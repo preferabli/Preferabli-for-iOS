@@ -201,7 +201,7 @@ class ViewController : UIViewController, UIPickerViewDelegate, UIPickerViewDataS
         } else if (customer) {
             let emailString = email.text ?? ""
             
-            Preferabli.main.loginCustomer(merchant_customer_identification: emailString, merchant_customer_verification: "123ABC") { customer in
+            Preferabli.main.loginCustomer(merchant_customer_identification: emailString, merchant_customer_verification: "ABC123") { customer in
                 self.products.removeAll()
                 self.items = ["Customer logged in.", "Display Name: " + customer.getName()]
                 self.tableView.reloadData()
