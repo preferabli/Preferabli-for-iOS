@@ -55,3 +55,10 @@ extension String {
         return simple.components(separatedBy: nonAlphaNumeric).joined(separator: "")
     }
 }
+
+extension Optional where Wrapped: Swift.Collection {
+    public var isEmptyOrWhitespace: Bool {
+        self?.isEmpty ?? true
+    }
+}
+

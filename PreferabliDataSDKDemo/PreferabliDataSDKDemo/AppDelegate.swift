@@ -17,7 +17,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         
         // Update with your own keys.
-        let YOUR_INTEGRATION_ID_HERE : NSNumber = 6301
+        let YOUR_INTEGRATION_ID_HERE : Int = 6301
         Preferabli.initialize(client_interface: "YOUR_CLIENT_INTERFACE_HERE", integration_id: YOUR_INTEGRATION_ID_HERE, logging_enabled: true)
         
         return true

@@ -1,0 +1,5 @@
+${PODS_ROOT}/Target Support Files/Pods-PreferabliDataSDKDemo/Pods-PreferabliDataSDKDemo-resources.sh
+${PODS_CONFIGURATION_BUILD_DIR}/Mixpanel-swift/Mixpanel.bundle
+${PODS_ROOT}/../../PreferabliDataSDK/PreferabliDataSDK/assets/powered_by_dark_bg.png
+${PODS_ROOT}/../../PreferabliDataSDK/PreferabliDataSDK/assets/powered_by_light_bg.png
+${PODS_ROOT}/../../PreferabliDataSDK/PreferabliDataSDK/assets/Preferabli.xcdatamodeld

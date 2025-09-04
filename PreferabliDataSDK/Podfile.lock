@@ -1,32 +1,22 @@
 PODS:
-  - Alamofire (4.9.1)
-  - MagicalRecord (2.3.2):
-    - MagicalRecord/Core (= 2.3.2)
-  - MagicalRecord/Core (2.3.2)
-  - Mixpanel-swift (4.0.2):
-    - Mixpanel-swift/Complete (= 4.0.2)
-  - Mixpanel-swift/Complete (4.0.2)
-  - SwiftEventBus (5.0.0)
+  - Alamofire (5.10.2)
+  - Mixpanel-swift (5.1.1):
+    - Mixpanel-swift/Complete (= 5.1.1)
+  - Mixpanel-swift/Complete (5.1.1)
 
 DEPENDENCIES:
-  - Alamofire (~> 4.9.1)
-  - MagicalRecord
+  - Alamofire
   - Mixpanel-swift
-  - SwiftEventBus
 
 SPEC REPOS:
   https://github.com/CocoaPods/Specs.git:
     - Alamofire
-    - MagicalRecord
     - Mixpanel-swift
-    - SwiftEventBus
 
 SPEC CHECKSUMS:
-  Alamofire: 85e8a02c69d6020a0d734f6054870d7ecb75cf18
-  MagicalRecord: 53bed74b4323b930992a725be713e53b37d19755
-  Mixpanel-swift: 91fc28834402720682f4cce760e95571fbb388c3
-  SwiftEventBus: b30f617a6aca5a9336464b4d3f5931034762f2d5
+  Alamofire: 7193b3b92c74a07f85569e1a6c4f4237291e7496
+  Mixpanel-swift: 4e4f8fbc99d6a412aab2adf1075313db7dee59a0
 
-PODFILE CHECKSUM: 15dcdae2220f34547621f13e90eaead836b1f4a5
+PODFILE CHECKSUM: f515f7a61975d30d61dfc7675e7d232c0babd8f7
 
-COCOAPODS: 1.11.3
+COCOAPODS: 1.16.2

@@ -4,14 +4,14 @@
   "summary": "Use this framework to integrate Preferabli's powerful preference technology into your applications.",
   "homepage": "https://github.com/winering/Preferabli-for-iOS.git",
   "license": {
-    "type": "RingIT, Inc.",
-    "text": "      Copyright 2023\n      Permission is granted to use this SDK to customers of RingIT, Inc.\n"
+    "type": "Preferabli, Inc.",
+    "text": "      Copyright 2025\n      Permission is granted to use this SDK to customers of Preferabli, Inc.\n"
   },
   "authors": {
-    "RingIT, Inc.": "info@preferabli.com"
+    "Preferabli, Inc.": "info@preferabli.com"
   },
   "platforms": {
-    "ios": "13.0"
+    "ios": "18.0"
   },
   "resources": "PreferabliDataSDK/PreferabliDataSDK/assets/*.*",
   "source": {
@@ -19,18 +19,8 @@
   },
   "source_files": "PreferabliDataSDK/PreferabliDataSDK/**/*.{h,m,swift,md}",
   "dependencies": {
-    "Alamofire": [
-      "4.9.1"
-    ],
-    "MagicalRecord": [
-
-    ],
-    "SwiftEventBus": [
-
-    ],
-    "Mixpanel-swift": [
-
-    ]
+    "Alamofire": [],
+    "Mixpanel-swift": []
   },
   "exclude_files": "PreferabliDataSDK/Pods/**/*.{h,m,swift},PreferabliDataSDKDemo/**/*.{h,m,swift}",
   "swift_versions": "5.0",

@@ -3,11 +3,11 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 51;
+	objectVersion = 54;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		3416AF49ECF12548B6951FA0 /* Pods_PreferabliDataSDKDemo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3367EDBC8666B78B801A3C75 /* Pods_PreferabliDataSDKDemo.framework */; };
+		A07BACEC2B70FC5F7EA2C6AB /* libPods-PreferabliDataSDKDemo.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3A52D949FA4B62FE23C4C6E1 /* libPods-PreferabliDataSDKDemo.a */; };
 		A2056F2A248141D100FBD6FC /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2056F29248141D100FBD6FC /* AppDelegate.swift */; };
 		A2056F2E248141D100FBD6FC /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2056F2D248141D100FBD6FC /* ViewController.swift */; };
 		A241EB9F24916AF500EBD66D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A241EB9E24916AF400EBD66D /* LaunchScreen.storyboard */; };
@@ -20,8 +20,8 @@
 /* Begin PBXFileReference section */
 		0F9A3D2ECD52EAA9D1A1DD0E /* Pods-PreferabliDataSDKDemo.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PreferabliDataSDKDemo.release.xcconfig"; path = "Target Support Files/Pods-PreferabliDataSDKDemo/Pods-PreferabliDataSDKDemo.release.xcconfig"; sourceTree = "<group>"; };
 		2BFAA490421AE6A9741B957C /* Pods-PreferabliDataSDKDemo.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PreferabliDataSDKDemo.debug.xcconfig"; path = "Target Support Files/Pods-PreferabliDataSDKDemo/Pods-PreferabliDataSDKDemo.debug.xcconfig"; sourceTree = "<group>"; };
-		3367EDBC8666B78B801A3C75 /* Pods_PreferabliDataSDKDemo.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_PreferabliDataSDKDemo.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		39ADEC7AE5CDDC7937976514 /* Pods-PreferabliSDKDemo.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PreferabliSDKDemo.release.xcconfig"; path = "Target Support Files/Pods-PreferabliSDKDemo/Pods-PreferabliSDKDemo.release.xcconfig"; sourceTree = "<group>"; };
+		3A52D949FA4B62FE23C4C6E1 /* libPods-PreferabliDataSDKDemo.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-PreferabliDataSDKDemo.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		6DF1D587AF4EFCDFF6FABB6E /* Pods-WineRingSDKTest.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-WineRingSDKTest.release.xcconfig"; path = "Target Support Files/Pods-WineRingSDKTest/Pods-WineRingSDKTest.release.xcconfig"; sourceTree = "<group>"; };
 		A2056F26248141D100FBD6FC /* PreferabliSDKDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PreferabliSDKDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2056F29248141D100FBD6FC /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -43,7 +43,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				3416AF49ECF12548B6951FA0 /* Pods_PreferabliDataSDKDemo.framework in Frameworks */,
+				A07BACEC2B70FC5F7EA2C6AB /* libPods-PreferabliDataSDKDemo.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -53,7 +53,7 @@
 		07309E18D5637D54771BE8C1 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				3367EDBC8666B78B801A3C75 /* Pods_PreferabliDataSDKDemo.framework */,
+				3A52D949FA4B62FE23C4C6E1 /* libPods-PreferabliDataSDKDemo.a */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -117,7 +117,7 @@
 				A2056F22248141D100FBD6FC /* Sources */,
 				A2056F23248141D100FBD6FC /* Frameworks */,
 				A2056F24248141D100FBD6FC /* Resources */,
-				428778E15BBEC6B9F0478AF4 /* [CP] Embed Pods Frameworks */,
+				F93621F893D4E0B7E9F638A8 /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -176,23 +176,6 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		428778E15BBEC6B9F0478AF4 /* [CP] Embed Pods Frameworks */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-PreferabliDataSDKDemo/Pods-PreferabliDataSDKDemo-frameworks-${CONFIGURATION}-input-files.xcfilelist",
-			);
-			name = "[CP] Embed Pods Frameworks";
-			outputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-PreferabliDataSDKDemo/Pods-PreferabliDataSDKDemo-frameworks-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-PreferabliDataSDKDemo/Pods-PreferabliDataSDKDemo-frameworks.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
 		C033AD54DD3E62DD80C9CD67 /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -213,6 +196,23 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		F93621F893D4E0B7E9F638A8 /* [CP] Copy Pods Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-PreferabliDataSDKDemo/Pods-PreferabliDataSDKDemo-resources-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Copy Pods Resources";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-PreferabliDataSDKDemo/Pods-PreferabliDataSDKDemo-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-PreferabliDataSDKDemo/Pods-PreferabliDataSDKDemo-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
@@ -355,7 +355,7 @@
 				DEVELOPMENT_TEAM = 4P7W5GTWY6;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = "$(SRCROOT)/PreferabliDataSDKDemo/Info.plist";
-				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -378,7 +378,7 @@
 				DEVELOPMENT_TEAM = 4P7W5GTWY6;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = "$(SRCROOT)/PreferabliDataSDKDemo/Info.plist";
-				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

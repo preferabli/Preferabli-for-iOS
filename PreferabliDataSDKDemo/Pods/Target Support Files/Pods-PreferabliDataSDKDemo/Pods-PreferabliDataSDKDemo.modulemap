@@ -1,4 +1,4 @@
-framework module Pods_PreferabliDataSDKDemo {
+module Pods_PreferabliDataSDKDemo {
   umbrella header "Pods-PreferabliDataSDKDemo-umbrella.h"
 
   export *

@@ -73,7 +73,7 @@ import Mixpanel
 func application(_ application: UIApplication,
                  didFinishLaunchingWithOptions launchOptions: [NSObject: AnyObject]?) -> Bool {
     ...
-    Mixpanel.initialize(token: "MIXPANEL_TOKEN", trackAutomaticEvents: true)
+    Mixpanel.initialize(token: "MIXPANEL_TOKEN", trackAutomaticEvents: false)
     ...
 }
 ```
@@ -104,7 +104,7 @@ import Mixpanel
 func application(_ application: UIApplication,
                  didFinishLaunchingWithOptions launchOptions: [NSObject: AnyObject]?) -> Bool {
     ...
-    Mixpanel.initialize(token: "MIXPANEL_TOKEN", trackAutomaticEvents: true)
+    Mixpanel.initialize(token: "MIXPANEL_TOKEN", trackAutomaticEvents: false)
     Mixpanel.mainInstance().track(event: "Sign Up", properties: [
        "source": "Pat's affiliate site",
        "Opted out of email": true
@@ -124,7 +124,7 @@ Mixpanel’s client-side tracking library contains the [optOutTracking()](https:
 
 **Why aren't my events showing up?**
 
-To preserve battery life and customer bandwidth, the Mixpanel library doesn't send the events you record immediately. Instead, it sends batches to the Mixpanel servers every 60 seconds while your application is running, as well as when the application transitions to the background. You can call [flush()](https://mixpanel.github.io/mixpanel-swift/Classes/MixpanelInstance.html#/s:8Mixpanel0A8InstanceC5flush10completionyyycSg_tF) manually if you want to force a flush at a particular moment.
+First, make sure your test device has internet access. To preserve battery life and customer bandwidth, the Mixpanel library doesn't send the events you record immediately. Instead, it sends batches to the Mixpanel servers every 60 seconds while your application is running, as well as when the application transitions to the background. You can call [flush()](https://mixpanel.github.io/mixpanel-swift/Classes/MixpanelInstance.html#/s:8Mixpanel0A8InstanceC5flush10completionyyycSg_tF) manually if you want to force a flush at a particular moment.
 ```swift
 Mixpanel.mainInstance().flush()
 ```
@@ -147,6 +147,8 @@ No worries, here are some links that you will find useful:
 * **[Advanced iOS - Swift Guide](https://developer.mixpanel.com/docs/swift)**
 * **[Sample app](https://github.com/mixpanel/mixpanel-swift/tree/master/MixpanelDemo)**
 * **[Full API Reference](https://mixpanel.github.io/mixpanel-swift)**
+
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mixpanel/mixpanel-swift)
 
 Have any questions? Reach out to Mixpanel [Support](https://help.mixpanel.com/hc/en-us/requests/new) to speak to someone smart, quickly.
 

@@ -2,356 +2,373 @@
 //  LoadCollectionTools.swift
 //  Preferabli
 //
-//  Created by Nicholas Bortolussi on 10/10/16.
-//  Copyright © 2023 RingIT, Inc. All rights reserved.
+//  Updated to SwiftData + Storage.withContext pattern, async/await
 //
 
 import Foundation
-import MagicalRecord
-import SwiftEventBus
+import SwiftData
 
-/// Contains methods that help load ``Collection``s.
-internal class LoadCollectionTools {
-    
-    internal static var sharedInstance = LoadCollectionTools()
-    
-    internal func loadCollectionViaTags(in context : NSManagedObjectContext, priority : Operation.QueuePriority, force_refresh : Bool, with collection_id : NSNumber)  throws {
-        if (force_refresh || !PreferabliTools.getKeyStore().bool(forKey: "hasLoaded\(collection_id)")) {
-            try LoadCollectionTools.sharedInstance.loadCollectionViaTags(in: context, priority: priority, with: collection_id)
-        } else if (PreferabliTools.hasMinutesPassed(minutes: 5, startDate: PreferabliTools.getKeyStore().object(forKey: "lastCalled\(collection_id)") as? Date)) {
-            PreferabliTools.startNewWorkThread(priority: .low) {
+/// Contains methods that help load `Collection`s.
+internal final class LoadCollectionTools {
+
+    internal static let sharedInstance = LoadCollectionTools()
+
+    // MARK: Public entry points
+
+    /// Top-level orchestrator that ensures a collection is loaded via Tags.
+    /// Triggers a background refresh if stale; otherwise no-ops.
+    internal func loadCollectionViaTags(
+        priority: Operation.QueuePriority,
+        force_refresh: Bool,
+        collection_id: Int
+    ) async throws {
+        let ks = PreferabliTools.getKeyStore()
+
+        if force_refresh || !ks.bool(forKey: "hasLoaded\(collection_id)") {
+            try await loadCollectionViaTags(priority: priority, collectionId: collection_id)
+        } else if PreferabliTools.hasMinutesPassed(
+            minutes: 5,
+            startDate: ks.object(forKey: "lastCalled\(collection_id)") as? Date
+        ) {
+            // Fire-and-forget refresh (does not block caller)
+            PreferabliTools.startNewAsyncWorkThread(priority: .low) { [weak self] in
                 do {
-                    let context = NSManagedObjectContext.mr_()
-                    context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
-                    try LoadCollectionTools.sharedInstance.loadCollectionViaTags(in: context, priority: .low, with: collection_id)
+                    try await self?.loadCollectionViaTags(priority: .low, collectionId: collection_id)
                 } catch {
-                    // catching any issues here so that we can still pull up our saved data
-                    if (Preferabli.loggingEnabled) {
-                        print(error)
-                    }
+                    if Preferabli.loggingEnabled { print(error) }
                 }
             }
         }
     }
-    
-    private func loadCollectionViaTags(in context : NSManagedObjectContext, priority : Operation.QueuePriority, with collectionId : NSNumber) throws {
-        var tagIds = Array<NSNumber>()
 
-        let predicate1 = NSPredicate(format: "collection_id == %d", collectionId.intValue)
-        let predicate2 = NSPredicate(format: "dirty = %d || dirty == nil", false)
-        let predicateCompound = NSCompoundPredicate.init(type: .and, subpredicates: [predicate1,predicate2])
-        let oldTags = CoreData_Tag.mr_findAll(with: predicateCompound, in: context) as! [Tag]
-        let collection = try getCollection(forceRefresh: false, collectionId: collectionId, context: context)
+    /// Same behavior as the legacy private version, but async and using Storage.withContext.
+    private func loadCollectionViaTags(
+        priority: Operation.QueuePriority,
+        collectionId: Int
+    ) async throws {
 
-        if (PreferabliTools.isLoggedOutOrLoggingOut()) {
-            return
+        // 1) Snapshot currently-linked (non-dirty) tags for this collection
+        let oldTags: [Tag] = try await Storage.withContext { ctx in
+            var fd = FetchDescriptor<Tag>(predicate: #Predicate<Tag> {
+                ($0.collection_id ?? 0) == collectionId
+            })
+            return try ctx.fetch(fd)
         }
 
-        tagIds.append(contentsOf: try getTagsAndProducts(collection: collection, priority: priority))
+        // 2) Ensure the Collection exists (or fetch it)
+        let collection = try await getCollection(forceRefresh: false, collectionId: collectionId)
 
-        for tag in oldTags {
-            if (!tagIds.contains(tag.id)) {
-                tag.collection_id = NSNumber.init(value: 0)
+        // 3) Early exit if logout is in-flight
+        if PreferabliTools.isLoggedOutOrLoggingOut() { return }
+
+        // 4) Pull latest tags/products and get the fresh tag ids
+        let freshTagIds: [Int] = try await getTagsAndProducts(collection: collection, priority: priority)
+
+        // 5) Any previously linked tag not present now gets unlinked
+        try await Storage.withContext { ctx in
+            if !freshTagIds.isEmpty {
+                let keep = Set(freshTagIds)
+                for tag in oldTags where !keep.contains(tag.id) {
+                    tag.collection_id = 0
+                }
+                try ctx.save()
             }
         }
 
-        PreferabliTools.getKeyStore().set(Date.init(), forKey: "lastCalled" + collectionId.stringValue)
-        PreferabliTools.getKeyStore().set(true, forKey: "hasLoaded" + collectionId.stringValue)
-        context.mr_saveToPersistentStoreAndWait()
+        // 6) Touch freshness flags
+        let ks = PreferabliTools.getKeyStore()
+        ks.set(Date(), forKey: "lastCalled\(collectionId)")
+        ks.set(true,   forKey: "hasLoaded\(collectionId)")
     }
 
-    internal func getCollection(forceRefresh : Bool, collectionId : NSNumber, context : NSManagedObjectContext) throws -> CoreData_Collection {
-        var collection = CoreData_Collection.mr_findFirst(byAttribute: "id", withValue: collectionId, in: context)
-        if (forceRefresh || collection == nil) {
-            var getCollectionResponse = try Preferabli.api.getAlamo().get(APIEndpoints.collection(id: collectionId))
-            getCollectionResponse = try PreferabliTools.continueOrThrowPreferabliException(response: getCollectionResponse)
-            PreferabliTools.saveCollectionEtag(response: getCollectionResponse, collectionId: collectionId)
-            let collectionDictionary = try PreferabliTools.continueOrThrowJSONException(data: getCollectionResponse.data!)
-            collection = CoreData_Collection.mr_import(from: collectionDictionary, in: context)
+    // MARK: Core helpers
+
+    /// Fetch (and optionally refresh) a `Collection` from API into SwiftData, then return it.
+    internal func getCollection(
+        forceRefresh: Bool,
+        collectionId: Int
+    ) async throws -> Collection {
+        // Try local first
+        if !forceRefresh, let local = try await Storage.withContext({ ctx in
+            try Storage.fetchById(Collection.self, id: collectionId, in: ctx)
+        }) {
+            return local
         }
-        return collection!
+
+        // Fetch from API
+        var resp = try Preferabli.api.getAlamo().get(APIEndpoints.collection(id: collectionId))
+        resp = try await APIService.continueOrThrowPreferabliException(response: resp)
+        PreferabliTools.saveCollectionEtag(response: resp, collectionId: collectionId)
+
+        guard let dict = try APIService.continueOrThrowJSONException(data: resp.data!) as? [String: Any] else {
+            throw PreferabliException(type: .MappingNotFound)
+        }
+
+        // Upsert into SwiftData
+        return try await Storage.withContext { ctx in
+            let c = try Storage.upsertCollection(from: dict, in: ctx)
+            try ctx.save()
+            return c
+        }
     }
-    
-    internal func getTagsAndProducts(collection : CoreData_Collection, priority : Operation.QueuePriority) throws -> [NSNumber] {
+
+    /// Fetches tags and their backing products for a collection, upserts everything,
+    /// and returns the set of Tag ids we now know about.
+    internal func getTagsAndProducts(
+        collection: Collection,
+        priority: Operation.QueuePriority
+    ) async throws -> [Int] {
+
+        if PreferabliTools.isLoggedOutOrLoggingOut() { return [] }
+
         let collectionId = collection.id
-        let dispatchGroup = DispatchGroup()
-        let tagSemaphore = DispatchSemaphore(value: 1)
+        let total = max(collection.product_count ?? 0, 0)
+        let pageSize = 50
 
-        var offset = 0
-        let limit = 50
-        var noErrors = true
-        var tagIds = Array<NSNumber>()
-        var errors = Array<PreferabliException>()
+        struct PageResult {
+            let tagDicts: [[String: Any]]
+            let productDicts: [[String: Any]]
+        }
 
-        while (offset <= collection.product_count.intValue) {
+        // 1) Page network in parallel
+        let pageOffsets = stride(from: 0, through: total, by: pageSize).map { $0 }
 
-            let tagOperation = BlockOperation()
-            let offsetForTagOperation = offset
+        let pageResults: [PageResult] = try await withThrowingTaskGroup(of: PageResult?.self) { group in
+            for off in pageOffsets {
+                group.addTask {
+                    if PreferabliTools.isLoggedOutOrLoggingOut() { return nil }
 
-            tagOperation.addExecutionBlock { () -> Void in
-                do {
-                    if (tagOperation.isCancelled || PreferabliTools.isLoggedOutOrLoggingOut()) {
-                        return
+                    // Fetch tags page
+                    var tagsResp = try Preferabli.api.getAlamo().get(
+                        APIEndpoints.tags(id: collectionId),
+                        params: ["offset": off, "limit": pageSize]
+                    )
+                    tagsResp = try await APIService.continueOrThrowPreferabliException(response: tagsResp)
+
+                    guard let tagDicts = try APIService
+                        .continueOrThrowJSONException(data: tagsResp.data!) as? [[String: Any]],
+                          !tagDicts.isEmpty
+                    else { return PageResult(tagDicts: [], productDicts: []) }
+
+                    // For these tags, fetch products by variant_ids (if any)
+                    let variantIds: [Int] = tagDicts.compactMap { Storage.asInt($0["variant_id"]) }
+                    var productDicts: [[String: Any]] = []
+
+                    if !variantIds.isEmpty {
+                        var prodResp = try Preferabli.api.getAlamo().get(
+                            APIEndpoints.products,
+                            params: ["variant_ids": variantIds]
+                        )
+                        prodResp = try await APIService.continueOrThrowPreferabliException(response: prodResp)
+                        productDicts = (try APIService
+                            .continueOrThrowJSONException(data: prodResp.data!) as? [[String: Any]]) ?? []
                     }
 
-                    let context = NSManagedObjectContext.mr_()
-                    context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
-
-                    let collection = CoreData_Collection.mr_findFirst(byAttribute: "id", withValue: collectionId, in: context)
-
-                    var getTagsResponse = try Preferabli.api.getAlamo().get(APIEndpoints.tags(id: collectionId), params: ["offset" : offsetForTagOperation, "limit" : limit])
-                    getTagsResponse = try PreferabliTools.continueOrThrowPreferabliException(response: getTagsResponse)
-
-                    if (tagOperation.isCancelled || PreferabliTools.isLoggedOutOrLoggingOut()) {
-                        return
-                    }
-
-                    let tagDictionaries = try PreferabliTools.continueOrThrowJSONException(data: getTagsResponse.data!) as! NSArray
-                    var tags = Array<CoreData_Tag>()
-                    var tagMap = [NSNumber : Array<CoreData_Tag>]()
-                    for tag in tagDictionaries {
-                        let tagObject = CoreData_Tag.mr_import(from: tag, in: context)
-                        if (!tagObject.isRating()) {
-                            tagObject.location = collection?.name
-                        }
-                        tags.append(tagObject)
-                        if (tagMap[tagObject.variant_id] == nil) {
-                            var tagArray = Array<CoreData_Tag>()
-                            tagArray.append(tagObject)
-                            tagMap[tagObject.variant_id] = tagArray
-                        } else {
-                            var tagArray = tagMap[tagObject.variant_id]!
-                            tagArray.append(tagObject)
-                            tagMap[tagObject.variant_id] = tagArray
-                        }
-                    }
-
-                    if (tagOperation.isCancelled || PreferabliTools.isLoggedOutOrLoggingOut()) {
-                        return
-                    }
-
-                    if (tags.count != 0) {
-                        let variantIds = tags.map { $0.variant_id }
-                        var getProductsResponse = try Preferabli.api.getAlamo().get(APIEndpoints.products, params: ["variant_ids" : variantIds])
-                        getProductsResponse = try PreferabliTools.continueOrThrowPreferabliException(response: getProductsResponse)
-                        let productDictionaries = try PreferabliTools.continueOrThrowJSONException(data: getProductsResponse.data!) as! NSArray
-                        for product in productDictionaries {
-                            let wineObject = CoreData_Product.mr_import(from: product, in: context)
-                            for variant in wineObject.variants.allObjects as! [CoreData_Variant] {
-                                if let tagArray = tagMap[variant.id] {
-                                    for tag in tagArray {
-                                        tag.variant = variant
-                                    }
-                                }
-                            }
-                        }
-
-                        if (tagOperation.isCancelled || PreferabliTools.isLoggedOutOrLoggingOut()) {
-                            return
-                        }
-
-                        let tagIdsHere = tags.map { $0.id }
-                        dispatchGroup.enter()
-                        tagSemaphore.wait()
-                        tagIds.append(contentsOf: tagIdsHere)
-                        tagSemaphore.signal()
-                        dispatchGroup.leave()
-                    }
-
-                    if (tagOperation.isCancelled || PreferabliTools.isLoggedOutOrLoggingOut()) {
-                        return
-                    }
-
-                    context.mr_saveToPersistentStoreAndWait()
-                    dispatchGroup.leave()
-
-                } catch {
-                    errors.append(error as! PreferabliException)
-                    noErrors = false
-                    dispatchGroup.leave()
+                    return PageResult(tagDicts: tagDicts, productDicts: productDicts)
                 }
             }
 
-
-            dispatchGroup.enter()
-            PreferabliTools.startNewAPIWorkThread(priority: priority, operation: tagOperation)
-            offset = offset + limit
+            // Collect results
+            var results: [PageResult] = []
+            for try await r in group {
+                if let r { results.append(r) }
+            }
+            return results
         }
 
-        // wait until all operation queues are done executing before moving on
-        dispatchGroup.wait()
+        if PreferabliTools.isLoggedOutOrLoggingOut() { return [] }
 
-        if (!noErrors) {
-            if (errors.count > 0) {
-                throw errors[0]
-            } else {
-                throw PreferabliException.init(type: .NetworkError)
+        // 2) Apply to SwiftData (single main-actor pass)
+        let tagIds: [Int] = try await Storage.withContext { ctx in
+            var allTagIds: [Int] = []
+            allTagIds.reserveCapacity(pageResults.reduce(0) { $0 + $1.tagDicts.count })
+
+            // Upsert products first so Variant ids exist
+            for page in pageResults where !page.productDicts.isEmpty {
+                for pd in page.productDicts {
+                    _ = try Storage.upsertProduct(from: pd, in: ctx)
+                }
             }
+
+            // Upsert tags + link to variants + mark location
+            for page in pageResults where !page.tagDicts.isEmpty {
+                for td in page.tagDicts {
+                    let t = try Storage.upsertTag(from: td, in: ctx)
+                    if !(t.isRating()) { t.location = collection.name }
+                    if let vid = t.variant_id,
+                       let v = try Storage.fetchById(Variant.self, id: vid, in: ctx) {
+                        t.variant = v
+                    }
+                    allTagIds.append(t.id)
+                }
+            }
+
+            try ctx.save()
+            return allTagIds
         }
 
         return tagIds
     }
 
-    internal func loadCollectionViaOrderings(context : NSManagedObjectContext, priority : Operation.QueuePriority, collection : CoreData_Collection) throws {
-        var tagIds = Array<NSNumber>()
+    /// Load a collection’s items by `CollectionOrder` (groups/orderings path).
+    internal func loadCollectionViaOrderings(
+        priority: Operation.QueuePriority,
+        collection: Collection
+    ) async throws {
+        if PreferabliTools.isLoggedOutOrLoggingOut() { return }
 
         let collectionId = collection.id
-        let predicate1 = NSPredicate(format: "collection_id == %d", collectionId)
-        let predicate2 = NSPredicate(format: "dirty = %d || dirty == nil", false)
-        let predicateCompound = NSCompoundPredicate.init(type: .and, subpredicates: [predicate1,predicate2])
-        let oldTags = CoreData_Tag.mr_findAll(with: predicateCompound, in: context) as! [CoreData_Tag]
 
-        let version = collection.getFirstVersion(context: context)
+        // Snapshot existing tags for this collection
+        let oldTags: [Tag] = try await Storage.withContext { ctx in
+            var fd = FetchDescriptor<Tag>(predicate: #Predicate<Tag> {
+                ($0.collection_id ?? 0) == collectionId
+            })
+            return try ctx.fetch(fd)
+        }
 
-        let collectionGroups = version.groups.allObjects as! [CoreData_CollectionGroup]
-        let limit = 50
-        var noErrors = true
-        var errors = Array<PreferabliException>()
+        // Choose first version (by order)
+        guard let version = collection.versions.sorted(by: { ($0.order ?? 0) < ($1.order ?? 0) }).first else {
+            throw PreferabliException(type: .DatabaseError)
+        }
 
-        let dispatchGroup = DispatchGroup()
-        outerLoop: for group in collectionGroups {
-            var offset = 0
-            while offset <= group.orderings_count.intValue {
+        // Fetch per-group pages concurrently (Swift concurrency)
+        let groups = version.groups
+        let pageSize = 50
 
-                if (PreferabliTools.isLoggedOutOrLoggingOut()) {
-                    return
-                }
+        // Aggregate every tag id we encounter, so we can drop stale ones afterwards.
+        var allTagIds = Set<Int>()
+        try await withThrowingTaskGroup(of: [Int].self) { group in
+            for g in groups {
+                let maxCount = g.orderings_count ?? 0
+                if maxCount <= 0 { continue }
 
-                let groupOperation = BlockOperation()
-                let offsetForGroupOperation = offset
-                let versionId = version.id
-                let groupId = group.id
-                groupOperation.addExecutionBlock { () -> Void in
-                    do {
-                        let context = NSManagedObjectContext.mr_()
-                        context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
-                        if (PreferabliTools.isLoggedOutOrLoggingOut()) {
-                            return
-                        }
-                        let collection = CoreData_Collection.mr_findFirst(byAttribute: "id", withValue: collectionId, in: context)!
-                        let group = CoreData_CollectionGroup.mr_findFirst(byAttribute: "id", withValue: groupId, in: context)!
-                        try self.getGroupItems(context: context, operation: groupOperation, collection: collection, versionId: versionId, group: group, limit: limit, offset: offsetForGroupOperation, failCount: 0, dispatchGroup : dispatchGroup, tagIds: &tagIds)
-                        dispatchGroup.leave()
-                    } catch {
-                        errors.append(error as! PreferabliException)
-                        noErrors = false
-                        dispatchGroup.leave()
+                let offsets = stride(from: 0, through: maxCount, by: pageSize)
+                for off in offsets {
+                    group.addTask { [weak self] in
+                        guard let self else { return [] }
+                        return try await self.getGroupItems(
+                            collection: collection,
+                            versionId: version.id,
+                            group: g,
+                            limit: pageSize,
+                            offset: off
+                        )
                     }
                 }
-                dispatchGroup.enter()
-                if (PreferabliTools.isLoggedOutOrLoggingOut()) {
-                    return
-                }
-                PreferabliTools.startNewAPIWorkThread(priority: priority, operation: groupOperation)
-                offset = offset + limit
+            }
+
+            for try await ids in group {
+                for id in ids { allTagIds.insert(id) }
             }
         }
 
-        // wait until all operation queues are done executing before moving on
-        dispatchGroup.wait()
-
-        if (!noErrors) {
-            if (errors.count > 0) {
-                throw errors[0]
-            } else {
-                throw PreferabliException.init(type: .NetworkError)
+        // Remove stale tags (not returned this cycle)
+        try await Storage.withContext { ctx in
+            let keep = allTagIds
+            for tag in oldTags where !keep.contains(tag.id) {
+                ctx.delete(tag)
             }
+            try ctx.save()
         }
 
-        for tag in oldTags {
-            if (!tagIds.contains(tag.id)) {
-                tag.mr_deleteEntity(in: context)
-            }
-        }
-        
-        context.mr_saveToPersistentStoreAndWait()
-
-        PreferabliTools.getKeyStore().set(Date.init(), forKey: "lastCalled" + collectionId.stringValue)
-        PreferabliTools.getKeyStore().set(true, forKey: "hasLoaded" + collectionId.stringValue)
+        // Flags
+        let ks = PreferabliTools.getKeyStore()
+        ks.set(Date(), forKey: "lastCalled\(collectionId)")
+        ks.set(true,   forKey: "hasLoaded\(collectionId)")
     }
 
-    private func getGroupItems(context : NSManagedObjectContext, operation : BlockOperation, collection : CoreData_Collection, versionId : NSNumber, group : CoreData_CollectionGroup, limit : Int, offset : Int, failCount : Int, dispatchGroup : DispatchGroup, tagIds : inout Array<NSNumber>) throws {
-        do {
-            let collectionId = collection.id
-            let tagSemaphore = DispatchSemaphore(value: 1)
+    /// Fetch a single "page" of group items (orderings -> tags -> products),
+    /// upsert to SwiftData, and return the tag ids found.
+    internal func getGroupItems(
+        collection: Collection,
+        versionId: Int,
+        group: CollectionGroup,
+        limit: Int,
+        offset: Int
+    ) async throws -> [Int] {
+        if PreferabliTools.isLoggedOutOrLoggingOut() { return [] }
 
+        let collectionId = collection.id
 
-            var getOrderingsResponse = try Preferabli.api.getAlamo().get(APIEndpoints.orderings(collectionId: collectionId, versionId: versionId, groupId: group.id), params: ["limit" : limit, "offset" : offset])
-            getOrderingsResponse = try PreferabliTools.continueOrThrowPreferabliException(response: getOrderingsResponse)
-            PreferabliTools.saveCollectionEtag(response: getOrderingsResponse, collectionId: collectionId)
-            let orderingDictionaries = try PreferabliTools.continueOrThrowJSONException(data: getOrderingsResponse.data!) as! Array<[String : Any]>
-            var orderings = Array<CoreData_CollectionOrder>()
-            for order in orderingDictionaries {
-                let collectionOrder = CoreData_CollectionOrder.mr_import(from: order, in: context)
-                orderings.append(collectionOrder)
-                collectionOrder.group = group
-            }
+        // 1) Orderings for this page
+        var ordersResp = try Preferabli.api.getAlamo().get(
+            APIEndpoints.orderings(collectionId: collectionId, versionId: versionId, groupId: group.id),
+            params: ["limit": limit, "offset": offset]
+        )
+        ordersResp = try await APIService.continueOrThrowPreferabliException(response: ordersResp)
+        PreferabliTools.saveCollectionEtag(response: ordersResp, collectionId: collectionId)
 
-            if (operation.isCancelled || PreferabliTools.isLoggedOutOrLoggingOut()) {
-                return
-            }
+        guard let orderingDicts = try APIService
+            .continueOrThrowJSONException(data: ordersResp.data!) as? [[String: Any]],
+              !orderingDicts.isEmpty
+        else { return [] }
 
-            let tagIdsHere = orderingDictionaries.map { $0["tag_id"] }
-            if (tagIdsHere.count != 0) {
-                var getTagsResponse = try Preferabli.api.getAlamo().get(APIEndpoints.tags(id: collectionId), params: ["tag_ids" : tagIdsHere])
-                getTagsResponse = try PreferabliTools.continueOrThrowPreferabliException(response: getTagsResponse)
-                PreferabliTools.saveCollectionEtag(response: getTagsResponse, collectionId: collectionId)
-                let tagDictionaries = try PreferabliTools.continueOrThrowJSONException(data: getTagsResponse.data!) as! Array<[String : Any]>
-                var tags = Array<CoreData_Tag>()
-                for tag in tagDictionaries {
-                    let tagObject = CoreData_Tag.mr_import(from: tag, in: context)
-                    
-                    // do this so we have collection name easily accesible for all tags. does not apply for ratings.
-                    if (!tagObject.isRating()) {
-                        tagObject.location = collection.name
-                    }
-                    tags.append(tagObject)
-                }
-
-                if (operation.isCancelled || PreferabliTools.isLoggedOutOrLoggingOut()) {
-                    return
-                }
-
-                let variantIds = tagDictionaries.map { $0["variant_id"] }
-                var getProductsResponse = try Preferabli.api.getAlamo().get(APIEndpoints.products, params: ["variant_ids" : variantIds])
-                getProductsResponse = try PreferabliTools.continueOrThrowPreferabliException(response: getProductsResponse)
-                let productDictionaries = try PreferabliTools.continueOrThrowJSONException(data: getProductsResponse.data!) as! NSArray
-                for product in productDictionaries {
-                    CoreData_Product.mr_import(from: product, in: context)
-                }
-
-                if (operation.isCancelled || PreferabliTools.isLoggedOutOrLoggingOut()) {
-                    return
-                }
-
-                for order in orderings {
-                    try order.setTag(in: context)
-                }
-
-                if (operation.isCancelled || PreferabliTools.isLoggedOutOrLoggingOut()) {
-                    return
-                }
-
-                let tagObjectIds = tags.map { $0.id }
-                dispatchGroup.enter()
-                tagSemaphore.wait()
-                tagIds.append(contentsOf: tagObjectIds)
-                tagSemaphore.signal()
-                dispatchGroup.leave()
-            }
-
-            if (operation.isCancelled || PreferabliTools.isLoggedOutOrLoggingOut()) {
-                return
-            }
-
-            context.mr_saveToPersistentStoreAndWait()
-
-        } catch let error as NSError {
-            if (failCount > 1) {
-                throw error
-            } else {
-                return try self.getGroupItems(context: context, operation: operation, collection: collection, versionId: versionId, group: group, limit: limit, offset: offset, failCount: failCount + 1, dispatchGroup: dispatchGroup, tagIds: &tagIds)
-            }
+        // 2) Fetch tags for the orderings
+        let tagIdsRequested: [Int] = orderingDicts.compactMap { Storage.asInt($0["tag_id"]) }
+        var tagDicts: [[String: Any]] = []
+        if !tagIdsRequested.isEmpty {
+            var tagsResp = try Preferabli.api.getAlamo().get(
+                APIEndpoints.tags(id: collectionId),
+                params: ["tag_ids": tagIdsRequested]
+            )
+            tagsResp = try await APIService.continueOrThrowPreferabliException(response: tagsResp)
+            PreferabliTools.saveCollectionEtag(response: tagsResp, collectionId: collectionId)
+            tagDicts = (try APIService
+                .continueOrThrowJSONException(data: tagsResp.data!) as? [[String: Any]]) ?? []
         }
+
+        // 3) For those tags, fetch backing products (by variant_id)
+        let variantIds: [Int] = tagDicts.compactMap { Storage.asInt($0["variant_id"]) }
+        var productDicts: [[String: Any]] = []
+        if !variantIds.isEmpty {
+            var prodResp = try Preferabli.api.getAlamo().get(APIEndpoints.products,
+                                                             params: ["variant_ids": variantIds])
+            prodResp = try await APIService.continueOrThrowPreferabliException(response: prodResp)
+            productDicts = (try APIService
+                .continueOrThrowJSONException(data: prodResp.data!) as? [[String: Any]]) ?? []
+        }
+
+        // 4) Apply everything in one SwiftData pass; return tag ids discovered
+        let tagIdsFound: [Int] = try await Storage.withContext { ctx in
+            // Rehydrate local references in this context
+            let localGroup = try Storage.fetchById(CollectionGroup.self, id: group.id, in: ctx)
+                ?? { let g = CollectionGroup(id: group.id); ctx.insert(g); return g }()
+
+            // Upsert orderings and attach group (tags wired later)
+            var orders: [CollectionOrder] = []
+            orders.reserveCapacity(orderingDicts.count)
+            for od in orderingDicts {
+                let o = try Storage.upsertCollectionOrder(from: od, in: ctx)
+                o.group = localGroup
+                orders.append(o)
+            }
+
+            // Upsert products so variants exist
+            for pd in productDicts {
+                _ = try Storage.upsertProduct(from: pd, in: ctx)
+            }
+
+            // Upsert tags, set location for non-ratings
+            var pageTags: [Tag] = []
+            pageTags.reserveCapacity(tagDicts.count)
+            for td in tagDicts {
+                let t = try Storage.upsertTag(from: td, in: ctx)
+                if !(t.isRating()) { t.location = collection.name }
+                pageTags.append(t)
+            }
+
+            // Wire orderings → tag objects
+            for o in orders {
+                if let t = try Storage.fetchById(Tag.self, id: o.tag_id, in: ctx) {
+                    o.tag = t
+                }
+            }
+
+            try ctx.save()
+            return pageTags.map { $0.id }
+        }
+
+        return tagIdsFound
     }
 }

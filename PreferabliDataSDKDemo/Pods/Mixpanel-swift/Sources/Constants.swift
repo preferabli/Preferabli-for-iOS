@@ -16,7 +16,7 @@ struct QueueConstants {
 }
 
 struct APIConstants {
-    static let batchSize = 50
+    static let maxBatchSize = 50
     static let flushSize = 1000
     static let minRetryBackoff = 60.0
     static let maxRetryBackoff = 600.0
@@ -27,17 +27,11 @@ struct BundleConstants {
     static let ID = "com.mixpanel.Mixpanel"
 }
 
-struct InternalKeys {
-    static let mpDebugTrackedKey = "mpDebugTrackedKey"
-    static let mpDebugInitCountKey = "mpDebugInitCountKey"
-    static let mpDebugImplementedKey = "mpDebugImplementedKey"
-    static let mpDebugIdentifiedKey = "mpDebugIdentifiedKey"
-    static let mpDebugAliasedKey = "mpDebugAliasedKey"
-    static let mpDebugUsedPeopleKey = "mpDebugUsedPeopleKey"
+struct GzipSettings {
+    static let gzipHeaderOffset = Int32(16)
 }
 
-
-#if !os(OSX) && !os(watchOS)
+#if !os(OSX) && !os(watchOS) && !os(visionOS)
 extension UIDevice {
     var iPhoneX: Bool {
         return UIScreen.main.nativeBounds.height == 2436

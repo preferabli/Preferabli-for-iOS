@@ -8,6 +8,6 @@ Use this framework to integrate Preferabli's functionalities and powerful taste 
 
 [Check out our full documentation](https://preferabli.readme.io/docs/).
 
-Written in Swift 5. Requires Minimum Deployment Target of iOS 13.
+Written in Swift 5. Requires Minimum Deployment Target of iOS 18.
 
 If you require any further assistance with the SDK, feel free to reach out to us at [support@preferabli.com](mailto:support@preferabli.com). 

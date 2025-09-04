@@ -9,6 +9,7 @@
 import SwiftUI
 import PreferabliDataSDK
 import TTGSnackbar
+import _SwiftData_SwiftUI
 
 class ViewController : UIViewController, UIPickerViewDelegate, UIPickerViewDataSource, UITableViewDelegate, UITableViewDataSource {
     
@@ -29,8 +30,8 @@ class ViewController : UIViewController, UIPickerViewDelegate, UIPickerViewDataS
     let pickerOptions = ["Search", "Label Rec", "Guided Rec", "Where To Buy", "Like That, Try This"]
     let pickerOptions2 = ["Rate Product", "Wishlist Product", "Get Profile", "Get Recs", "Get Foods", "Get Rated Products", "Get Wishlisted Products", "Get Purchased Products", "Get Customer"]
     var items = Array<String>()
-    var products = Array<Product>()
-    
+    @Query var products: [Product]
+
     override func viewDidLoad() {
         logo.image = Preferabli.getPoweredByPreferabliLogo(light_background: true)
         handleViews()
@@ -272,7 +273,7 @@ class ViewController : UIViewController, UIPickerViewDelegate, UIPickerViewDataS
         
         Preferabli.main.getGuidedRec { guided_rec in
             let questions = guided_rec.questions
-            var selected_choice_ids = Array<NSNumber>()
+            var selected_choice_ids = Array<Int>()
             for question in questions {
                 if (question.choices.count > 0) {
                     selected_choice_ids.append(question.choices.randomElement()!.id)
@@ -296,7 +297,7 @@ class ViewController : UIViewController, UIPickerViewDelegate, UIPickerViewDataS
         
         Preferabli.main.getGuidedRec { guided_rec in
             let questions = guided_rec.questions
-            var selected_choice_ids = Array<NSNumber>()
+            var selected_choice_ids = Array<Int>()
                 for question in questions {
                     if (question.choices.count > 0) {
                          // Here I am simply randomizing choices to get results. In the real world, the answers to these questions would come from the user.
@@ -338,9 +339,12 @@ class ViewController : UIViewController, UIPickerViewDelegate, UIPickerViewDataS
     
     @IBAction func ltttPressed() {
         showLoadingView()
-        Preferabli.main.lttt(product_id: 11263) { products in
-            self.products = products
-            self.items = products.map { $0.name } as! [String]
+        Preferabli.main.lttt(product_id: 11263) { ids in
+            self._products = Query(
+                filter: Storage.Queries.products(withIDs: ids),
+                sort: Storage.Queries.sortByUpdatedDesc
+            )
+            self.items = self.products.map { $0.name } as! [String]
             self.tableView.reloadData()
             self.hideLoadingView()
         } onFailure: { error in
@@ -353,7 +357,7 @@ class ViewController : UIViewController, UIPickerViewDelegate, UIPickerViewDataS
         showLoadingView()
         Preferabli.main.rateProduct(product_id: 11263, year: Variant.CURRENT_VARIANT_YEAR, rating: RatingLevel.SOSO) { product in
             self.products = [product]
-            self.items = [ product.name ]
+            self.items = [ product.name ?? "N/A" ]
             self.tableView.reloadData()
             self.hideLoadingView()
         } onFailure: { error in
@@ -366,7 +370,7 @@ class ViewController : UIViewController, UIPickerViewDelegate, UIPickerViewDataS
         showLoadingView()
         Preferabli.main.wishlistProduct(product_id: 11263, year: Variant.CURRENT_VARIANT_YEAR) { product in
             self.products = [product]
-            self.items = [ product.name ]
+            self.items = [ product.name ?? "N/A" ]
             self.tableView.reloadData()
             self.hideLoadingView()
         } onFailure: { error in
@@ -379,7 +383,7 @@ class ViewController : UIViewController, UIPickerViewDelegate, UIPickerViewDataS
         showLoadingView()
         Preferabli.main.getProfile { profile in
             self.products.removeAll()
-            self.items = profile.profile_styles.map { $0.style.name } as! [String]
+            self.items = profile.profile_styles.map { $0.style?.name ?? "N/A" } as! [String]
             self.tableView.reloadData()
             self.hideLoadingView()
         } onFailure: { error in
@@ -507,7 +511,7 @@ class ViewController : UIViewController, UIPickerViewDelegate, UIPickerViewDataS
                 self.showLoadingView()
                 self.products[indexPath.row].toggleWishlist() { product in
                     self.products = [product]
-                    self.items = [ product.name ]
+                    self.items = [ product.name ?? "N/A" ]
                     self.tableView.reloadData()
                     self.hideLoadingView()
                 } onFailure: { error in
@@ -519,7 +523,7 @@ class ViewController : UIViewController, UIPickerViewDelegate, UIPickerViewDataS
                 self.showLoadingView()
                 self.products[indexPath.row].rate(rating: .LOVE) { product in
                     self.products = [product]
-                    self.items = [ product.name ]
+                    self.items = [ product.name ?? "N/A" ]
                     self.tableView.reloadData()
                     self.hideLoadingView()
                 } onFailure: { error in

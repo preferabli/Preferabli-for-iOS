@@ -22,7 +22,9 @@ class FlushRequest: Network {
     func sendRequest(_ requestData: String,
                      type: FlushType,
                      useIP: Bool,
-                     completion: @escaping (Bool) -> Void) {
+                     headers: [String: String],
+                     queryItems: [URLQueryItem] = [],
+                     useGzipCompression: Bool) -> Bool {
 
         let responseParser: (Data) -> Int? = { data in
             let response = String(data: data, encoding: String.Encoding.utf8)
@@ -32,20 +34,40 @@ class FlushRequest: Network {
             return nil
         }
         
+        var resourceHeaders: [String: String] = ["Content-Type": "application/json"].merging(headers) {(_,new) in new }
+        var compressedData: Data? = nil
+        
+        if useGzipCompression && type == .events {
+            if let requestDataRaw = requestData.data(using: .utf8) {
+                do {
+                    compressedData = try requestDataRaw.gzipCompressed()
+                    resourceHeaders["Content-Encoding"] = "gzip"
+                } catch {
+                    MixpanelLogger.error(message: "Failed to compress data with gzip: \(error)")
+                }
+            }
+        }
         let ipString = useIP ? "1" : "0"
+        var resourceQueryItems: [URLQueryItem] = [URLQueryItem(name: "ip", value: ipString)]
+        resourceQueryItems.append(contentsOf: queryItems)
         let resource = Network.buildResource(path: type.rawValue,
                                              method: .post,
-                                             requestBody: requestData.data(using: .utf8),
-                                             queryItems: [URLQueryItem(name: "ip", value: ipString)],
-                                             headers: ["Content-Type": "application/json"],
+                                             requestBody: compressedData ?? requestData.data(using: .utf8),
+                                             queryItems: resourceQueryItems,
+                                             headers: resourceHeaders,
                                              parse: responseParser)
-
-        flushRequestHandler(BasePath.getServerURL(identifier: basePathIdentifier),
+        var result = false
+        let semaphore = DispatchSemaphore(value: 0)
+        flushRequestHandler(serverURL,
                             resource: resource,
                             completion: { success in
-                                completion(success)
+                                result = success
+                                semaphore.signal()
         })
+        _ = semaphore.wait(timeout: .now() + 120.0)
+        return result
     }
+
 
     private func flushRequestHandler(_ base: String,
                                      resource: Resource<Int>,
@@ -55,13 +77,13 @@ class FlushRequest: Network {
             failure: { (reason, _, response) in
                 self.networkConsecutiveFailures += 1
                 self.updateRetryDelay(response)
-                Logger.warn(message: "API request to \(resource.path) has failed with reason \(reason)")
+                MixpanelLogger.warn(message: "API request to \(resource.path) has failed with reason \(reason)")
                 completion(false)
             }, success: { (result, response) in
                 self.networkConsecutiveFailures = 0
                 self.updateRetryDelay(response)
                 if result == 0 {
-                    Logger.info(message: "\(base) api rejected some items")
+                    MixpanelLogger.info(message: "\(base) api rejected some items")
                 }
                 completion(true)
             })
@@ -93,3 +115,4 @@ class FlushRequest: Network {
     }
 
 }
+
