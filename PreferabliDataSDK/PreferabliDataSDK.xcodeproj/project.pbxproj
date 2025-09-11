@@ -39,8 +39,6 @@
 		A2039C652E61E0CD00128378 /* SessionData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2039C642E61E0CD00128378 /* SessionData.swift */; };
 		A2039C672E61E10500128378 /* PreferenceData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2039C662E61E10500128378 /* PreferenceData.swift */; };
 		A2039C692E62261400128378 /* BaseModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2039C682E62260F00128378 /* BaseModel.swift */; };
-		A21B432F25388EED00B232A5 /* LoadCollectionTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A21B432E25388EED00B232A5 /* LoadCollectionTools.swift */; };
-		A241EC0B2493BCA100EBD66D /* Preferabli.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = A241EC082493BCA100EBD66D /* Preferabli.xcdatamodeld */; };
 		A27F8FFD2476C3D700187B9D /* StringExt.swift in Sources */ = {isa = PBXBuildFile; fileRef = A27F8FFB2476C3D700187B9D /* StringExt.swift */; };
 		A27F8FFE2476C3D700187B9D /* URLExt.swift in Sources */ = {isa = PBXBuildFile; fileRef = A27F8FFC2476C3D700187B9D /* URLExt.swift */; };
 		A27F90F52476DF5200187B9D /* Sort.swift in Sources */ = {isa = PBXBuildFile; fileRef = A27F90F12476DF5100187B9D /* Sort.swift */; };
@@ -57,7 +55,6 @@
 		A2A90B812475A35900493EA8 /* Preferabli.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A90B802475A35900493EA8 /* Preferabli.swift */; };
 		A2C809F62E68CCF50085CFA9 /* Reservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2C809F52E68CCF50085CFA9 /* Reservation.swift */; };
 		A2F908E429C0F43400BFD89D /* PreferabliDataSDK.docc in Sources */ = {isa = PBXBuildFile; fileRef = A2F908E329C0F43400BFD89D /* PreferabliDataSDK.docc */; };
-		A2F908F029CCA64900BFD89D /* PreferabliUserTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2F908EF29CCA64900BFD89D /* PreferabliUserTools.swift */; };
 		A2FB46CB299C2A1B00653527 /* powered_by_light_bg.png in Resources */ = {isa = PBXBuildFile; fileRef = A2FB46C9299C2A1B00653527 /* powered_by_light_bg.png */; };
 		A2FB46CC299C2A1B00653527 /* powered_by_dark_bg.png in Resources */ = {isa = PBXBuildFile; fileRef = A2FB46CA299C2A1B00653527 /* powered_by_dark_bg.png */; };
 /* End PBXBuildFile section */
@@ -95,12 +92,10 @@
 		A2039C642E61E0CD00128378 /* SessionData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionData.swift; sourceTree = "<group>"; };
 		A2039C662E61E10500128378 /* PreferenceData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferenceData.swift; sourceTree = "<group>"; };
 		A2039C682E62260F00128378 /* BaseModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BaseModel.swift; sourceTree = "<group>"; };
-		A21B432E25388EED00B232A5 /* LoadCollectionTools.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LoadCollectionTools.swift; sourceTree = "<group>"; };
-		A241EC092493BCA100EBD66D /* WineRing.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = WineRing.xcdatamodel; sourceTree = "<group>"; };
 		A27F8FFB2476C3D700187B9D /* StringExt.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = StringExt.swift; sourceTree = "<group>"; };
 		A27F8FFC2476C3D700187B9D /* URLExt.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = URLExt.swift; sourceTree = "<group>"; };
 		A27F90F12476DF5100187B9D /* Sort.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Sort.swift; sourceTree = "<group>"; };
-		A27F9102247805B500187B9D /* PreferabliDataSDK.podspec */ = {isa = PBXFileReference; lastKnownFileType = text; name = PreferabliDataSDK.podspec; path = ../PreferabliDataSDK.podspec; sourceTree = SOURCE_ROOT; xcLanguageSpecificationIdentifier = xcode.lang.ruby; };
+		A27F9102247805B500187B9D /* PreferabliDataSDK.podspec */ = {isa = PBXFileReference; lastKnownFileType = text; name = PreferabliDataSDK.podspec; path = ../PreferabliDataSDK.podspec; sourceTree = SOURCE_ROOT; };
 		A2A0F4B02E677013001C6F64 /* Analytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Analytics.swift; sourceTree = "<group>"; };
 		A2A61B8825B09F3800FDFEEA /* FulfillSort.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FulfillSort.swift; sourceTree = "<group>"; };
 		A2A90B5D24744BAD00493EA8 /* PreferabliDataSDK.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = PreferabliDataSDK.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -115,7 +110,6 @@
 		A2A90B802475A35900493EA8 /* Preferabli.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preferabli.swift; sourceTree = "<group>"; };
 		A2C809F52E68CCF50085CFA9 /* Reservation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Reservation.swift; sourceTree = "<group>"; };
 		A2F908E329C0F43400BFD89D /* PreferabliDataSDK.docc */ = {isa = PBXFileReference; lastKnownFileType = folder.documentationcatalog; path = PreferabliDataSDK.docc; sourceTree = "<group>"; };
-		A2F908EF29CCA64900BFD89D /* PreferabliUserTools.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PreferabliUserTools.swift; sourceTree = "<group>"; };
 		A2FB46C9299C2A1B00653527 /* powered_by_light_bg.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = powered_by_light_bg.png; sourceTree = "<group>"; };
 		A2FB46CA299C2A1B00653527 /* powered_by_dark_bg.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = powered_by_dark_bg.png; sourceTree = "<group>"; };
 		A9FF01DD6075EA7B3EDF384E /* Pods-PreferabliDataSDK.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PreferabliDataSDK.release.xcconfig"; path = "Target Support Files/Pods-PreferabliDataSDK/Pods-PreferabliDataSDK.release.xcconfig"; sourceTree = "<group>"; };
@@ -156,7 +150,6 @@
 			children = (
 				A2FB46CA299C2A1B00653527 /* powered_by_dark_bg.png */,
 				A2FB46C9299C2A1B00653527 /* powered_by_light_bg.png */,
-				A241EC082493BCA100EBD66D /* Preferabli.xcdatamodeld */,
 			);
 			path = assets;
 			sourceTree = "<group>";
@@ -254,13 +247,11 @@
 				A2A0F4B02E677013001C6F64 /* Analytics.swift */,
 				A27F8FFA2476C3BB00187B9D /* ext */,
 				A2A90B6124744BAD00493EA8 /* Info.plist */,
-				A21B432E25388EED00B232A5 /* LoadCollectionTools.swift */,
 				A2A90B802475A35900493EA8 /* Preferabli.swift */,
 				A2039C582E61D9BE00128378 /* Storage.swift */,
 				A2F908E329C0F43400BFD89D /* PreferabliDataSDK.docc */,
 				A27F9102247805B500187B9D /* PreferabliDataSDK.podspec */,
 				A2A90B7A247590A000493EA8 /* PreferabliTools.swift */,
-				A2F908EF29CCA64900BFD89D /* PreferabliUserTools.swift */,
 				A2A90B6924744C7400493EA8 /* readme.md */,
 			);
 			path = tools;
@@ -420,9 +411,7 @@
 				A2F908E429C0F43400BFD89D /* PreferabliDataSDK.docc in Sources */,
 				A2A90B7324758D5600493EA8 /* DataResponseExt.swift in Sources */,
 				A2039C692E62261400128378 /* BaseModel.swift in Sources */,
-				A2F908F029CCA64900BFD89D /* PreferabliUserTools.swift in Sources */,
 				A2A90B7524758D5600493EA8 /* APIService.swift in Sources */,
-				A241EC0B2493BCA100EBD66D /* Preferabli.xcdatamodeld in Sources */,
 				A2039C672E61E10500128378 /* PreferenceData.swift in Sources */,
 				A2039C5F2E61E06900128378 /* MerchantProductLink.swift in Sources */,
 				A2A90B7624758D5600493EA8 /* PreferabliException.swift in Sources */,
@@ -430,7 +419,6 @@
 				A2A90B7E247590A000493EA8 /* PreferabliTools.swift in Sources */,
 				A2A90B812475A35900493EA8 /* Preferabli.swift in Sources */,
 				A27F90F52476DF5200187B9D /* Sort.swift in Sources */,
-				A21B432F25388EED00B232A5 /* LoadCollectionTools.swift in Sources */,
 				A2C809F62E68CCF50085CFA9 /* Reservation.swift in Sources */,
 				A2A90B7724758D5600493EA8 /* SessionExt.swift in Sources */,
 				A2A61B8925B09F3900FDFEEA /* FulfillSort.swift in Sources */,
@@ -687,19 +675,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
-/* Begin XCVersionGroup section */
-		A241EC082493BCA100EBD66D /* Preferabli.xcdatamodeld */ = {
-			isa = XCVersionGroup;
-			children = (
-				A241EC092493BCA100EBD66D /* WineRing.xcdatamodel */,
-			);
-			currentVersion = A241EC092493BCA100EBD66D /* WineRing.xcdatamodel */;
-			path = Preferabli.xcdatamodeld;
-			sourceTree = "<group>";
-			versionGroupType = wrapper.xcdatamodel;
-		};
-/* End XCVersionGroup section */
 	};
 	rootObject = A2A90B5424744BAD00493EA8 /* Project object */;
 }

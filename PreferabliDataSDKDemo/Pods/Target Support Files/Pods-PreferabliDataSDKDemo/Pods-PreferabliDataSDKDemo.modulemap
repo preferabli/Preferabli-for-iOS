@@ -1,6 +1,0 @@
-module Pods_PreferabliDataSDKDemo {
-  umbrella header "Pods-PreferabliDataSDKDemo-umbrella.h"
-
-  export *
-  module * { export * }
-}
