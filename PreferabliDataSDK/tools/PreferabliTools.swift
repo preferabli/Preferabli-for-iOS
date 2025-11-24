@@ -48,9 +48,6 @@ internal class PreferabliTools {
         // Cancel your outstanding work
         operationQueue.cancelAllOperations()
         apiOperationQueue.cancelAllOperations()
-        
-        // Do your cleanup (already async)
-        try await Preferabli.main.clearAllData()
     }
     
     /// Async because it reads actor state.
@@ -285,8 +282,8 @@ internal class PreferabliTools {
         return newImage
     }
     
-    internal class func generateRandomLongId() -> Int32 {
-        return -Int32(arc4random() % 28147497)
+    internal class func generateRandomLongId() -> Int {
+        return -Int(arc4random() % 28147497)
     }
     
     internal class func hasDaysPassed(days: Int, startDate: Date?) -> Bool {
@@ -312,20 +309,21 @@ internal class PreferabliTools {
     }
     
     // Core, nonisolated builder (no main-actor APIs)
-    nonisolated internal static func getImageUrl(image: String?, width: Float, height: Float, quality: Int, scale: Float = Storage.getKeyStore().float(forKey: "mainScale")) -> URL? {
+    nonisolated internal static func getImageUrl(image: String?, width: Int, height: Int, quality: Int, scale: Float = Storage.getKeyStore().float(forKey: "mainScale")) -> URL? {
         guard let raw = image, !raw.isEmptyOrWhitespace() else { return nil }
         if raw.contains("placeholder") { return nil }
         if raw.contains("winering.com") || raw.contains("preferabli.com") { return URL(string: raw) }
         if !raw.contains("s3.amazonaws.com/winering-production") { return URL(string: raw) }
 
         var key = raw
-        if let slash = key.range(of: "/", options: .backwards)?.upperBound {
-            let tail = String(key[slash...])
-            key = key.containsIgnoreCase("/avatars") ? "avatars/" + tail : tail
-        }
+        let index = raw.range(of: "winering-production/", options: .backwards, range: nil, locale: nil)!.upperBound
+        let start = raw.index(index, offsetBy: 0)
+        let end = raw.endIndex
+        let range = start..<end
+        key = String(raw[range])
 
-        let cloudfrontAppId = "ios_sdk/fit-in/"
-        let sizeString = "\(Int(width * scale))x\(Int(height * scale))/"
+        let cloudfrontAppId = "ios_psdk/fit-in/"
+        let sizeString = "\(Int(Float(width) * scale * 1.4))x\(Int(Float(height) * scale * 1.4))/"
         let qualityString = "filters:quality(\(quality))/"
         let pngString = key.containsIgnoreCase("png") ? "filters:format(png)/" : ""
         let urlString = "https://dxlu3le4zp2pd.cloudfront.net/wineringlabel/" + cloudfrontAppId + sizeString + qualityString + pngString + key

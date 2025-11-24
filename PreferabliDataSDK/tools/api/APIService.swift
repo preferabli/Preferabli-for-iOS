@@ -31,7 +31,7 @@ internal actor APIService {
         }
 
         if logging {
-            print("Printing default header:")
+            print("Printing default headers:")
             print(headers)
         }
 
@@ -95,19 +95,24 @@ private final class LoggingAdapter: RequestAdapter {
     let loggingEnabled: Bool
     init(loggingEnabled: Bool) { self.loggingEnabled = loggingEnabled }
 
-    func adapt(
-        _ urlRequest: URLRequest,
-        for session: Alamofire.Session,
-        completion: @escaping @Sendable (Result<URLRequest, any Error>) -> Void
-    ) {
-        if loggingEnabled, let req = urlRequest as URLRequest? {
-            if let method = req.httpMethod { print(method) }
-            if let url = req.url { print(url.absoluteString) }
-            if let body = req.httpBody { print(body) }
+    func adapt(_ urlRequest: URLRequest,
+               for session: Alamofire.Session,
+               completion: @escaping @Sendable (Result<URLRequest, any Error>) -> Void) {
+        if loggingEnabled {
+            let method = urlRequest.httpMethod ?? "?"
+            let url    = urlRequest.url?.absoluteString ?? "?"
+            print("\(method) \(url)")
+            if let body = urlRequest.httpBody, !body.isEmpty {
+                print(String(decoding: body.prefix(2000), as: UTF8.self))
+            }
         }
         completion(.success(urlRequest))
     }
 }
+
+
+import Alamofire
+import Foundation
 
 extension APIService {
     /// Returns `response` on 2xx, else throws `PreferabliException`.
@@ -116,6 +121,23 @@ extension APIService {
         response: AFDataResponse<Data?>
     ) async throws -> AFDataResponse<Data?> {
 
+        let endpoint = response.request?.url?.absoluteString ?? "<unknown-url>"
+        let status   = response.response?.statusCode
+        let raw      = response.data
+
+        // Helper to build a context-rich exception
+        func makeErr(_ type: PreferabliExceptionType,
+                     code: Int = (status ?? 0),
+                     message: String? = nil,
+                     attachRaw: Bool = true) -> PreferabliException {
+            var msg = "[\(endpoint)] \(message ?? type.getMessage())"
+            if attachRaw, let raw, !raw.isEmpty {
+                let snippet = String(decoding: raw.prefix(1000), as: UTF8.self)
+                msg += "\n── Raw (first 1000 bytes) ──\n\(snippet)\n────────"
+            }
+            return PreferabliException(type: type, message: msg, code: code)
+        }
+
         // Happy path: 2xx + no AF error
         if response.error == nil,
            let http = response.response,
@@ -123,7 +145,7 @@ extension APIService {
 
             let logging = await MainActor.run { Preferabli.main.loggingEnabled }
             if logging, let data = response.data, let utf8 = String(data: data, encoding: .utf8) {
-                print("Data: \(utf8)")
+                print("✅ \(http.statusCode) \(endpoint)\nData: \(utf8)")
             }
             return response
         }
@@ -149,13 +171,29 @@ extension APIService {
                        let http2 = sessionResponse.response,
                        http2.statusCode < 400 {
 
-                        let sessionData = SessionData(map: try continueOrThrowJSONException(data: sessionResponse.data!) as! [String: Any])
+                        let sessionData: SessionData
+                        do {
+                            let sessionDict = try continueOrThrowJSONException(data: sessionResponse.data!)
+                            guard let dict = sessionDict as? [String: Any] else {
+                                throw makeErr(.JSONError, code: http2.statusCode, message: "Session refresh JSON root was not a dictionary.")
+                            }
+                            sessionData = SessionData(map: dict)
+                        } catch let e as PreferabliException {
+                            // Enrich the thrown JSON error with the refresh endpoint + raw
+                            var msg = "[\(APIEndpoints.postSession)] \(e.getMessage())"
+                            if let raw2 = sessionResponse.data, !raw2.isEmpty {
+                                let snippet = String(decoding: raw2.prefix(1000), as: UTF8.self)
+                                msg += "\n── Raw (first 1000 bytes) ──\n\(snippet)\n────────"
+                            }
+                            throw PreferabliException(type: e.type, message: msg, code: e.getCode())
+                        }
+
                         await sessionData.saveSession()
 
                         guard let req = response.request,
                               let method = req.httpMethod?.lowercased()
                         else {
-                            throw PreferabliException(type: .APIError, code: http.statusCode)
+                            throw makeErr(.APIError, code: http.statusCode, message: "Unable to replay original request (missing method/URL).")
                         }
 
                         let s = try await api.getAlamo()
@@ -184,31 +222,53 @@ extension APIService {
                         }
                     }
 
-                    // Refresh failed
-                    throw PreferabliException(type: .APIError, code: http.statusCode)
+                    // Refresh failed (include refresh endpoint + raw snippet if present)
+                    var msg = "[\(endpoint)] Token refresh failed with status \(http.statusCode)."
+                    if let raw2 = sessionResponse.data, !raw2.isEmpty {
+                        let snippet = String(decoding: raw2.prefix(1000), as: UTF8.self)
+                        msg += "\n── Refresh Raw (first 1000 bytes) ──\n\(snippet)\n────────"
+                    }
+                    throw PreferabliException(type: .APIError, message: msg, code: http.statusCode)
 
+                } catch let e as PreferabliException {
+                    // If refresh or replay fails and already a PreferabliException, prepend original endpoint + attach original raw
+                    var msg = "[\(endpoint)] \(e.getMessage())"
+                    if let raw, !raw.isEmpty {
+                        let snippet = String(decoding: raw.prefix(1000), as: UTF8.self)
+                        msg += "\n── Original Raw (first 1000 bytes) ──\n\(snippet)\n────────"
+                    }
+                    throw PreferabliException(type: e.type, message: msg, code: e.getCode())
                 } catch {
-                    // If refresh or replay fails, surface as API error with original code
-                    throw PreferabliException(type: .APIError, code: http.statusCode)
+                    // Any other error: surface as API error with original code + endpoint/raw
+                    throw makeErr(.APIError, code: http.statusCode, message: "Token refresh/replay failed: \(error.localizedDescription)")
                 }
             }
 
             // Non-401: try to parse API error body
-            let errorObject = try continueOrThrowJSONException(data: data) as? [String: Any]
-            guard let dict = errorObject else {
-                throw PreferabliException(type: .APIError, code: http.statusCode)
-            }
-
-            let apiError = APIError(map: dict)
-            if apiError.message != nil {
-                throw PreferabliException(error: apiError)
-            } else {
-                throw PreferabliException(type: .APIError, code: http.statusCode)
+            do {
+                let obj = try continueOrThrowJSONException(data: data)
+                guard let dict = obj as? [String: Any] else {
+                    throw makeErr(.APIError, code: http.statusCode, message: "API error body was not a dictionary.")
+                }
+                let apiError = APIError(map: dict)
+                if apiError.message != nil {
+                    // Attach endpoint + raw snippet
+                    var msg = "[\(endpoint)] \(PreferabliException(error: apiError).getMessage())"
+                    let snippet = String(decoding: data.prefix(1000), as: UTF8.self)
+                    msg += "\n── Raw (first 1000 bytes) ──\n\(snippet)\n────────"
+                    throw PreferabliException(type: .APIError, message: msg, code: http.statusCode)
+                } else {
+                    throw makeErr(.APIError, code: http.statusCode, message: "HTTP \(http.statusCode) without API error message.")
+                }
+            } catch let e as PreferabliException {
+                // JSON parsing already formatted: just prepend endpoint if not present
+                let msg = "[\(endpoint)] \(e.getMessage())"
+                throw PreferabliException(type: e.type, message: msg, code: http.statusCode)
             }
         }
 
         // No HTTP response or data
-        throw PreferabliException(type: .NetworkError)
+        throw PreferabliException(type: .NetworkError, message: "[\(endpoint)] No HTTP response or data.", code: status ?? 0)
     }
 
     internal static func continueOrThrowJSONException(data: Data) throws -> Any {
@@ -217,10 +277,13 @@ extension APIService {
         } catch {
             // report malformed JSON
             Analytics.track(["event": "error", "type": "JSON", "data": data.base64EncodedString()])
-            throw PreferabliException(type: .JSONError)
+            let snippet = String(decoding: data.prefix(1000), as: UTF8.self)
+            let msg = "JSON parse failed.\n── Raw (first 1000 bytes) ──\n\(snippet)\n────────"
+            throw PreferabliException(type: .JSONError, message: msg, code: 0)
         }
     }
 }
+
 
 // MARK: - API Endpoints
 
@@ -239,7 +302,10 @@ internal struct APIEndpoints {
     internal static let flttt = baseUrl + "flttt"
     internal static let foods = baseUrl + "foods"
     internal static let wheretobuy = baseUrl + "wheretobuy"
-
+    internal static let magicLink = baseUrl + "sessions/magic-link"
+    internal static let preferenceData = baseUrl + "wili"
+    internal static let qrCode = "https://api.qr-code-generator.com/v1/create?access-token=" + SDKConfig.qrKey
+    
     internal static func integration(id: Int) -> String { baseUrl + "integrations/\(id)" }
     internal static func lookupConversion(id: Int) -> String { baseUrl + "integrations/\(id)/lookups" }
     internal static func lttt(id: Int) -> String { baseUrl + "integration/\(id)/lttt" }
@@ -252,7 +318,6 @@ internal struct APIEndpoints {
     internal static func collection(id: Int) -> String { baseUrl + "collections/\(id)" }
     internal static func product(id: Int) -> String { baseUrl + "products/\(id)" }
     internal static func user(id: Int) -> String { baseUrl + "users/\(id)" }
-    internal static func wili() -> String { baseUrl + "wili" }
     internal static func tags(id: Int) -> String { baseUrl + "collections/\(id)/tags" }
     internal static func variants(product_id: Int) -> String { baseUrl + "products/\(product_id)/variants" }
     internal static func style(id: Int) -> String { baseUrl + "styles/\(id)" }
@@ -269,4 +334,11 @@ internal struct APIEndpoints {
     internal static func profile(id: Int) -> String { baseUrl + "users/\(id)/profile?include_styles=false" }
     internal static func userTags(id: Int) -> String { baseUrl + "users/\(id)/tags" }
     internal static func userTag(id: Int, tagId: Int) -> String { baseUrl + "users/\(id)/tags/\(tagId)" }
+    internal static func productProfileData(id : Int, year : Int = -1) -> String {
+        return baseUrl + "variant-details?keys[]=acidity_percent&keys[]=sweetness_percent&keys[]=oak_percent&keys[]=body_percent&keys[]=peat_percent&keys[]=agave_percent&keys[]=smoke_percent&keys[]=hop_percent&keys[]=malt_percent&keys[]=flavor_percent&keys[]=carbonation_percent&keys[]=alcohol_percent&keys[]=firmness_percent&keys[]=savouriness_percent&keys[]=aromatic_percent&keys[]=flavor_profile_1_name&keys[]=flavor_profile_2_name&keys[]=flavor_profile_3_name&keys[]=flavor_profile_4_name&keys[]=flavor_profile_1_icon_png_4x_url&keys[]=flavor_profile_2_icon_png_4x_url&keys[]=flavor_profile_3_icon_png_4x_url&keys[]=flavor_profile_4_icon_png_4x_url&keys[]=food_category_1_name&keys[]=food_category_2_name&keys[]=food_category_3_name&keys[]=food_category_4_name&keys[]=food_category_1_icon_png_url&keys[]=food_category_2_icon_png_url&keys[]=food_category_3_icon_png_url&keys[]=food_category_4_icon_png_url&product_id=\(id)&year=\(year)"
+    }
+    
+    internal static func productFoodData(id : Int, year : Int = -1) -> String {
+        return baseUrl + "variant-details?keys[]=food_category_1_name&keys[]=food_category_2_name&keys[]=food_category_3_name&keys[]=food_category_4_name&keys[]=food_category_1_icon_png_url&keys[]=food_category_2_icon_png_url&keys[]=food_category_3_icon_png_url&keys[]=food_category_4_icon_png_url&product_id=\(id)&year=\(year)"
+    }
 }

@@ -132,7 +132,7 @@ public class MerchantProductLink : BaseObject {
     ///   - height: returns an image with the specified height in pixels.
     ///   - quality: returns an image with the specified quality. Scales from 0 - 100.
     /// - Returns: the URL of the requested image.
-    public func getImage(width : Float, height : Float, quality : Int = 80) -> URL? {
+    public func getImage(width : Int, height : Int, quality : Int = 80) -> URL? {
         return PreferabliTools.getImageUrl(image: image_url, width: width, height: height, quality: quality)
     }
     

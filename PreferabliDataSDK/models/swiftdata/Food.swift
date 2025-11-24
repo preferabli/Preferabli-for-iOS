@@ -5,9 +5,10 @@ import SwiftData
 /// You can use foods to get pairings within ``Preferabli/getRecs(product_category:product_type:collection_id:price_min:price_max:style_ids:food_ids:include_merchant_links:onCompletion:onFailure:)``.
 @Model
 public final class Food: HasIntID, HasTimestamps {
+    
     @Attribute(.unique) public var id: Int
-    public var created_at: Date?
-    public var updated_at: Date?
+    public var created_at: Date = Foundation.Date.now
+    public var updated_at: Date = Foundation.Date.now
     public var name: String?
     public var desc: String?
     public var keywords: String?
@@ -15,7 +16,9 @@ public final class Food: HasIntID, HasTimestamps {
     public var food_category_name: String?
     public var food_category_url: String?
 
-    public init(id: Int) { self.id = id }
+    public init(id: Int) {
+        self.id = id
+    }
 
     init(id: Int, name: String? = nil, desc: String? = nil, keywords: String? = nil, food_category_id: Int? = nil, food_category_name: String? = nil, food_category_url: String? = nil) {
         self.id = id
@@ -25,6 +28,10 @@ public final class Food: HasIntID, HasTimestamps {
         self.food_category_id = food_category_id
         self.food_category_name = food_category_name
         self.food_category_url = food_category_url
+    }
+    
+    public static func predicate(forID id: Int) -> Predicate<Food> {
+        #Predicate<Food> { $0.id == id }
     }
     
     /// Sort foods alphabetically.
@@ -68,7 +75,7 @@ public final class Food: HasIntID, HasTimestamps {
     ///   - height: returns an image with the specified height in pixels.
     ///   - quality: returns an image with the specified quality. Scales from 0 - 100.
     /// - Returns: the URL of the requested image.
-    public func getImage(width : Float, height : Float, quality : Int = 80) -> URL? {
+    public func getImage(width : Int, height : Int, quality : Int = 80) -> URL? {
         return PreferabliTools.getImageUrl(image: food_category_url, width: width, height: height, quality: quality)
     }
     

@@ -10,22 +10,21 @@
 import Foundation
 import CoreGraphics
 import SwiftData
+import SwiftUI
+import Combine
 
 /// Represents a product  (e.g., wines, beers, spirits) within the Preferabli SDK. A product may have one or more ``Variant``s stored as ``variants``.  A variant can have one or more ``Tag``s which are used to associate a product with a user's interaction (e.g., rating) or with a particular ``Collection``.
-///
-/// With respect to a ``Customer``, a product return may also include ``PreferenceData`` which identifies the customer's affinity for the product. See ``getPreferabliScore(force_refresh:onCompletion:onFailure:)``.
-///
-/// To see how a product is mapped to your own object(s), see ``Variant/merchant_links``. To see a user's interaction with the product, see ``Variant/tags``.
 @Model
-public final class Product: HasIntID, HasTimestamps {
+public final class Product: HasIntID, HasTimestamps, HasImage {
+    
     @Attribute(.unique) public var id: Int
-    public var created_at: Date?
-    public var updated_at: Date?
+    public var created_at: Date = Foundation.Date.now
+    public var updated_at: Date = Foundation.Date.now
     public var brand: String?
     public var decant: Bool?
     public var grape: String?
-    public var brand_lat: Int?
-    public var brand_lon: Int?
+    public var brand_lat: Double?
+    public var brand_lon: Double?
     public var show_year_dropdown: Bool?
     public var name: String?
     public var region: String?
@@ -33,40 +32,61 @@ public final class Product: HasIntID, HasTimestamps {
     public var category: String?
     public var subcategory: String?
     public var brand_id: Int?
-    public var producthash: String?
+    public var product_hash: String?
+    public var country_code: String?
+    public var recommendable: Bool?
 
-    @Relationship(deleteRule: .nullify) public var primaryImage: Media?
-    @Relationship(deleteRule: .nullify) public var variants: [Variant] = []
+    // local
+    public var cardToneRGB: Int?
+    @Attribute(.externalStorage) public var temporaryImage: Data?
+    public var temporaryName: String?
+
+    // relationships
+    @Relationship(deleteRule: .nullify) public var primary_image: Media?
+    @Relationship(deleteRule: .cascade) public var variants: [Variant] = []
+    @Relationship(deleteRule: .cascade) public var profile: ProductProfile?
+    @Relationship(deleteRule: .cascade) public var preference_data: PreferenceData?
+
+    @Relationship public var cachedMostRecentRating: Tag?
+    @Relationship public var cachedWishlist: Tag?
+    @Relationship public var cachedMostRecentVariant: Variant?
+    @Relationship public var cachedPurchase: Tag?
+    @Relationship public var cachedCellar: Tag?
 
     public init(id: Int) { self.id = id }
+    
+    public static func predicate(forID id: Int) -> Predicate<Product> {
+        #Predicate<Product> { $0.id == id }
+    }
+    
+    internal func updateCachedRelationships() {
+        cachedMostRecentRating = Tag.sortTagsByDate(tags: variants.flatMap(\.tags)).first(where: { $0.tag_type == .RATING && $0.isTombstoned == false })
+        cachedWishlist = variants.flatMap(\.tags).first(where: { $0.tag_type == .WISHLIST && $0.isTombstoned == false })
+        cachedMostRecentVariant = variants.sorted { $0.year > $1.year }.first
+    }
 
     /// The ``RatingLevel`` of the most recent rating of a specific product for the current user.
     var rating_level : RatingLevel {
-        if let mostRecentRating = most_recent_rating {
+        if let mostRecentRating = cachedMostRecentRating {
             return RatingLevel.getRatingLevelBasedOffTagValue(value: mostRecentRating.value)
         }
         return RatingLevel.NONE
     }
-
-    /// The first instance within the product of tag type ``TagType/WISHLIST`` for the current user.
-    var wishlist_tag : Tag? {
-        for variant in variants {
-            for tag in variant.tags {
-                if (tag.tag_type == .WISHLIST) {
-                    return tag
-                }
-            }
+    
+    public func getShareLink() -> String? {
+        guard let hash = product_hash else {
+            return nil
         }
-        return nil
+        return "https://app.preferabli.com/products/" + hash
     }
 
     /// All of the product tags of type ``TagType/PURCHASE`` for the current user.
-    var purchase_tags: Set<Tag> {
-        var purchaseTags = Set<Tag>()
+    var purchase_tags: [Tag] {
+        var purchaseTags = [Tag]()
         for variant in variants {
             for tag in variant.tags {
                 if (tag.tag_type == .PURCHASE) {
-                    purchaseTags.insert(tag)
+                    purchaseTags.append(tag)
                 }
             }
         }
@@ -78,36 +98,16 @@ public final class Product: HasIntID, HasTimestamps {
     /// > Note: In legacy code this referenced `CoreData_UserCollection` to filter by `relationship_type == "mycellar"`.
     /// SwiftData equivalent should query user collections in a `ModelContext` and then filter tags by those collection ids.
     /// See `cellar_tags(in:)` below for a context-aware variant.
-    var cellar_tags: Set<Tag> {
-        var cellarTags = Set<Tag>()
+    var cellar_tags: [Tag] {
+        var cellarTags = [Tag]()
         for variant in variants {
             for tag in variant.tags {
                 if (tag.tag_type == .CELLAR) {
-                    cellarTags.insert(tag)
+                    cellarTags.append(tag)
                 }
             }
         }
         return cellarTags
-    }
-
-    /// Context-aware variant that matches legacy "mycellar" behavior.
-    /// - Parameter ctx: SwiftData context to query the user's collections.
-    /// - Returns: Tags of type ``TagType/CELLAR`` that belong to collections whose `relationship_type` is `mycellar`.
-    func cellar_tags(in ctx: ModelContext) throws -> Set<Tag> {
-        // Fetch user collections with relationship_type == "mycellar"
-        let myCellar = try ctx.fetch(FetchDescriptor<UserCollection>(
-            predicate: #Predicate { $0.relationship_type == "mycellar" }
-        ))
-        let ids = Set(myCellar.map { $0.collection_id })
-        var result = Set<Tag>()
-        for v in variants {
-            for t in v.tags {
-                if t.tag_type == .CELLAR, let cid = t.collection_id, ids.contains(cid) {
-                    result.insert(t)
-                }
-            }
-        }
-        return result
     }
 
     /// The most recent product tags of type ``TagType/PURCHASE`` for the current user.
@@ -133,7 +133,7 @@ public final class Product: HasIntID, HasTimestamps {
     /// Identifies if the current user has added a specific product to their wishlist.
     /// - Returns: true if it was wishlisted.
     public func isOnWishlist() -> Bool {
-        return wishlist_tag != nil
+        return cachedWishlist != nil
     }
 
     /// Identifies if the current user added a specific product to a cellar collection.
@@ -143,29 +143,45 @@ public final class Product: HasIntID, HasTimestamps {
     }
 
     /// All of the product tags of type ``TagType/RATING`` for the current user.
-    var ratings_tags: Set<Tag> {
-        var ratingsTags = Set<Tag>()
-        for variant in variants {
-            for tag in variant.tags where tag.tag_type == .RATING {
-                ratingsTags.insert(tag)
+    public var ratings_tags: [Tag] {
+        var ratingsTags = [Tag]()
+        for variant in variants where !variant.isTombstoned {
+            for tag in variant.tags where tag.tag_type == .RATING && !tag.isTombstoned {
+                ratingsTags.append(tag)
             }
         }
         return ratingsTags
     }
-
-    /// The most recent product tags of type ``TagType/RATING`` for the current user.
-    var most_recent_rating: Tag? {
-        var date = Date(timeIntervalSince1970: 0)
-        var mostRecentRating : Tag?
-        for tag in ratings_tags {
-            let compareToDate = tag.created_at ?? Date(timeIntervalSince1970: 0)
-            if (date < compareToDate) {
-                date = compareToDate
-                mostRecentRating = tag
+    
+    public var nameSanitized: String? {
+        if let n = name, n.localizedCaseInsensitiveContains("identified") {
+            if let tempName = temporaryName {
+                return tempName
             }
+            return n
+        } else if !name.isEmptyOrWhitespace {
+            return name
         }
-        return mostRecentRating
+        
+        return nil
     }
+    
+    /// Returns grape if one exists
+    public var grapeSanitized: String? {
+        guard let g = grape,
+              !g.localizedCaseInsensitiveContains("identifying")
+        else { return nil }
+        return g
+    }
+    
+    /// Returns grape if one exists
+    public var regionSanitized: String? {
+        guard let r = region,
+              !r.localizedCaseInsensitiveContains("info")
+        else { return nil }
+        return r
+    }
+
 
     /// Identifies if a product is still being curated.
     /// - Returns: true if the product has not been curated.
@@ -179,8 +195,8 @@ public final class Product: HasIntID, HasTimestamps {
     ///   - height: returns an image with the specified height in pixels.
     ///   - quality: returns an image with the specified quality. Scales from 0 - 100.
     /// - Returns: the URL of the requested image.
-    public func getImage(width : Float, height : Float, quality : Int = 80) -> URL? {
-        if (primaryImage == nil || primaryImage!.path.isEmptyOrWhitespace || primaryImage?.path?.contains("placeholder") == true) {
+    public func getImage(width : Int, height : Int, quality : Int = 80) -> URL? {
+        if (primary_image == nil || primary_image!.path.isEmptyOrWhitespace || primary_image?.path?.contains("placeholder") == true) {
             for variant in variants {
                 if (variant.primary_image == nil || variant.primary_image!.path.isEmptyOrWhitespace || variant.primary_image?.path?.contains("placeholder") == true) {
                     continue
@@ -188,17 +204,26 @@ public final class Product: HasIntID, HasTimestamps {
                 return variant.getImage(width: width, height: height, quality: quality)
             }
         }
-        return PreferabliTools.getImageUrl(image: primaryImage?.path, width: width, height: height, quality: quality)
+        return PreferabliTools.getImageUrl(image: primary_image?.path, width: width, height: height, quality: quality)
+    }
+    
+    public func getPlaceholderImage() -> String? {
+        return nil
     }
 
     /// The type of a product (e.g., Red). Only for wines.
-    var product_type: ProductType {
+    public var product_type: ProductType? {
         return ProductType.getProductTypeFromString(value: type)
     }
 
     /// The category of a product.
-    var product_category: ProductCategory {
+    public var product_category: ProductCategory? {
         return ProductCategory.getProductCategoryFromString(value: category)
+    }
+    
+    /// The subcategory of a product.
+    public var product_subcategory: ProductSubcategory? {
+        return ProductSubcategory.getProductSubcategoryFromString(value: subcategory)
     }
 
     /// Gets the price range of the most recent ``Variant``.
@@ -211,35 +236,7 @@ public final class Product: HasIntID, HasTimestamps {
     /// - $$$$ = $50 to $74.99 | $110 - $160
     /// - $$$$$ = $75 and up | > $160
     public func getPrice() -> String {
-        return Product.getPrice(num_dollar_signs: most_recent_variant.num_dollar_signs ?? 1)
-    }
-
-    static internal func getPrice(num_dollar_signs : Int) -> String {
-        var dollarSigns = ""
-        for _ in 0..<num_dollar_signs {
-            dollarSigns += "$"
-        }
-        return dollarSigns
-    }
-
-    /// The most recent ``Variant`` for a product.
-    public var most_recent_variant: Variant {
-        var mostRecentYear : Int? = -2
-        var mostRecentVariant : Variant?
-        for variant in variants {
-            if (((variant.year ?? 0) > (mostRecentYear ?? 0)) && variant.id > 0) {
-                mostRecentYear = variant.year
-                mostRecentVariant = variant
-            }
-        }
-
-        if (mostRecentVariant == nil) {
-            // We should always have a variant. Create one if it doesn't exist.
-            mostRecentVariant = Variant(year: Variant.CURRENT_VARIANT_YEAR, product: self)
-            variants.append(mostRecentVariant!)
-        }
-
-        return mostRecentVariant!
+        return cachedMostRecentVariant?.getPrice() ?? ""
     }
 
     /// Gets a ``Variant`` of a product by its id.
@@ -258,12 +255,18 @@ public final class Product: HasIntID, HasTimestamps {
     /// - Parameter year: a variant year.
     /// - Returns: the corresponding variant. Returns *nil* if this product does not contain the variant.
     public func getVariantWithYear(year : Int) -> Variant? {
+        var candidateToReturn : Variant? = nil
         for variant in variants {
             if (variant.year == year) {
-                return variant
+                if (variant.hasValidID) {
+                    return variant
+                } else {
+                    candidateToReturn = variant
+                }
             }
         }
-        return nil
+        
+        return candidateToReturn
     }
 
     /// Filters products by a user's search.
@@ -319,46 +322,70 @@ public final class Product: HasIntID, HasTimestamps {
 
 // MARK: - API action passthroughs (unchanged semantics)
 extension Product {
-//    /// See ``Preferabli/whereToBuy(product_id:fulfill_sort:append_nonconforming_results:lock_to_integration:onCompletion:onFailure:)``.
-//    public func whereToBuy(fulfill_sort : FulfillSort = FulfillSort.init(), append_nonconforming_results : Bool = true, lock_to_integration : Bool = true,  onCompletion: @escaping (WhereToBuy) -> () = {_ in }, onFailure: @escaping (PreferabliException) -> () = {_ in }) {
-//        most_recent_variant.whereToBuy(fulfill_sort: fulfill_sort, append_nonconforming_results: append_nonconforming_results, lock_to_integration: lock_to_integration, onCompletion: onCompletion, onFailure: onFailure)
-//    }
-//
-//    /// See ``Preferabli/wishlistProduct(product_id:year:location:notes:price:quantity:format_ml:onCompletion:onFailure:)``.
-//    public func toggleWishlist(onCompletion : @escaping (Product) -> ()  = {_ in }, onFailure : @escaping (PreferabliException) -> () = {_ in }) {
-//        let tag = wishlist_tag
-//        var variant = most_recent_variant
-//        if (tag?.variant != nil) {
-//            variant = tag!.variant!
-//        }
-//        variant.toggleWishlist(onCompletion: onCompletion, onFailure: onFailure)
-//    }
-//
-//    /// See ``Preferabli/rateProduct(product_id:year:rating:location:notes:price:quantity:format_ml:onCompletion:onFailure:)``.
-//    public func rate(rating : RatingLevel, location : String? = nil, notes : String? = nil, price : Decimal? = nil, quantity : Int? = nil, format_ml : Int? = nil, onCompletion : @escaping (Product) -> () = {_ in }, onFailure : @escaping (PreferabliException) -> () = {_ in }) {
-//        most_recent_variant.rate(rating: rating, location: location, notes: notes, price: price, quantity: quantity, format_ml: format_ml, onCompletion: onCompletion, onFailure: onFailure)
-//    }
-//
-//    /// See ``Preferabli/lttt(product_id:year:collection_id:include_merchant_links:onCompletion:onFailure:)``.
-//    public func lttt(collection_id : Int = Preferabli.PRIMARY_INVENTORY_ID, onCompletion: @escaping ([Int]) -> () = {_ in }, onFailure: @escaping (PreferabliException) -> () = {_ in }) {
-//        most_recent_variant.lttt(collection_id: collection_id, onCompletion: onCompletion, onFailure: onFailure)
-//    }
-//
-//    /// See ``Preferabli/getPreferabliScore(product_id:year:onCompletion:onFailure:)``.
-//    public func getPreferabliScore(force_refresh : Bool = false, onCompletion : @escaping (PreferenceData) -> ()  = {_ in }, onFailure : @escaping (PreferabliException) -> () = {_ in }) {
-//        most_recent_variant.getPreferabliScore(force_refresh: force_refresh, onCompletion: onCompletion, onFailure: onFailure)
-//    }
+    
+    public static let tonePalette: [Color] = [
+        Color.init(hex: "F4F8FA"),
+    ]
+    
+    public var cardTone: Color {
+        // Check cache first, then self, then fallback
+        let v = ProductToneCache.shared.get(id)
+        if let v = v {
+            let ui = UIColor.unpackRGB(v).lightenedForCardTone(strength: 0.30)
+            return Color(uiColor: ui)
+        }
+        return Self.tonePalette[0] // Fallback
+    }
+    
+    /// Use this in SwiftUI
+    public var cardToneColor: Color? {
+        guard let v = cardToneRGB else { return nil }
+        // Use helper to unpack
+        let ui = UIColor.unpackRGB(v)
+        return Color(uiColor: ui)
+    }
+
+    /// Set from UIColor
+    @MainActor
+    public func setCardTone(from color: UIColor) {
+        // Use helper to pack
+        let v = color.packRGB()
+
+        // 1️⃣ Idempotency guard
+        if cardToneRGB == v { return }
+
+        // 2️⃣ Cache tone in memory for instant reuse
+        ProductToneCache.shared.set(id, v)
+
+        // 3️⃣ Only persist when user opens details or manually triggers save
+        // (No write here to keep scrolling smooth)
+        cardToneRGB = v
+    }
+
+    // Your original `flag` now returns the emoji
+    public var flag: URL? {
+        if let country_code = country_code {
+            return URL.init(string: "https://purecatamphetamine.github.io/country-flag-icons/3x2/" + country_code + ".svg")
+        } else {
+            return nil
+        }
+    }
 }
 
 /// The category of a ``Product``.
-public enum ProductCategory {
+public enum ProductCategory : Sendable, CaseIterable, Hashable {
     case WHISKEY
     case MEZCAL
+    case VODKA
+    case GIN
+    case RUM
+    case SAKE
+    case COCKTAIL
+    case CHEESE
     case BEER
     case WINE
-    case NONE
 
-    internal func getCategoryName() -> String {
+    public func getCategoryName() -> String {
         switch self {
         case .WHISKEY:
             return "whiskey"
@@ -368,12 +395,22 @@ public enum ProductCategory {
             return "beer"
         case .WINE:
             return "wine"
-        case .NONE:
-            return ""
+        case .CHEESE:
+            return "cheese"
+        case .VODKA:
+            return "vodka"
+        case .GIN:
+            return "gin"
+        case .RUM:
+            return "rum"
+        case .SAKE:
+            return "sake"
+        case .COCKTAIL:
+            return "cocktail"
         }
     }
 
-    static internal func getProductCategoryFromString(value : String?) -> ProductCategory {
+    static internal func getProductCategoryFromString(value : String?) -> ProductCategory? {
         if let value {
             switch value.lowercased() {
             case "whiskey":
@@ -384,25 +421,100 @@ public enum ProductCategory {
                 return .BEER
             case "wine":
                 return .WINE
+            case "cheese":
+                return .CHEESE
+            case "vodka":
+                return .VODKA
+            case "gin":
+                return .GIN
+            case "rum":
+                return .RUM
+            case "sake":
+                return .SAKE
+            case "cocktail":
+                return .COCKTAIL
             default:
-                return .NONE
+                return nil
             }
         }
-        return .NONE
+        return nil
     }
 }
 
+/// The subcategory of a ``Product``.
+public enum ProductSubcategory : Sendable, CaseIterable, Hashable {
+    case ALE
+    case LAGER
+    case GF
+    case NON_ALC_BEER
+    case CANNABIS
+    case ENERGY
+    case FLAVORED
+    case NON_ALC_BEVERAGE
+    case CIDER
+
+    public func getSubcategoryName() -> String {
+        switch self {
+        case .ALE:
+            return "ale"
+        case .LAGER:
+            return "lager"
+        case .GF:
+            return "gluten_free_beer"
+        case .NON_ALC_BEER:
+            return "non_alcoholic_beer"
+        case .CANNABIS:
+            return "cannabis_based_drink"
+        case .ENERGY:
+            return "energy_drink"
+        case .FLAVORED:
+            return "flavored_alcoholic_beverage"
+        case .NON_ALC_BEVERAGE:
+            return "non_alcoholic_beverage"
+        case .CIDER:
+            return "cider"
+        }
+    }
+
+    static internal func getProductSubcategoryFromString(value : String?) -> ProductSubcategory? {
+            if let value {
+                let lowercasedValue = value.lowercased()
+                switch lowercasedValue {
+                case "ale":
+                    return .ALE
+                case "lager":
+                    return .LAGER
+                case "gluten_free_beer":
+                    return .GF
+                case "non_alcoholic_beer":
+                    return .NON_ALC_BEER
+                case "canabis_based_drink":
+                    return .CANNABIS
+                case "energy_drink":
+                    return .ENERGY
+                case "flavored_alcoholic_beverage":
+                    return .FLAVORED
+                case "non_alcoholic_beverage":
+                    return .NON_ALC_BEVERAGE
+                case "cider":
+                    return .CIDER
+                default:
+                    return nil
+                }
+            }
+            return nil
+        }
+}
+
 /// The recognized type of a ``Product``.  At this time, non-wine products use the type ``ProductType/OTHER``.
-public enum ProductType {
+public enum ProductType : Sendable, CaseIterable, Hashable {
     case RED
     case WHITE
     case ROSE
     case SPARKLING
     case FORTIFIED
-    /// Use other if product is not a wine (e.g., a whiskey, mezcal/tequila, or beer).
-    case OTHER
 
-    internal func getTypeName() -> String {
+    public func getTypeName() -> String {
         switch self {
         case .RED:
             return "red"
@@ -414,34 +526,70 @@ public enum ProductType {
             return "sparkling"
         case .FORTIFIED:
             return "fortified"
-        case .OTHER:
-            return "other"
         }
     }
 
-    static internal func getProductTypeFromString(value : String?) -> ProductType {
+    static internal func getProductTypeFromString(value : String?) -> ProductType? {
         if let value {
             switch value.lowercased() {
             case "red":
                 return .RED
             case "white":
                 return .WHITE
-            case "rosé":
+            case "rosé", "rose":
                 return .ROSE
             case "fortified":
                 return .FORTIFIED
             case "sparkling":
                 return .SPARKLING
             default:
-                return .OTHER
+                return nil
             }
         }
-        return .OTHER
+        return nil
     }
 
     /// Is a specific product a wine?
     /// - Returns: true if the product type corresponds to a wine.
     public func isWine() -> Bool {
         return self == .RED || self == .WHITE || self == .ROSE || self == .SPARKLING || self == .FORTIFIED
+    }
+}
+
+public final class ProductToneCache: @unchecked Sendable {
+    public static let shared = ProductToneCache()
+
+    private let tones = NSCache<NSNumber, NSNumber>()            // productID → RGB
+    private var versions: [Int: Int] = [:]                      // non-published
+    private var subjects: [Int: CurrentValueSubject<Int, Never>] = [:]
+    private let lock = NSLock()                                  // guard maps (cheap)
+
+    public func get(_ id: Int) -> Int? {
+        tones.object(forKey: NSNumber(value: id))?.intValue
+    }
+
+    public func set(_ id: Int, _ rgb: Int) {
+        tones.setObject(NSNumber(value: rgb), forKey: NSNumber(value: id))
+        let v: Int = {
+            lock.lock(); defer { lock.unlock() }
+            let nv = (versions[id] ?? 0) &+ 1
+            versions[id] = nv
+            subjects[id]?.send(nv)                               // notify only this id
+            return nv
+        }()
+        _ = v // keep if you want to use it
+    }
+
+    public func version(for id: Int) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        return versions[id] ?? 0
+    }
+
+    public func publisher(for id: Int) -> AnyPublisher<Int, Never> {
+        lock.lock(); defer { lock.unlock() }
+        if let s = subjects[id] { return s.eraseToAnyPublisher() }
+        let s = CurrentValueSubject<Int, Never>(versions[id] ?? 0)
+        subjects[id] = s
+        return s.eraseToAnyPublisher()
     }
 }

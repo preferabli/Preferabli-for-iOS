@@ -6,12 +6,12 @@ import SwiftData
 @Model
 public final class CollectionGroup: HasIntID, HasTimestamps {
     @Attribute(.unique) public var id: Int
-    public var created_at: Date?
-    public var updated_at: Date?
+    public var created_at: Date = Foundation.Date.now
+    public var updated_at: Date = Foundation.Date.now
     public var name: String?
     public var order: Int?
     public var orderings_count: Int?
-    @Relationship(deleteRule: .nullify) public var orderings: [CollectionOrder] = []
+    @Relationship(deleteRule: .cascade, inverse: \CollectionOrder.group) public var orderings: [CollectionOrder] = []
     @Relationship(deleteRule: .nullify) public var version: CollectionVersion?
     
     public init(id: Int) { self.id = id }
@@ -32,5 +32,9 @@ public final class CollectionGroup: HasIntID, HasTimestamps {
         return groups.sorted {
             ($0.order ?? Int.max) < ($1.order ?? Int.max)
         }
+    }
+    
+    public static func predicate(forID id: Int) -> Predicate<CollectionGroup> {
+        #Predicate<CollectionGroup> { $0.id == id }
     }
 }

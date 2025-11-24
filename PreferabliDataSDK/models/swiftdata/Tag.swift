@@ -17,11 +17,12 @@ import SwiftData
 
 /// Chronicles a user's interaction with a ``Product``. Is one of a type ``TagType``.
 @Model
-public final class Tag: HasIntID, HasTimestamps {
+public final class Tag: HasIntID, HasTimestamps, HasTombstone {
+    
     @Attribute(.unique) public var id: Int
-    public var created_at: Date?
-    public var updated_at: Date?
-    public var collection_id: Int?
+    public var created_at: Date = Foundation.Date.now
+    public var updated_at: Date = Foundation.Date.now
+    public var collection_id: Int
     public var comment: String?
     public var location: String?
     public var badge: String?
@@ -32,90 +33,81 @@ public final class Tag: HasIntID, HasTimestamps {
     public var user_id: Int?
     public var value: String?
     public var bin: String?
-    public var variant_id: Int?
-    public var product_id: Int?
+    public var variant_id: Int
+    public var product_id: Int
     public var quantity: Int?
     public var format_ml: Int?
     public var price: Decimal?
     public var customer_id: Int?
-
-    @Relationship(deleteRule: .nullify) public var variant: Variant?
+    
+    // relationships
+    @Relationship(deleteRule: .nullify) public var variant: Variant {
+        didSet {
+            updateSearchableContent()
+        }
+    }
     @Relationship(deleteRule: .nullify) public var orderings: [CollectionOrder] = []
-
+    
+    // local only
+    public var isTombstoned: Bool = false
+    public var searchableContent: String = ""
+    
     // MARK: - Init (SwiftData)
-    public init(id: Int) { self.id = id }
-
-    public init(
-        collection_id: Int? = nil,
-        comment: String? = nil,
-        created_at: Date? = nil,
-        id: Int,
-        location: String? = nil,
-        badge: String? = nil,
-        tagged_in_collection_id: Int? = nil,
-        tagged_in_channel_id: Int? = nil,
-        tagged_in_channel_name: String? = nil,
-        type: String? = nil,
-        updated_at: Date? = nil,
-        user_id: Int? = nil,
-        value: String? = nil,
-        bin: String? = nil,
-        variant_id: Int? = nil,
-        product_id: Int? = nil,
-        quantity: Int? = nil,
-        format_ml: Int? = nil,
-        price: Decimal? = nil,
-        customer_id: Int? = nil,
-        temp_image_id: Int? = nil,
-        variant: Variant? = nil,
-        orderings: [CollectionOrder] = []
-    ) {
-        self.collection_id = collection_id
-        self.comment = comment
-        self.created_at = created_at
+    public init(id: Int, collection_id: Int, variant: Variant) {
         self.id = id
-        self.location = location
-        self.badge = badge
-        self.tagged_in_collection_id = tagged_in_collection_id
-        self.tagged_in_channel_id = tagged_in_channel_id
-        self.tagged_in_channel_name = tagged_in_channel_name
-        self.type = type
-        self.updated_at = updated_at
-        self.user_id = user_id
-        self.value = value
-        self.bin = bin
-        self.variant_id = variant_id
-        self.product_id = product_id
-        self.quantity = quantity
-        self.format_ml = format_ml
-        self.price = price
-        self.customer_id = customer_id
+        self.collection_id = collection_id
         self.variant = variant
-        self.orderings = orderings
+        self.variant_id = variant.id
+        self.product_id = variant.product.id
+        updateSearchableContent()
+    }
+    
+    internal func updateSearchableContent() {
+        let product = variant.product
+        
+        let name = product.name ?? ""
+        let brand = product.brand ?? ""
+        let grape = product.grape ?? ""
+        let region = product.region ?? ""
+        let category = product.category ?? ""
+        let subcategory = product.subcategory ?? ""
+        let type = product.type ?? ""
+        let year = String(variant.year)
+
+        self.searchableContent = "\(name) \(brand) \(grape) \(region) \(category) \(subcategory) \(type) \(year)".lowercased()
     }
     
     // Lets us know is the Tag is a Rating or not
     public func isRating() -> Bool {
         return tag_type == .RATING
     }
-
+    
+    // Lets us know is the Tag is a Wishlist or not
+    public func isWishlist() -> Bool {
+        return tag_type == .WISHLIST
+    }
+    
+    public static func predicate(forID id: Int) -> Predicate<Tag> {
+        #Predicate<Tag> { $0.id == id }
+    }
+    
     /// The type of the tag.
     public var tag_type : TagType {
         return TagType.getTagTypeBasedOffDatabaseName(value: type)
     }
-
+    
     /// The rating level of the tag. Only for tags of type ``TagType/RATING``.
     public var rating_level : RatingLevel {
         return RatingLevel.getRatingLevelBasedOffTagValue(value: value)
     }
-
+    
     /// Sort tags by date.
     /// - Parameter tags: an array of tags to be sorted.
     /// - Returns: a sorted array of tags.
-    static public func sortTagsByDate(tags : [Tag]) -> [Tag] {
-        return tags.sorted { $0.getCreatedAt().compare($1.getCreatedAt()) == .orderedDescending }
+    static public func sortTagsByDate(tags : [Tag], comparisonResult : ComparisonResult = .orderedDescending) -> [Tag] {
+        return tags.sorted { $0.getCreatedAt().compare($1.getCreatedAt()) == comparisonResult }
     }
-
+    
     /// Gets the formmated version of ``price``.
     /// - Parameter currency_code: code of the currency you would like to use for formatting.
     /// - Returns: a currency formatted price.
@@ -128,20 +120,57 @@ public final class Tag: HasIntID, HasTimestamps {
         let number = NSDecimalNumber(decimal: price)
         return formatter.string(from: number) ?? ""
     }
+    
+    public func getFormat() -> ServingFormat {
+        return ServingFormat.getServingFormatFromML(value: format_ml)
+    }
+    
+    public func hasPrice() -> Bool {
+        return price != nil && price != 0
+    }
+    
+    public func hasFormat() -> Bool {
+        return format_ml != nil && format_ml != 0
+    }
 }
 
-// MARK: - API action passthroughs (unchanged semantics)
-//extension Tag {
-//    /// See ``Preferabli/deleteTag(tag_id:onCompletion:onFailure:)``.
-//    public func delete(onCompletion : @escaping (Int) -> ()  = {_ in }, onFailure : @escaping (PreferabliException) -> () = {_ in }) {
-//        Preferabli.main.deleteTag(tag_id: id, onCompletion: onCompletion, onFailure: onFailure)
-//    }
-//
-//    /// See ``Preferabli/editTag(tag_id:tag_type:year:rating:location:notes:price:quantity:format_ml:onCompletion:onFailure:)``.
-//    public func edit(year : Int, rating : RatingLevel = .NONE, location : String? = nil, notes : String? = nil, price : Decimal? = nil, quantity : Int? = nil, format_ml : Int? = nil, onCompletion : @escaping (Int) -> () = {_ in }, onFailure : @escaping (PreferabliException) -> () = {_ in }) {
-//        Preferabli.main.editTag(tag_id: id, tag_type: tag_type, year: year, rating: rating, location: location, notes: notes, price: price, quantity: quantity, format_ml: format_ml, onCompletion: onCompletion, onFailure: onFailure)
-//    }
-//}
+/// The size of a ServingFormat as identified by a ``Tag``.
+public enum ServingFormat : String, CaseIterable, Identifiable {
+    
+    public var id: String { rawValue }
+
+    case GLASS
+    case HALF_BOTTLE
+    case BOTTLE
+    case LARGE_FORMAT
+    case NONE
+    
+    static public func getServingFormatFromML(value : Int?) -> ServingFormat {
+        guard let value = value, value != 0 else {
+            return .NONE
+        }
+        
+        if (value < 350) {
+            return .GLASS
+        } else if (value >= 350 && value < 600) {
+            return .HALF_BOTTLE
+        } else if (value >= 600 && value < 1000) {
+            return .BOTTLE
+        } else {
+            return .LARGE_FORMAT
+        }
+    }
+    
+    public func getFormatML() -> Int? {
+        switch self {
+        case .GLASS:       return 150
+        case .HALF_BOTTLE:  return 375
+        case .BOTTLE:      return 750
+        case .LARGE_FORMAT: return 1500
+        case .NONE:        return nil
+        }
+    }
+}
 
 /// The degree of appeal for a product as identified by a ``Tag``.
 public enum RatingLevel {
@@ -155,7 +184,7 @@ public enum RatingLevel {
     case DISLIKE
     /// Not a valid rating.
     case NONE
-
+    
     static internal func getRatingLevelBasedOffTagValue(value : String?) -> RatingLevel {
         if let value {
             switch value {
@@ -175,30 +204,30 @@ public enum RatingLevel {
         }
         return .NONE
     }
-
+    
     internal func getValue() -> String {
         switch self {
         case .LOVE:    return "4"
         case .LIKE:    return "3"
         case .SOSO:    return "2"
         case .DISLIKE: return "1"
-        case .NONE:    return "0"
+        case .NONE:    return ""
         }
     }
-
+    
     public func compare(_ other: RatingLevel) -> ComparisonResult {
         return self.getValue().caseInsensitiveCompare(other.getValue())
     }
 }
 
 /// Type of a ``Tag``. Tags may can contain different information depending on it's type.
-public enum TagType {
+public enum TagType: Sendable {
     case RATING
     case CELLAR
     case PURCHASE
     case WISHLIST
     case OTHER
-
+    
     static internal func getTagTypeBasedOffDatabaseName(value : String?) -> TagType {
         if let value {
             switch value {
@@ -211,8 +240,8 @@ public enum TagType {
         }
         return .OTHER
     }
-
-    internal func getDatabaseName() -> String {
+    
+    public func getDatabaseName() -> String {
         switch self {
         case .RATING:   return "rating"
         case .CELLAR:   return "collection"
@@ -221,7 +250,7 @@ public enum TagType {
         case .OTHER:    return "other"
         }
     }
-
+    
     public func compare(_ other: TagType) -> ComparisonResult {
         return self.getDatabaseName().caseInsensitiveCompare(other.getDatabaseName())
     }

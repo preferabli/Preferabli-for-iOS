@@ -6,8 +6,8 @@ import SwiftData
 @Model
 public final class CollectionTrait: HasIntID, HasTimestamps {
     @Attribute(.unique) public var id: Int
-    public var created_at: Date?
-    public var updated_at: Date?
+    public var created_at: Date = Foundation.Date.now
+    public var updated_at: Date = Foundation.Date.now
     public var name: String?
     public var order: Int?
     public var restrict_to_ring_it: Bool?
@@ -21,5 +21,9 @@ public final class CollectionTrait: HasIntID, HasTimestamps {
         self.order = order
         self.restrict_to_ring_it = restrict_to_ring_it
         self.collection = collection
+    }
+    
+    public static func predicate(forID id: Int) -> Predicate<CollectionTrait> {
+        #Predicate<CollectionTrait> { $0.id == id }
     }
 }

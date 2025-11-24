@@ -4,10 +4,11 @@ import SwiftData
 
 /// A logged in Preferabli user. Most SDK installations will never use this.
 @Model
-public final class PreferabliUser : HasIntID, HasTimestamps {
+public final class PreferabliUser : HasIntID, HasTimestamps, HasImage {
+    
     @Attribute(.unique) public var id: Int
-    public var created_at: Date?
-    public var updated_at: Date?
+    public var created_at: Date = Foundation.Date.now
+    public var updated_at: Date = Foundation.Date.now
     public var country: String?
     public var display_name: String?
     public var email: String?
@@ -55,7 +56,16 @@ public final class PreferabliUser : HasIntID, HasTimestamps {
     ///   - height: returns an image with the specified height in pixels.
     ///   - quality: returns an image with the specified quality. Scales from 0 - 100.
     /// - Returns: the URL of the requested image.
-    public func getAvatar(width : Float, height : Float, quality : Int = 80) -> URL? {
+    public func getImage(width : Int, height : Int, quality : Int = 80) -> URL? {
+        let path = avatar?.path
         return PreferabliTools.getImageUrl(image: avatar?.path, width: width, height: height, quality: quality)
+    }
+    
+    public func getPlaceholderImage() -> String? {
+        return nil
+    }
+    
+    public static func predicate(forID id: Int) -> Predicate<PreferabliUser> {
+        #Predicate<PreferabliUser> { $0.id == id }
     }
 }

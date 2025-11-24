@@ -17,6 +17,16 @@ extension NSAttributedString {
 
 extension String {
     
+    public var flagEmoji: String {
+        let upper = self.uppercased()
+        guard upper.count == 2, upper.unicodeScalars.allSatisfy({ ("A"..."Z").contains(Character($0)) }) else {
+            return "🏳️" // fallback
+        }
+        let base: UInt32 = 127397 // 127462 ("🇦") - 65 ("A")
+        let scalars = upper.unicodeScalars.compactMap { UnicodeScalar(base + $0.value) }
+        return String(String.UnicodeScalarView(scalars))
+    }
+    
     func index(at offset: Int) -> String.Index {
         index(startIndex, offsetBy: offset)
       }
@@ -75,6 +85,10 @@ extension String {
         }
         
         return x!.caseInsensitiveCompare(y!) == comparisonResult
+    }
+    
+    public func localizedOrSelf(table: String? = nil, bundle: Bundle = .main) -> String {
+        bundle.localizedString(forKey: self, value: self, table: table)
     }
 }
 

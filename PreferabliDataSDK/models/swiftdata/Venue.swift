@@ -22,8 +22,8 @@ import SwiftData
 @Model
 public final class Venue: HasIntID, HasTimestamps {
     @Attribute(.unique) public var id: Int
-    public var created_at: Date?
-    public var updated_at: Date?
+    public var created_at: Date = Foundation.Date.now
+    public var updated_at: Date = Foundation.Date.now
     public var address_l1: String?
     public var address_l2: String?
     public var city: String?
@@ -50,9 +50,9 @@ public final class Venue: HasIntID, HasTimestamps {
 
     // MARK: - Relationships
     @Relationship(deleteRule: .nullify) public var collections: [Collection] = []
-    @Relationship(deleteRule: .nullify) public var active_delivery_methods: [DeliveryMethod] = []
-    @Relationship(deleteRule: .nullify) public var images: [Media] = []
-    @Relationship(deleteRule: .nullify) public var hours: [VenueHour] = []
+    @Relationship(deleteRule: .cascade, inverse: \DeliveryMethod.venue) public var active_delivery_methods: [DeliveryMethod] = []
+    @Relationship(deleteRule: .cascade) public var images: [Media] = []
+    @Relationship(deleteRule: .cascade, inverse: \VenueHour.venue) public var hours: [VenueHour] = []
 
     // MARK: - Transient (non-persisted) properties
     /// All of the links in stock at this venue. Call Where to Buy to populate.
@@ -143,6 +143,10 @@ public final class Venue: HasIntID, HasTimestamps {
         var third = city.isEmptyOrWhitespace ? "" : (city! + ", ")
         third = third + (state ?? "") + " " + (zip_code ?? "") + (country.isEmptyOrWhitespace ? "" : (newLine + country!))
         return firstTwo + third
+    }
+    
+    public static func predicate(forID id: Int) -> Predicate<Venue> {
+        #Predicate<Venue> { $0.id == id }
     }
 
     /// Get the venue's city and state.

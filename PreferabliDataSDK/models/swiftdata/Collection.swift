@@ -27,8 +27,8 @@ import SwiftData
 @Model
 public final class Collection: HasIntID, HasTimestamps {
     @Attribute(.unique) public var id: Int
-    public var created_at: Date?
-    public var updated_at: Date?
+    public var created_at: Date = Foundation.Date.now
+    public var updated_at: Date = Foundation.Date.now
     public var channel_id: Int?
     public var sort_channel_id: Int?
     public var code: String?
@@ -62,94 +62,13 @@ public final class Collection: HasIntID, HasTimestamps {
 
     // MARK: - Relationships
     @Relationship(deleteRule: .nullify) public var primary_image: Media?
-    @Relationship(deleteRule: .nullify) public var venue: Venue?
-    @Relationship(deleteRule: .nullify, inverse: \CollectionVersion.collection) public var versions: [CollectionVersion] = []
+    @Relationship(deleteRule: .nullify, inverse: \Venue.collections) public var venue: Venue?
+    @Relationship(deleteRule: .cascade, inverse: \CollectionVersion.collection) public var versions: [CollectionVersion] = []
     @Relationship(deleteRule: .nullify, inverse: \CollectionTrait.collection) public var traits: [CollectionTrait] = []
     @Relationship(deleteRule: .nullify) public var user_collections: [UserCollection] = []
-
+    
     // MARK: - Init
     public init(id: Int) { self.id = id }
-
-    public init(
-        channel_id: Int? = nil,
-        sort_channel_id: Int? = nil,
-        code: String? = nil,
-        desc: String? = nil,
-        end_date: Date? = nil,
-        updated_at: Date? = nil,
-        auto_wili: Bool? = nil,
-        has_image: Bool? = nil,
-        is_pinned: Bool? = nil,
-        display_time: Bool? = nil,
-        is_browsable: Bool? = nil,
-        is_my_cellar: Bool? = nil,
-        lbs_order: Int? = nil,
-        product_count: Int? = nil,
-        id: Int,
-        name: String? = nil,
-        badge_method: String? = nil,
-        currency: String? = nil,
-        timezone: String? = nil,
-        published: Bool? = nil,
-        archived: Bool? = nil,
-        display_price: Bool? = nil,
-        display_quantity: Bool? = nil,
-        display_bin: Bool? = nil,
-        has_predict_order: Bool? = nil,
-        is_randomized: Bool? = nil,
-        display_group_headings: Bool? = nil,
-        is_blind: Bool? = nil,
-        start_date: Date? = nil,
-        created_at: Date? = nil,
-        venue_id: Int? = nil,
-        sort_channel_name: String? = nil,
-        order: Int? = nil,
-        location_based_recs: Bool? = nil,
-        primary_image: Media? = nil,
-        venue: Venue? = nil,
-        versions: [CollectionVersion] = [],
-        traits: [CollectionTrait] = [],
-        user_collections: [UserCollection] = []
-    ) {
-        self.channel_id = channel_id
-        self.sort_channel_id = sort_channel_id
-        self.code = code
-        self.desc = desc
-        self.end_date = end_date
-        self.updated_at = updated_at
-        self.auto_wili = auto_wili
-        self.has_image = has_image
-        self.is_pinned = is_pinned
-        self.display_time = display_time
-        self.is_browsable = is_browsable
-        self.is_my_cellar = is_my_cellar
-        self.lbs_order = lbs_order
-        self.product_count = product_count
-        self.id = id
-        self.name = name
-        self.badge_method = badge_method
-        self.currency = currency
-        self.timezone = timezone
-        self.published = published
-        self.archived = archived
-        self.display_price = display_price
-        self.display_quantity = display_quantity
-        self.display_bin = display_bin
-        self.has_predict_order = has_predict_order
-        self.is_randomized = is_randomized
-        self.display_group_headings = display_group_headings
-        self.is_blind = is_blind
-        self.start_date = start_date
-        self.created_at = created_at
-        self.venue_id = venue_id
-        self.sort_channel_name = sort_channel_name
-        self.location_based_recs = location_based_recs
-        self.primary_image = primary_image
-        self.venue = venue
-        self.versions = versions
-        self.traits = traits
-        self.user_collections = user_collections
-    }
 
     // MARK: - Legacy helpers (ported)
 
@@ -159,7 +78,7 @@ public final class Collection: HasIntID, HasTimestamps {
     ///   - height: returns an image with the specified height in pixels.
     ///   - quality: returns an image with the specified quality. Scales from 0 - 100.
     /// - Returns: the URL of the requested image.
-    public func getImage(width : Float, height : Float, quality : Int = 80) -> URL? {
+    public func getImage(width : Int, height : Int, quality : Int = 80) -> URL? {
         return PreferabliTools.getImageUrl(image: primary_image?.path, width: width, height: height, quality: quality)
     }
 
@@ -167,6 +86,10 @@ public final class Collection: HasIntID, HasTimestamps {
     /// - Returns: the start date - or nil if it does not exist.
     public func getStartDate() -> Date? {
         return start_date
+    }
+    
+    public static func predicate(forID id: Int) -> Predicate<Collection> {
+        #Predicate<Collection> { $0.id == id }
     }
 
     /// Get the last updated date of the collection.

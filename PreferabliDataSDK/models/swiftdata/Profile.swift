@@ -6,8 +6,8 @@ import SwiftData
 @Model
 public final class Profile: HasIntID, HasTimestamps {
     @Attribute(.unique) public var id: Int
-    public var created_at: Date?
-    public var updated_at: Date?
+    public var created_at: Date = Foundation.Date.now
+    public var updated_at: Date = Foundation.Date.now
     public var user_id: Int?
     public var customer_id: Int?
     
@@ -15,8 +15,7 @@ public final class Profile: HasIntID, HasTimestamps {
     internal var score: Int?
     
     // Relationships
-    @Relationship(deleteRule: .nullify) public var profile_styles: [ProfileStyle] = []
-
+    @Relationship(deleteRule: .cascade, inverse: \ProfileStyle.profile) public var profile_styles: [ProfileStyle] = []
     public init(id: Int) { self.id = id }
 
     init(id: Int, user_id: Int? = nil, customer_id: Int? = nil, score: Int? = nil, profile_styles: [ProfileStyle] = []) {
@@ -25,5 +24,9 @@ public final class Profile: HasIntID, HasTimestamps {
         self.customer_id = customer_id
         self.score = score
         self.profile_styles = profile_styles
+    }
+    
+    public static func predicate(forID id: Int) -> Predicate<Profile> {
+        #Predicate<Profile> { $0.id == id }
     }
 }

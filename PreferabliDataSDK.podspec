@@ -17,5 +17,5 @@ Pod::Spec.new do |spec|
   spec.dependency 'Alamofire'
   spec.dependency 'Mixpanel-swift'
   spec.exclude_files = "PreferabliDataSDK/Pods/**/*.{h,m,swift},PreferabliDataSDKDemo/**/*.{h,m,swift}"
-  spec.swift_version = "5.0"
+  spec.swift_version = "6.0"
 end

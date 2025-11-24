@@ -5,9 +5,10 @@ import SwiftData
 /// A logged in merchant customer.
 @Model
 public final class Customer: HasIntID, HasTimestamps {
+    
     @Attribute(.unique) public var id: Int
-    public var created_at: Date?
-    public var updated_at: Date?
+    public var created_at: Date = Foundation.Date.now
+    public var updated_at: Date = Foundation.Date.now
     var avatar_url: String?
     var merchant_user_email_address: String?
     var merchant_user_id: String?
@@ -54,13 +55,17 @@ public final class Customer: HasIntID, HasTimestamps {
         return ""
     }
     
+    public static func predicate(forID id: Int) -> Predicate<Customer> {
+        #Predicate<Customer> { $0.id == id }
+    }
+    
     /// Get the customer's  avatar.
     /// - Parameters:
     ///   - width: returns an image with the specified width in pixels.
     ///   - height: returns an image with the specified height in pixels.
     ///   - quality: returns an image with the specified quality. Scales from 0 - 100.
     /// - Returns: the URL of the requested image.
-    public func getAvatar(width : Float, height : Float, quality : Int = 80) -> URL? {
+    public func getAvatar(width : Int, height : Int, quality : Int = 80) -> URL? {
         return PreferabliTools.getImageUrl(image: avatar_url, width: width, height: height, quality: quality)
     }
 }

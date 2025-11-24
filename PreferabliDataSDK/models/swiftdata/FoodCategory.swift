@@ -4,20 +4,23 @@ import SwiftData
 
 @Model
 internal final class FoodCategory: HasIntID, HasTimestamps {
+    
     @Attribute(.unique) public var id: Int
-    public var created_at: Date?
-    public var updated_at: Date?
-    var name: String?
-    var icon_url: String?
-    @Relationship(deleteRule: .nullify) var styles: [Style] = []
-
+    public var created_at: Date = Foundation.Date.now
+    public var updated_at: Date = Foundation.Date.now
+    public var name: String?
+    public var icon_url: String?
+    
     public init(id: Int) { self.id = id }
 
-    init(id: Int, name: String, icon_url: String? = nil, styles: [Style] = []) {
+    init(id: Int, name: String, icon_url: String? = nil) {
         self.id = id
         self.name = name
         self.icon_url = icon_url
-        self.styles = styles
+    }
+    
+    public static func predicate(forID id: Int) -> Predicate<FoodCategory> {
+        #Predicate<FoodCategory> { $0.id == id }
     }
     
     static internal func sortFoodCats(foodCats: [FoodCategory]) -> Array<FoodCategory> {

@@ -5,15 +5,19 @@ import SwiftData
 /// Indicates that a ``Venue`` provides a specified delivery method (``ShippingType``).
 @Model
 public final class DeliveryMethod: HasIntID, HasTimestamps {
+    
     @Attribute(.unique) public var id: Int
-    public var created_at: Date?
-    public var updated_at: Date?
+    public var created_at: Date = Foundation.Date.now
+    public var updated_at: Date = Foundation.Date.now
     public var shipping_type: String?
     public var state_abbreviation: String?
     public var state_display_name: String?
     public var country: String?
     public var shipping_cost_note: String?
     public var shipping_speed_note: String?
+    
+    // relationships
+    @Relationship(deleteRule: .nullify) public var venue: Venue?
 
     public init(id: Int) { self.id = id }
 
@@ -38,5 +42,9 @@ public final class DeliveryMethod: HasIntID, HasTimestamps {
     /// Shipping Type of this fulfillment method.
     public var type : ShippingType {
         ShippingType.getShippingTypeBasedOffDatabaseName(value: shipping_type)
+    }
+    
+    public static func predicate(forID id: Int) -> Predicate<DeliveryMethod> {
+        #Predicate<DeliveryMethod> { $0.id == id }
     }
 }

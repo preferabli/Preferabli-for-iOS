@@ -6,12 +6,15 @@ import SwiftData
 @Model
 public final class VenueHour: HasIntID, HasTimestamps {
     @Attribute(.unique) public var id: Int
-    public var created_at: Date?
-    public var updated_at: Date?
+    public var created_at: Date = Foundation.Date.now
+    public var updated_at: Date = Foundation.Date.now
     public var weekday: String?
     public var open_time: String?
     public var close_time: String?
     public var is_closed: Bool?
+    
+    // relationships
+    @Relationship(deleteRule: .nullify) public var venue: Venue?
 
     public init(id: Int) { self.id = id }
 
@@ -31,5 +34,9 @@ public final class VenueHour: HasIntID, HasTimestamps {
 
     public var day_of_week : Weekday {
         Weekday.getWeekdayFromString(weekday: weekday)
+    }
+    
+    public static func predicate(forID id: Int) -> Predicate<VenueHour> {
+        #Predicate<VenueHour> { $0.id == id }
     }
 }

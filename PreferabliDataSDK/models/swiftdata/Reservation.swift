@@ -10,9 +10,10 @@ import SwiftData
 
 @Model
 final class Reservation: HasIntID, HasTimestamps {
+    
     @Attribute(.unique) var id: Int
-    public var created_at: Date?
-    public var updated_at: Date?
+    public var created_at: Date = Foundation.Date.now
+    public var updated_at: Date = Foundation.Date.now
     public var region: String?
     public var date: Date?
     public var title: String?
@@ -23,4 +24,8 @@ final class Reservation: HasIntID, HasTimestamps {
 
     // Convenience (non-persisted)
     var imageURL: URL? { imageURLString.flatMap(URL.init(string:)) }
+    
+    public static func predicate(forID id: Int) -> Predicate<Reservation> {
+        #Predicate<Reservation> { $0.id == id }
+    }
 }
