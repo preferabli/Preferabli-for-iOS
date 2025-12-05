@@ -11,17 +11,13 @@ public final class CollectionGroup: HasIntID, HasTimestamps {
     public var name: String?
     public var order: Int?
     public var orderings_count: Int?
-    @Relationship(deleteRule: .cascade, inverse: \CollectionOrder.group) public var orderings: [CollectionOrder] = []
-    @Relationship(deleteRule: .nullify) public var version: CollectionVersion?
     
-    public init(id: Int) { self.id = id }
-
-    public init(id: Int, name: String? = nil, order: Int? = nil, orderings_count: Int? = nil, orderings: [CollectionOrder] = [], version: CollectionVersion? = nil) {
+    // relationships
+    @Relationship(deleteRule: .cascade, inverse: \CollectionOrder.group) public var orderings: [CollectionOrder] = []
+    @Relationship(deleteRule: .nullify) public var version: CollectionVersion
+    
+    public init(id: Int, version : CollectionVersion) {
         self.id = id
-        self.name = name
-        self.order = order
-        self.orderings_count = orderings_count
-        self.orderings = orderings
         self.version = version
     }
 

@@ -46,7 +46,7 @@ public final class Tag: HasIntID, HasTimestamps, HasTombstone {
             updateSearchableContent()
         }
     }
-    @Relationship(deleteRule: .nullify) public var orderings: [CollectionOrder] = []
+    @Relationship(deleteRule: .cascade) public var orderings: [CollectionOrder] = []
     
     // local only
     public var isTombstoned: Bool = false
@@ -92,7 +92,7 @@ public final class Tag: HasIntID, HasTimestamps, HasTombstone {
     }
     
     /// The type of the tag.
-    public var tag_type : TagType {
+    public var tag_type : TagType? {
         return TagType.getTagTypeBasedOffDatabaseName(value: type)
     }
     
@@ -223,31 +223,33 @@ public enum RatingLevel {
 /// Type of a ``Tag``. Tags may can contain different information depending on it's type.
 public enum TagType: Sendable {
     case RATING
-    case CELLAR
+    case COLLECTION
     case PURCHASE
     case WISHLIST
-    case OTHER
+    case SKIPPED
     
-    static internal func getTagTypeBasedOffDatabaseName(value : String?) -> TagType {
+    static internal func getTagTypeBasedOffDatabaseName(value : String?) -> TagType? {
         if let value {
             switch value {
             case "rating":    return .RATING
-            case "collection":return .CELLAR
+            case "collection":return .COLLECTION
             case "purchase":  return .PURCHASE
             case "wishlist":  return .WISHLIST
-            default:          return .OTHER
+            case "skipped":  return .SKIPPED
+            default: return nil
             }
         }
-        return .OTHER
+        
+        return nil
     }
     
     public func getDatabaseName() -> String {
         switch self {
         case .RATING:   return "rating"
-        case .CELLAR:   return "collection"
+        case .COLLECTION:   return "collection"
         case .PURCHASE: return "purchase"
         case .WISHLIST: return "wishlist"
-        case .OTHER:    return "other"
+        case .SKIPPED: return "skipped"
         }
     }
     

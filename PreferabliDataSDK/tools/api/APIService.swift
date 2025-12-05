@@ -305,6 +305,7 @@ internal struct APIEndpoints {
     internal static let magicLink = baseUrl + "sessions/magic-link"
     internal static let preferenceData = baseUrl + "wili"
     internal static let qrCode = "https://api.qr-code-generator.com/v1/create?access-token=" + SDKConfig.qrKey
+    internal static let jumpstartCollection = baseUrl + "jumpstart-collection"
     
     internal static func integration(id: Int) -> String { baseUrl + "integrations/\(id)" }
     internal static func lookupConversion(id: Int) -> String { baseUrl + "integrations/\(id)/lookups" }

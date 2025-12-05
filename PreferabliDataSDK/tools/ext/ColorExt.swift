@@ -64,7 +64,7 @@ extension UIColor {
     }
 
     /// Keep only `strength` of the original color power, mix the rest with white.
-    public func lightenedForCardTone(strength: CGFloat = 0.30) -> UIColor {
+    public func lightenedForCardTone(strength: CGFloat = 0.15) -> UIColor {
         return mixed(with: .white, amount: 1 - strength)
     }
     

@@ -34,7 +34,8 @@ public class Preferabli {
     internal let hasBeenInitialized : Bool
     
     internal var startupThreadRunning = false
-    
+    internal lazy var profileHelper = ProfileHelper(preferabli: self)
+
     /// The primary inventory id of your integration.
     public nonisolated static var PRIMARY_INVENTORY_ID : Int {
         Storage.getKeyStore().integer(forKey: "PRIMARY_INVENTORY_ID")
@@ -51,9 +52,7 @@ public class Preferabli {
     public nonisolated static var USER_ID : Int {
         Storage.getKeyStore().integer(forKey: "user_id")
     }
-    
-    private var profileFetches = [Int: Task<Int, Error>]()
-    
+        
     private init(logging_enabled : Bool = false) {
         self.api = APIService()
         self.loggingEnabled = logging_enabled
@@ -148,6 +147,7 @@ public class Preferabli {
     private func loadUserData() {
         if (Preferabli.isPreferabliUserLoggedIn() || Preferabli.isCustomerLoggedIn()) {
             Task.detached(priority: .background) {
+                try await self.getProfile()
                 await CollectionLoader.shared.ensureWarm(BuiltInCollection.ratings)
                 await CollectionLoader.shared.ensureWarm(BuiltInCollection.wishlist)
             }
@@ -208,6 +208,10 @@ public class Preferabli {
         let email = Storage.getKeyStore().string(forKey: "email")
         let userId = PreferabliTools.getPreferabliUserId()
         return accessToken != nil && userId != 0 && !email.isEmptyOrWhitespace
+    }
+    
+    static nonisolated public func userHasTasteProfile() -> Bool {
+        return Storage.getKeyStore().object(forKey: "lastCalledProfile") != nil
     }
     
     /// Will let you know if a customer is logged in or not.
@@ -562,63 +566,59 @@ public class Preferabli {
     //            handleError(error: error, onFailure: onFailure)
     //        }
     //    }
-    //
-    //    /// Performs label recognition on a supplied image. Returns any ``Product`` matches.
-    //    /// - Parameters:
-    //    ///   - image: label image you want to search for.
-    //    ///   - include_merchant_links: pass true if you want the results to include an array of ``MerchantProductLink`` embedded in ``Variant``. These connect Preferabli products to your own. Passing true requires additional resources and therefore will take longer. Defaults to *true*.
-    //    ///   - onCompletion: returns ``Media``, \[``LabelRecResult``\] if the call was successful. *Returns on the main thread.*
-    //    ///   - onFailure: returns ``PreferabliException``  if the call fails. *Returns on the main thread.*
-    //    public func labelRecognition(image : UIImage, include_merchant_links: Bool = true, onCompletion: @escaping (Media, [LabelRecResult]) -> () = {_,_  in }, onFailure: @escaping (PreferabliException) -> () = {_ in }) {
-    //        PreferabliTools.startNewAsyncWorkThread(priority: .veryHigh, {
-    //            self.labelRecognitionActual(image: image, include_merchant_links: include_merchant_links, onCompletion: onCompletion, onFailure: onFailure)
-    //        })
-    //    }
-    //
-    //    private func labelRecognitionActual(
-    //        image : UIImage,
-    //        include_merchant_links: Bool,
-    //        onCompletion: @escaping (Media, [LabelRecResult]) -> (),
-    //        onFailure: @escaping (PreferabliException) -> ()
-    //    ) async {
-    //        do {
-    //            try await canWeContinue(needsToBeLoggedIn: false)
-    //            Analytics.track( ["event" : "label_rec"])
-    //
-    //            let resizedImage = PreferabliTools.resizeImage(image: image, newDimension: 1000)!
-    //            let imageData = resizedImage.jpegData(compressionQuality: 0.60)!
-    //
-    //            var mediaResponse = try Preferabli.api.getAlamo().syncUpload(url: APIEndpoints.postMedia, data: imageData)
-    //            mediaResponse = try await APIService.continueOrThrowPreferabliException(response: mediaResponse)
-    //            let imageDictionary = try APIService.continueOrThrowJSONException(data: mediaResponse.data!)
-    //
-    //            let ctx = await Preferabli.storage.newContext()
-    //            let media = try Storage.upsertMedia(from: imageDictionary, in: ctx)
-    //
-    //            var imageRecResponse = try Preferabli.api.getAlamo().get(APIEndpoints.imageRec, params: ["media_id" : media.id])
-    //            imageRecResponse = try await APIService.continueOrThrowPreferabliException(response: imageRecResponse)
-    //            let imageRecDictionaries = try APIService.continueOrThrowJSONException(data: imageRecResponse.data!) as! [[String : Any]]
-    //
-    //            var results = [LabelRecResult]()
-    //            var products = [Product]()
-    //            for rec in imageRecDictionaries {
-    //                let p = try Storage.upsertProduct(from: rec["product"] as! [String : Any], in: ctx)
-    //                products.append(p)
-    //                results.append(LabelRecResult(score: rec["score"] as! NSNumber, product: p))
-    //            }
-    //            try ctx.save()
-    //
-    //            if include_merchant_links {
-    //                try await addMerchantDataToProducts(products: products)
-    //            }
-    //
-    //            DispatchQueue.main.async { onCompletion(media, results) }
-    //
-    //        } catch {
-    //            handleError(error: error, onFailure: onFailure)
-    //        }
-    //    }
-    //
+    
+    /// Performs label recognition on a supplied image. Returns matches as an array of ``Product`` ids.
+    /// - Parameters:
+    ///   - image: label image you want to search for.
+    public func labelRecognition(image: Data) async throws -> (ids: [Int], bestMatchID: Int?) {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "label_rec"])
+
+            // 1. Upload and Get Results
+            let mediaResponse: MediaDTO = try await api.getAlamo().upload(APIEndpoints.postMedia, data: image)
+            let imageRecResponse: [LabelRecResultDTO] = try await api.getAlamo().get(APIEndpoints.imageRec, sparams: ["media_id": mediaResponse.id])
+            
+            // 2. Sort by Score (Descending) to simplify logic
+            let sortedResults = imageRecResponse.sorted { $0.score > $1.score }
+            
+            // 3. Identify "Best Match" based on rules
+            var bestMatchID: Int? = nil
+            if let first = sortedResults.first, first.score > 70 {
+                if sortedResults.count == 1 {
+                    // Only one result and high confidence -> Winner
+                    bestMatchID = first.product.id
+                } else {
+                    // Check if the gap to the runner-up is significant (> 20)
+                    let second = sortedResults[1]
+                    if (first.score - second.score) > 20 {
+                        bestMatchID = first.product.id
+                    }
+                }
+            }
+
+            // 4. Persist Products and Collect IDs
+            let productIds = try Storage.withContext { ctx in
+                var productsToReturn = [Int]()
+                
+                // Upsert in sorted order to maintain relevance
+                for imageRec in sortedResults {
+                    let p = try Storage.upsertProduct(from: imageRec.product, in: ctx)
+                    productsToReturn.append(p.id)
+                }
+                try ctx.save()
+                return productsToReturn
+            }
+            
+            // 5. Return both the list and the optional winner
+            return (ids: productIds, bestMatchID: bestMatchID)
+
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
 
     /// Search for a ``Product``.
     /// - Parameters:
@@ -657,32 +657,6 @@ public class Preferabli {
                     for t in product_types { types.append(t.getTypeName()) }
                     if !types.isEmpty { dictionary["product_types"] = types }
                 }
-                
-                try Storage.withContext { ctx in
-                    let predicate = #Predicate<Search> { $0.text == query }
-                    var descriptor = FetchDescriptor<Search>(predicate: predicate)
-                    descriptor.fetchLimit = 1
-                    
-                    let searchRecord: Search
-                    
-                    if let existing = try ctx.fetch(descriptor).first {
-                        searchRecord = existing
-                    } else {
-                        let new = Search(
-                            count: 0,
-                            last_searched: Date(),
-                            text: query
-                        )
-                        ctx.insert(new)
-                        searchRecord = new
-                    }
-                    
-                    searchRecord.count += 1
-                    searchRecord.last_searched = Date()
-                    
-                    try ctx.save()
-                }
-
     
                 var searchResponse : SearchResponseDTO = try await api.getAlamo().get(APIEndpoints.search, sparams: dictionary)
 
@@ -705,6 +679,41 @@ public class Preferabli {
                 throw error
             }
         }
+    
+    public func saveSearch(query : String) throws {
+        if (query.isEmptyOrWhitespace()) {
+            return
+        }
+        do {
+        try Storage.withContext { ctx in
+            let predicate = #Predicate<Search> { $0.text == query }
+            var descriptor = FetchDescriptor<Search>(predicate: predicate)
+            descriptor.fetchLimit = 1
+            
+            let searchRecord: Search
+            
+            if let existing = try ctx.fetch(descriptor).first {
+                searchRecord = existing
+            } else {
+                let new = Search(
+                    count: 0,
+                    last_searched: Date(),
+                    text: query
+                )
+                ctx.insert(new)
+                searchRecord = new
+            }
+            
+            searchRecord.count += 1
+            searchRecord.last_searched = Date()
+            
+            try ctx.save()
+        }
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
     
     
     
@@ -921,162 +930,141 @@ public class Preferabli {
     //        Storage.getKeyStore().set(true,   forKey: "hasLoaded" + (tag_type ?? "AllCustomerTags"))
     //    }
     //
-    //    /// Get all the questions and choices needed to run a Guided Rec. Present the questions to the user, then pass the answers to ``Preferabli/getGuidedRecResults(guided_rec_id:selected_choice_ids:price_min:price_max:collection_id:include_merchant_links:onCompletion:onFailure:)`` to get results.
-    //    /// - Parameters:
-    //    ///   - guided_rec_id: id of the Guided Rec you wish to run. See ``GuidedRec`` for all the default Guided Rec options. Defaults to ``GuidedRec/WINE_DEFAULT``.
-    //    ///   - onCompletion: returns ``GuidedRec`` if the call was successful. *Returns on the main thread.*
-    //    ///   - onFailure: returns ``PreferabliException``  if the call fails. *Returns on the main thread.*
-    //    public func getGuidedRec(guided_rec_id: Int = GuidedRec.WINE_DEFAULT, onCompletion: @escaping (GuidedRec) -> () = {_ in }, onFailure: @escaping (PreferabliException) -> () = {_ in }) {
-    //        PreferabliTools.startNewAsyncWorkThread(priority: .veryHigh, {
-    //            self.getGuidedRecActual(guided_rec_id: guided_rec_id, onCompletion: onCompletion, onFailure: onFailure)
-    //        })
-    //    }
-    //
-    //    private func getGuidedRecActual(guided_rec_id: Int, onCompletion: @escaping (GuidedRec) -> (), onFailure: @escaping (PreferabliException) -> ()) async {
-    //        do {
-    //            try await canWeContinue(needsToBeLoggedIn: false)
-    //
-    //            Analytics.track( ["event" : "get_guided_rec"])
-    //
-    //            var instantRecResponse = try Preferabli.api.getAlamo().get(APIEndpoints.guidedRec(id: guided_rec_id))
-    //            instantRecResponse = try await APIService.continueOrThrowPreferabliException(response: instantRecResponse)
-    //            let dictionary = try APIService.continueOrThrowJSONException(data: instantRecResponse.data!) as! [String : Any]
-    //            let quiz = GuidedRec(map: dictionary)
-    //
-    //            DispatchQueue.main.async {
-    //                onCompletion(quiz)
-    //            }
-    //
-    //        } catch {
-    //            handleError(error: error, onFailure: onFailure)
-    //        }
-    //    }
-    //
-    //    /// Get Guided Rec results based on the selected ``GuidedRecChoice``.
-    //    /// - Parameters:
-    //    ///   - guided_rec_id: id of the Guided Rec you wish to run.
-    //    ///   - selected_choice_ids: an array of selected ``GuidedRecChoice`` ids.
-    //    ///   - price_min: pass if you want to lock results to a minimum price. Defaults to *nil*.
-    //    ///   - price_max: pass if you want to lock results to a maximum price. Defaults to *nil*.
-    //    ///   - collection_id: the id of a specific ``Collection`` that you want to draw results from. Defaults to ``PRIMARY_INVENTORY_ID``. Pass *nil* for results from anywhere.
-    //    ///   - include_merchant_links: pass true if you want the results to include an array of ``MerchantProductLink`` embedded in ``Variant``. These connect Preferabli products to your own. Passing true requires additional resources and therefore will take longer. Defaults to *true*.
-    //    ///   - onCompletion: returns an array of ``Product`` if the call was successful. *Returns on the main thread.*
-    //    ///   - onFailure: returns ``PreferabliException``  if the call fails. *Returns on the main thread.*
-    //    public func getGuidedRecResults(guided_rec_id: Int, selected_choice_ids : Array<Int>, price_min : Int? = nil, price_max : Int? = nil, collection_id : Int? = Preferabli.PRIMARY_INVENTORY_ID, include_merchant_links: Bool = true, onCompletion: @escaping ([Int]) -> () = {_ in }, onFailure: @escaping (PreferabliException) -> () = {_ in }) {
-    //        PreferabliTools.startNewAsyncWorkThread(priority: .veryHigh, {
-    //            await self.getGuidedRecResultsActual(guided_rec_id: guided_rec_id, selected_choice_ids: selected_choice_ids, price_min: price_min, price_max: price_max, collection_id: collection_id, include_merchant_links: include_merchant_links, onCompletion: onCompletion, onFailure: onFailure)
-    //        })
-    //    }
-    //
-    //    private func getGuidedRecResultsActual(
-    //        guided_rec_id: Int,
-    //        selected_choice_ids : Array<Int>,
-    //        price_min : Int?,
-    //        price_max : Int?,
-    //        collection_id : Int?,
-    //        include_merchant_links: Bool,
-    //        onCompletion: @escaping ([Int]) -> (),
-    //        onFailure: @escaping (PreferabliException) -> ()
-    //    ) async {
-    //        do {
-    //            try await canWeContinue(needsToBeLoggedIn: false)
-    //            Analytics.track( ["event" : "get_guided_rec_results"])
-    //
-    //            var payload: [String : Any] = [
-    //                "limit": 8,
-    //                "sort_by": "preference",
-    //                "questionnaire_id": guided_rec_id,
-    //                "offset": 0,
-    //                "questionnaire_choice_ids": selected_choice_ids
-    //            ]
-    //            var filters = [[String: Any]]()
-    //            if let price_min { filters.append(["key":"price_min","value":price_min]) }
-    //            if let price_max { filters.append(["key":"price_max","value":price_max]) }
-    //            payload["filters"] = filters
-    //
-    //            var recResponse = try Preferabli.api.getAlamo().post(
-    //                collection_id == nil ? APIEndpoints.guidedRecResults() : APIEndpoints.guidedRecResults(id: collection_id!),
-    //                json: payload
-    //            )
-    //            recResponse = try await APIService.continueOrThrowPreferabliException(response: recResponse)
-    //            let recDictionary = try APIService.continueOrThrowJSONException(data: recResponse.data!) as! [String : Any]
-    //
-    //            // Gather variant_ids and prediction map
-    //            var variantIds = [Int]()
-    //            var predictedByVariant = [Int: Int]() // variant_id -> formatted_predict_rating
-    //            if let types = recDictionary["types"] as? [[String: Any]] {
-    //                for type in types {
-    //                    if let results = type["results"] as? [[String: Any]] {
-    //                        for r in results {
-    //                            if let vid = (r["variant_id"] as? NSNumber)?.intValue {
-    //                                variantIds.append(vid)
-    //                                if let wili = r["formatted_predict_rating"] as? Int {
-    //                                    predictedByVariant[vid] = wili
-    //                                }
-    //                            }
-    //                        }
-    //                    }
-    //                }
-    //            }
-    //
-    //            // Pull products for these variants, then upsert to SwiftData
-    //            var getProductsResponse = try Preferabli.api.getAlamo().get(APIEndpoints.products, params: ["variant_ids" : variantIds])
-    //            getProductsResponse = try await APIService.continueOrThrowPreferabliException(response: getProductsResponse)
-    //            let productDictionaries = try APIService.continueOrThrowJSONException(data: getProductsResponse.data!) as! [[String : Any]]
-    //
-    //            var productsToReturn = [Product]()
-    //            var productIds = [Int]()
-    //
-    //            try await Storage.withContext { ctx in
-    //                for pd in productDictionaries {
-    //                    let p = try Storage.upsertProduct(from: pd, in: ctx)
-    //
-    //                    // Attach prediction per matching variant
-    //                    for v in p.variants {
-    //                        if let pr = predictedByVariant[v.id] {
-    //                            v.preference_data = PreferenceData(
-    //                                title: nil, details: nil, confidence_code: nil, formatted_predict_rating: pr
-    //                            )
-    //                        }
-    //                    }
-    //                    productsToReturn.append(p)
-    //                }
-    //
-    //                try ctx.save()
-    //            }
-    //
-    ////            if include_merchant_links {
-    ////                try await addMerchantDataToProducts(products: productsToReturn)
-    ////            }
-    //
-    //            await MainActor.run { onCompletion(productIds) }
-    //
-    //        } catch {
-    //            handleError(error: error, onFailure: onFailure)
-    //        }
-    //    }
+        /// Get all the questions and choices needed to run a Guided Rec. Present the questions to the user, then pass the answers to ``Preferabli/getGuidedRecResults(guided_rec_id:selected_choice_ids:price_min:price_max:collection_id:include_merchant_links:onCompletion:onFailure:)`` to get results.
+        /// - Parameters:
+        ///   - guided_rec_id: id of the Guided Rec you wish to run. See ``GuidedRec`` for all the default Guided Rec options. Defaults to ``GuidedRec/WINE_DEFAULT``.
+    public func getGuidedRec(guided_rec_id: Int = GuidedRecQuizDTO.WINE_DEFAULT) async throws -> GuidedRecQuizDTO {
+            do {
+                try await canWeContinue(needsToBeLoggedIn: false)
     
-    //            // --- 3) Merchant links (network OFF-main, apply ON-main) ---
-    //            if include_merchant_links, !variantIDs.isEmpty {
-    //                let linksByVariant = try await fetchMerchantLinks(for: Array(variantIDs))
-    //
-    //                try await Storage.withContext { ctx in
-    //                    // Fetch the variants we need by id and apply links
-    //                    let ids = Array(variantIDs)
-    //                    var fd = FetchDescriptor<Variant>(
-    //                        predicate: #Predicate<Variant> { ids.contains($0.id) }
-    //                    )
-    //                    let variants = try ctx.fetch(fd)
-    //                    for v in variants {
-    //                        if let links = linksByVariant[v.id] {
-    //                            v.merchant_links = links
-    //                        }
-    //                    }
-    //                    try ctx.save()
-    //                }
-    //            }
+                Analytics.track( ["event" : "get_guided_rec"])
     
+                let guidedRecQuiz : GuidedRecQuizDTO = try await api.getAlamo().get(APIEndpoints.guidedRec(id: guided_rec_id))
+                return guidedRecQuiz
     
+            } catch {
+                handleError(error: error)
+                throw error
+            }
+        }
+    
+        /// Get Guided Rec results based on the selected ``GuidedRecChoice``.
+        /// - Parameters:
+        ///   - guided_rec_id: id of the Guided Rec you wish to run.
+        ///   - selected_choice_ids: an array of selected ``GuidedRecChoice`` ids.
+        ///   - price_min: pass if you want to lock results to a minimum price. Defaults to *nil*.
+        ///   - price_max: pass if you want to lock results to a maximum price. Defaults to *nil*.
+        ///   - collection_id: the id of a specific ``Collection`` that you want to draw results from. Defaults to ``PRIMARY_INVENTORY_ID``. Pass *nil* for results from anywhere.
+    public func getGuidedRecResults(
+        guided_rec_id: Int,
+        selected_choice_ids: [Int],
+        price_min: Int? = nil,
+        price_max: Int? = nil,
+        collection_id: Int? = Preferabli.PRIMARY_INVENTORY_ID
+    ) async throws -> [Int] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event" : "get_guided_rec_results"])
+
+            var payload: SParams = [
+                "limit": 8,
+                "sort_by": "preference",
+                "questionnaire_id": guided_rec_id,
+                "offset": 0,
+                "questionnaire_choice_ids": selected_choice_ids
+            ]
+
+            var filters = [SParams]()
+            if let price_min { filters.append(["key": "price_min", "value": price_min]) }
+            if let price_max { filters.append(["key": "price_max", "value": price_max]) }
+            payload["filters"] = filters
+
+            var recResponse: GuidedRecResponseDTO = try await api
+                .getAlamo()
+                .post(
+                    collection_id == nil
+                        ? APIEndpoints.guidedRecResults()
+                        : APIEndpoints.guidedRecResults(id: collection_id!),
+                    sjson: payload
+                )
+
+            // 1) Gather variant_ids + predicted rating map
+            var variantIds = [Int]()
+            var predictedByVariant = [Int: Int]() // variant_id -> formatted_predict_rating
+
+            for type in recResponse.types {
+                for r in type.results {
+                    if let vid = r.variant_id {
+                        variantIds.append(vid)
+                        if let wili = r.formatted_predict_rating {
+                            predictedByVariant[vid] = wili
+                        }
+                    }
+                }
+            }
+
+            guard !variantIds.isEmpty else { return [] }
+
+            // 2) Figure out which variants are missing (on main context)
+            let missingVariantIds: [Int] = try Storage.withContext { ctx in
+                try Storage.missingVariantIds(from: variantIds, in: ctx)
+            }
+
+            // 3) Fetch products only for missing variants
+            let productDTOs: [ProductDTO]
+            if missingVariantIds.isEmpty {
+                productDTOs = []
+            } else {
+                productDTOs = try await api.getAlamo().get(
+                    APIEndpoints.products,
+                    sparams: ["variant_ids": missingVariantIds]
+                )
+            }
+
+            // 4) Upsert missing products + attach preference data for *all* variants
+            //    and build ordered productIds (by variant order).
+            let productIds: [Int] = try Storage.withContext { ctx in
+                // 4a) Upsert missing products
+                for pd in productDTOs {
+                    _ = try Storage.upsertProduct(from: pd, in: ctx)
+                }
+
+                // 4b) For each variant in original order, attach preference_data
+                //     and collect product.id (deduped, in rec order)
+                var ids: [Int] = []
+                var seen = Set<Int>()
+
+                for vid in variantIds {
+                    guard let variant = try Storage.fetchById(Variant.self, id: vid, in: ctx) else {
+                        continue
+                    }
+                    let product = variant.product
+
+                    if let rating = predictedByVariant[vid] {
+                        let preferenceDataDTO = PreferenceDataDTO(
+                            formatted_predict_rating: rating
+                        )
+                        try Storage.upsertPreferenceData(from: preferenceDataDTO, for: product, in: ctx)
+                    }
+
+                    if !seen.contains(product.id) {
+                        seen.insert(product.id)
+                        ids.append(product.id)
+                    }
+                }
+
+                try ctx.save()
+                return ids
+            }
+
+            return productIds
+
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
     /// Get a Similar Tasting Products recommendation. Start with a ``Product``, get similar tasting results. This function will return personalized results if a user is logged in.
     /// - Parameters:
     ///   - product_id: id of the starting ``Product``.  Only pass a Preferabli product id. If necessary, call ``Preferabli/getPreferabliProductId(merchant_product_id:merchant_variant_id:onCompletion:onFailure:)`` to convert your product id into a Preferabli product id.
@@ -1114,7 +1102,6 @@ public class Preferabli {
                 
                 for item in body.results {
                     let product = try Storage.upsertProduct(from: item.product, in: ctx)
-                    let preference_data = PreferenceData(product: product)
                     
                     if let rating = item.formatted_predict_rating {
                         let preferenceDataDTO = PreferenceDataDTO(formatted_predict_rating: rating)
@@ -1463,138 +1450,19 @@ public class Preferabli {
     //            handleError(error: error, onFailure: onFailure)
     //        }
     //    }
-    //
-    //    /// Get the Preference Profile of the customer. Customer must be logged in to run this call.
-    //    /// - Parameters:
-    //    ///   - force_refresh: pass true if you want to force a refresh from the API and wait for the results to return. Otherwise, the call will load locally if available and run a background refresh only if one has not been initiated in the past 5 minutes. Defaults to *false*.
-    //    ///   - onCompletion: returns ``Profile`` if the call was successful. *Returns on the main thread.*
-    //    ///   - onFailure: returns ``PreferabliException``  if the call fails. *Returns on the main thread.*
-    //    public func getProfile(force_refresh : Bool = false, onCompletion: @escaping (Int) -> () = {_ in }, onFailure: @escaping (PreferabliException) -> () = {_ in }) {
-    //        PreferabliTools.startNewAsyncWorkThread(priority: .veryHigh, {
-    //            await self.getProfileActual(force_refresh: force_refresh, onCompletion: onCompletion, onFailure: onFailure)
-    //        })
-    //    }
-    //
-    //    private func getProfileActual(
-    //        force_refresh: Bool = false,
-    //        onCompletion: @escaping (Int) -> () = { _ in },
-    //        onFailure: @escaping (PreferabliException) -> ()  = { _ in }
-    //    ) async {
-    //        do {
-    //            try await canWeContinue(needsToBeLoggedIn: true)
-    //            Analytics.track( ["event" : "get_profile"])
-    //
-    //            // Refresh now if needed
-    //            let ks = Storage.getKeyStore()
-    //            let hasLoaded = ks.bool(forKey: "hasLoadedProfile")
-    //            if force_refresh || !hasLoaded {
-    //                try await getProfileActual(force_refresh: force_refresh)
-    //            } else if PreferabliTools.hasMinutesPassed(minutes: 5, startDate: ks.object(forKey: "lastCalledProfile") as? Date) {
-    //                PreferabliTools.startNewAsyncWorkThread(priority: .low) {
-    //                    do {
-    //                        try await self.getProfileActual(force_refresh: false)
-    //                    } catch {
-    //                        if Preferabli.loggingEnabled { print(error) }
-    //                    }
-    //                }
-    //            }
-    //
-    //            var profileId : Int? = nil
-    //            try await Storage.withContext { ctx in
-    //                let lookingForCustomer = Preferabli.isCustomerLoggedIn()
-    //                let targetId = lookingForCustomer ? PreferabliTools.getCustomerId() : PreferabliTools.getPreferabliUserId()
-    //
-    //                let profile: Profile? = {
-    //                    if lookingForCustomer {
-    //                        var fd = FetchDescriptor<Profile>(predicate: #Predicate<Profile> { $0.customer_id == targetId })
-    //                        fd.fetchLimit = 1
-    //                        return try? ctx.fetch(fd).first
-    //                    } else {
-    //                        var fd = FetchDescriptor<Profile>(predicate: #Predicate<Profile> { $0.user_id == targetId })
-    //                        fd.fetchLimit = 1
-    //                        return try? ctx.fetch(fd).first
-    //                    }
-    //                }()
-    //
-    //                guard let profile else {
-    //                    throw PreferabliException(type: .DatabaseError)
-    //                }
-    //
-    //                profileId = profile.id
-    //            }
-    //
-    //            try await canWeContinue(needsToBeLoggedIn: true)
-    //
-    //            guard let idCopy = profileId else {
-    //                throw PreferabliException(type: .DatabaseError)
-    //            }
-    //
-    //            await MainActor.run {
-    //                onCompletion(idCopy)
-    //            }
-    //
-    //        } catch {
-    //            handleError(error: error, onFailure: onFailure)
-    //        }
-    //    }
-    //
-    //
-    //    private func getProfileActual(force_refresh: Bool) async throws {
-    //        // 1) Fetch JSON
-    //        var resp = try Preferabli.api.getAlamo().get(
-    //            Preferabli.isCustomerLoggedIn()
-    //            ? APIEndpoints.customerProfile(id: Preferabli.CHANNEL_ID, and: PreferabliTools.getCustomerId())
-    //            : APIEndpoints.profile(id: PreferabliTools.getPreferabliUserId())
-    //        )
-    //        resp = try await APIService.continueOrThrowPreferabliException(response: resp)
-    //        guard let profileJSON = try APIService.continueOrThrowJSONException(data: resp.data!) as? [String: Any]
-    //        else { throw PreferabliException(type: .MappingNotFound) }
-    //
-    //        // 2) Upsert profile + preference styles
-    //        try await Storage.withContext { ctx in
-    //            let profile = try Storage.upsertProfile(from: profileJSON, in: ctx)
-    //            profile.customer_id = PreferabliTools.getCustomerId()
-    //            profile.user_id     = PreferabliTools.getPreferabliUserId()
-    //
-    //            var styleIdsToFetch: [Int] = []
-    //            var prefMapByStyleId: [Int: ProfileStyle] = [:]
-    //
-    //            if let prefStyles = profileJSON["preference_styles"] as? [[String: Any]] {
-    //                for psJSON in prefStyles {
-    //                    let ps = try Storage.upsertProfileStyle(from: psJSON, in: ctx)
-    //                    ps.profile = profile
-    //                    if let sid = ps.style_id, sid != 0 {
-    //                        if force_refresh || ((try? Storage.fetchById(Style.self, id: sid, in: ctx)) == nil) {
-    //                            styleIdsToFetch.append(sid)
-    //                            prefMapByStyleId[sid] = ps
-    //                        } else if let s = try Storage.fetchById(Style.self, id: sid, in: ctx) {
-    //                            ps.style = s
-    //                        }
-    //                    }
-    //                }
-    //            }
-    //
-    //            // 3) Fetch any missing styles and wire them up
-    //            if !styleIdsToFetch.isEmpty {
-    //                var stylesResp = try Preferabli.api.getAlamo().get(APIEndpoints.styles,
-    //                                                                   params: ["style_ids": styleIdsToFetch])
-    //                stylesResp = try await APIService.continueOrThrowPreferabliException(response: stylesResp)
-    //                let styleArray = try APIService.continueOrThrowJSONException(data: stylesResp.data!) as! [[String: Any]]
-    //                for dict in styleArray {
-    //                    let style = try Storage.upsertStyle(from: dict, in: ctx)
-    //                    if let ps = prefMapByStyleId[style.id] {
-    //                        ps.style = style
-    //                    }
-    //                }
-    //            }
-    //
-    //            try ctx.save()
-    //            Storage.getKeyStore().set(Date(), forKey: "lastCalledProfile")
-    //            Storage.getKeyStore().setValue(true, forKey: "hasLoadedProfile")
-    //        }
-    //    }
     
-    
+        /// Get the Preference Profile of the customer. Customer must be logged in to run this call.
+        /// - Parameters:
+        ///   - force_refresh: pass true if you want to force a refresh from the API and wait for the results to return. Otherwise, the call will load locally if available and run a background refresh only if one has not been initiated in the past 5 minutes. Defaults to *false*.
+    /// Get the Preference Profile of the customer (or user).
+    /// This now delegates to ProfileHelper, which handles deduping and analytics.
+    public func getProfile(
+        force_refresh: Bool = false
+    ) async throws -> Int {
+        try await profileHelper.getProfile(force_refresh: force_refresh)
+    }
+
+
     
     //    /// Get a list of foods to choose from to be used in ``getRecs(product_category:product_type:collection_id:price_min:price_max:style_ids:food_ids:include_merchant_links:onCompletion:onFailure:)``.
     //    /// - Parameters:
@@ -1682,138 +1550,149 @@ public class Preferabli {
     //        ks.set(Date(), forKey: "lastCalledFoods")
     //        ks.setValue(true, forKey: "hasLoadedFoods")
     //    }
-    //
-    //
-    //    /// Get a personalized, preference based recommendation for a customer.
-    //    /// - Parameters:
-    //    ///   - product_category: pass a ``ProductCategory`` that you would like the results to conform to.
-    //    ///   - product_type: pass a ``ProductType`` that you would like the results to conform to. Pass ``ProductType/OTHER`` if ``ProductCategory`` is not set  to ``ProductCategory/WINE``. If ``ProductCategory/WINE`` is passed, a type of wine *must* be passed here.
-    //    ///   - collection_id: the id of a specific ``Collection`` that you want to draw results from. Defaults to ``PRIMARY_INVENTORY_ID``. Pass *nil* for results from anywhere.
-    //    ///   - price_min: pass if you want to lock results to a minimum price. Defaults to *nil*.
-    //    ///   - price_max: pass if you want to lock results to a maximum price. Defaults to *nil*.
-    //    ///   - style_ids: an array of ``Style`` ids that you want to constrain results to. Get available styles from ``getProfile(force_refresh:onCompletion:onFailure:)``. Defaults to *nil*.
-    //    ///   - food_ids: an array of ``Food`` ids that should pair with the recommendation. Get available foods from ``getFoods(force_refresh:onCompletion:onFailure:)`` Defaults to *nil*.
-    //    ///   - include_merchant_links: pass true if you want the results to include an array of ``MerchantProductLink`` embedded in ``Variant``. These connect Preferabli products to your own. Passing true requires additional resources and therefore will take longer. Defaults to *true*.
-    //    ///   - onCompletion: returns an optional message as a string along with an array of ``Product`` if the call was successful. *Returns on the main thread.*
-    //    ///   - onFailure: returns ``PreferabliException``  if the call fails. *Returns on the main thread.*
-    //    public func getRecs(product_category : ProductCategory, product_type : ProductType,  collection_id : Int = Preferabli.PRIMARY_INVENTORY_ID, price_min : Int? = nil, price_max : Int? = nil, style_ids : [Int]? = nil, food_ids : [Int]? = nil, include_merchant_links: Bool = true, onCompletion: @escaping (String?, [Product]) -> () = {_,_  in }, onFailure: @escaping (PreferabliException) -> () = {_ in }) {
-    //        PreferabliTools.startNewAsyncWorkThread(priority: .veryHigh, {
-    //            self.getRecsActual(product_category: product_category, product_type: product_type, price_min: price_min, price_max: price_max, collection_id: collection_id, style_ids: style_ids, food_ids: food_ids, include_merchant_links: include_merchant_links, onCompletion: onCompletion, onFailure: onFailure)
-    //        })
-    //    }
-    //
-    //    private func getRecsActual(
-    //        product_category: ProductCategory,
-    //        product_type: ProductType,
-    //        price_min: Int?,
-    //        price_max: Int?,
-    //        collection_id: Int,
-    //        style_ids: [Int]?,
-    //        food_ids: [Int]?,
-    //        include_merchant_links: Bool,
-    //        onCompletion: @escaping (String?, [Product]) -> (),
-    //        onFailure: @escaping (PreferabliException) -> ()
-    //    ) async {
-    //        do {
-    //            try await canWeContinue(needsToBeLoggedIn: true)
-    //            Analytics.track( ["event" : "get_recs"])
-    //
-    //            // Build constraints payload (same semantics as before)
-    //            var constraints = [[String: Any]]()
-    //
-    //            if Preferabli.isCustomerLoggedIn() {
-    //                constraints.append([
-    //                    "type"   : "channel_customer_ids",
-    //                    "values" : [PreferabliTools.getCustomerId()]
-    //                ])
-    //            } else {
-    //                constraints.append([
-    //                    "type"   : "user_ids",
-    //                    "values" : [PreferabliTools.getPreferabliUserId()]
-    //                ])
-    //            }
-    //
-    //            let typeName = (product_type != .OTHER) ? product_type.getTypeName() : product_category.getCategoryName()
-    //            constraints.append(["type": "collection_ids",      "values": [collection_id]])
-    //            constraints.append(["type": "types",               "values": [typeName]])
-    //            constraints.append(["type": "product_categories",  "values": [product_category.getCategoryName()]])
-    //            constraints.append(["type": "precedence",          "values": false])
-    //            constraints.append(["type": "single_style",        "values": false])
-    //            constraints.append(["type": "rated_wines",         "values": "ignore"])
-    //
-    //            if let style_ids, !style_ids.isEmpty {
-    //                constraints.append(["type": "style_ids", "values": style_ids])
-    //            }
-    //            if let food_ids, !food_ids.isEmpty {
-    //                constraints.append(["type": "food_ids", "values": food_ids])
-    //            }
-    //            if let price_min { constraints.append(["type": "price_min", "values": price_min]) }
-    //            if let price_max { constraints.append(["type": "price_max", "values": price_max]) }
-    //
-    //            let payload: [String: Any] = ["constraints": constraints]
-    //
-    //            // Call recommender
-    //            var recResponse = try Preferabli.api.getAlamo().post(APIEndpoints.getRec, json: payload)
-    //            recResponse = try await APIService.continueOrThrowPreferabliException(response: recResponse)
-    //            let recDictionary = try APIService.continueOrThrowJSONException(data: recResponse.data!) as! [String: Any]
-    //
-    //            let message = recDictionary["message"] as? String
-    //            let results  = recDictionary["results"] as? [[String: Any]] ?? []
-    //
-    //            // Collect variant ids and prediction metadata
-    //            var variantIds: [Int] = []
-    //            var predictByVariant: [Int: (rating: Int, code: Int)] = [:]
-    //            for r in results {
-    //                guard
-    //                    let vid = (r["variant_id"] as? NSNumber)?.intValue ?? r["variant_id"] as? Int
-    //                else { continue }
-    //                let wili = (r["formatted_predict_rating"] as? NSNumber)?.intValue ?? (r["formatted_predict_rating"] as? Int) ?? 0
-    //                let code = (r["confidence_code"] as? NSNumber)?.intValue ?? (r["confidence_code"] as? Int) ?? 0
-    //                variantIds.append(vid)
-    //                predictByVariant[vid] = (rating: wili, code: code)
-    //            }
-    //
-    //            var productsToReturn: [Product] = []
-    //            let ctx = await Preferabli.storage.newContext()
-    //
-    //            // Load products for those variants
-    //            if !variantIds.isEmpty {
-    //                var getProductsResponse = try Preferabli.api.getAlamo().get(APIEndpoints.products, params: ["variant_ids": variantIds])
-    //                getProductsResponse = try await APIService.continueOrThrowPreferabliException(response: getProductsResponse)
-    //                let productDictionaries = try APIService.continueOrThrowJSONException(data: getProductsResponse.data!) as! [[String: Any]]
-    //
-    //                // Upsert and attach preference data to matching variants
-    //                for pd in productDictionaries {
-    //                    let p = try Storage.upsertProduct(from: pd, in: ctx)
-    //
-    //                    for v in p.variants {
-    //                        if let meta = predictByVariant[v.id] {
-    //                            // Use your PreferenceData initializer signature
-    //                            v.preference_data = PreferenceData(confidence_code: meta.code, formatted_predict_rating: meta.rating)
-    //                        }
-    //                    }
-    //
-    //                    productsToReturn.append(p)
-    //                }
-    //            }
-    //
-    //            try ctx.save()
-    //
-    //            if include_merchant_links {
-    //                try await addMerchantDataToProducts(products: productsToReturn)
-    //            }
-    //
-    //            try await canWeContinue(needsToBeLoggedIn: true)
-    //
-    //            DispatchQueue.main.async {
-    //                onCompletion(message, productsToReturn)
-    //            }
-    //
-    //        } catch {
-    //            handleError(error: error, onFailure: onFailure)
-    //        }
-    //    }
-    //
+    
+    
+        /// Get a personalized, preference based recommendation for a customer.
+        /// - Parameters:
+        ///   - product_category: pass a ``ProductCategory`` that you would like the results to conform to.
+        ///   - product_type: pass a ``ProductType`` that you would like the results to conform to. Pass ``ProductType/OTHER`` if ``ProductCategory`` is not set  to ``ProductCategory/WINE``. If ``ProductCategory/WINE`` is passed, a type of wine *must* be passed here.
+        ///   - collection_id: the id of a specific ``Collection`` that you want to draw results from. Defaults to ``PRIMARY_INVENTORY_ID``. Pass *nil* for results from anywhere.
+        ///   - price_min: pass if you want to lock results to a minimum price. Defaults to *nil*.
+        ///   - price_max: pass if you want to lock results to a maximum price. Defaults to *nil*.
+        ///   - style_ids: an array of ``Style`` ids that you want to constrain results to. Get available styles from ``getProfile(force_refresh:onCompletion:onFailure:)``. Defaults to *nil*.
+    public func getRecommendations(
+        product_category: ProductCategory,
+        product_subcategory: ProductSubcategory?,
+        product_type: ProductType?,
+        price_min: Int?,
+        price_max: Int?,
+        collection_id: Int? = PRIMARY_INVENTORY_ID,
+        style_ids: [Int]?
+    ) async throws -> [Int] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            Analytics.track(["event" : "get_recs"])
+
+            // 1) Build constraints
+            var constraints = [SParams]()
+
+            if Preferabli.isCustomerLoggedIn() {
+                constraints.append([
+                    "type"   : "channel_customer_ids",
+                    "values" : [PreferabliTools.getCustomerId()]
+                ])
+            } else {
+                constraints.append([
+                    "type"   : "user_ids",
+                    "values" : [PreferabliTools.getPreferabliUserId()]
+                ])
+            }
+
+            constraints.append(["type": "collection_ids", "values": [collection_id]])
+            if let pt = product_type {
+                constraints.append(["type": "types", "values": [pt.getTypeName()]])
+            }
+    //      if let sc = product_subcategory {
+    //          constraints.append(["type": "product_subcategories", "values": [sc.getSubcategoryName()]])
+    //      }
+            constraints.append(["type": "product_categories", "values": [product_category.getCategoryName()]])
+            constraints.append(["type": "precedence",          "values": false])
+            constraints.append(["type": "single_style",        "values": true])
+            constraints.append(["type": "rated_wines",         "values": "ignore"])
+
+            if let style_ids, !style_ids.isEmpty {
+                constraints.append(["type": "style_ids", "values": style_ids])
+            }
+
+            if let price_min { constraints.append(["type": "price_min", "values": price_min]) }
+            if let price_max { constraints.append(["type": "price_max", "values": price_max]) }
+
+            let payload: SParams = ["constraints": constraints]
+
+            var recResponse: RecResponseDTO = try await api
+                .getAlamo()
+                .post(APIEndpoints.getRec, sjson: payload)
+
+            let message = recResponse.message
+            let results  = recResponse.results
+
+            // 2) Collect variant ids + prediction metadata
+            var variantIds: [Int] = []
+            var predictedByVariant: [Int: (rating: Int?, code: Int?)] = [:]
+
+            for r in results {
+                let wili = r.formatted_predict_rating
+                let code = r.confidence_code
+                variantIds.append(r.variant_id)
+                predictedByVariant[r.variant_id] = (rating: wili, code: code)
+            }
+
+            guard !variantIds.isEmpty else {
+                try await canWeContinue(needsToBeLoggedIn: true)
+                return []
+            }
+
+            // 3) Figure out missing variants on main context
+            let missingVariantIds: [Int] = try Storage.withContext { ctx in
+                try Storage.missingVariantIds(from: variantIds, in: ctx)
+            }
+
+            // 4) Fetch products only for missing variants
+            let productDTOs: [ProductDTO]
+            if missingVariantIds.isEmpty {
+                productDTOs = []
+            } else {
+                productDTOs = try await api.getAlamo().get(
+                    APIEndpoints.products,
+                    sparams: ["variant_ids": missingVariantIds]
+                )
+            }
+
+            // 5) Upsert missing products + attach PreferenceData for all variants,
+            //    and build ordered productIds.
+            let productIds: [Int] = try Storage.withContext { ctx in
+                // 5a) Upsert missing products
+                for pd in productDTOs {
+                    _ = try Storage.upsertProduct(from: pd, in: ctx)
+                }
+
+                // 5b) For each variant in original order, attach preference_data and collect product.id
+                var ids: [Int] = []
+                var seen = Set<Int>()
+
+                for vid in variantIds {
+                    guard let variant = try Storage.fetchById(Variant.self, id: vid, in: ctx) else {
+                        continue
+                    }
+                    let product = variant.product
+
+                    if let prediction = predictedByVariant[variant.id] {
+                        let preferenceDataDTO = PreferenceDataDTO(
+                            confidence_code: prediction.code,
+                            formatted_predict_rating: prediction.rating
+                        )
+                        try Storage.upsertPreferenceData(from: preferenceDataDTO, for: product, in: ctx)
+                    }
+
+                    if !seen.contains(product.id) {
+                        seen.insert(product.id)
+                        ids.append(product.id)
+                    }
+                }
+
+                try ctx.save()
+                return ids
+            }
+
+            try await canWeContinue(needsToBeLoggedIn: true)
+            return productIds
+
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
     //    private func addMerchantDataToProducts(products: [Product]) async throws {
     //        if (products.count == 0) {
     //            return
@@ -1958,7 +1837,7 @@ public class Preferabli {
         year: Int,
         collection_id: Int,
         value: String? = nil,
-        tag_type: TagType,
+        tag_type: TagType?,
         location: String? = nil,
         notes: String? = nil,
         price: Decimal? = nil,
@@ -1991,14 +1870,14 @@ public class Preferabli {
                     needsRefresh = true
                 }
                 
-                let tagDTO : TagDTO = TagDTO.init(id: tempTagId, collection_id: collection_id, comment: notes, created_at: Date.init(), location: location, badge: nil, tagged_in_collection_id: tagged_in_collection_id, tagged_in_channel_id: nil, tagged_in_channel_name: nil, type: tag_type.getDatabaseName(), updated_at: Date.init(), user_id: PreferabliTools.getPreferabliUserId(), value: value, bin: bin, variant_id: variant.id, quantity: quantity, format_ml: format_ml, price: price, customer_id: PreferabliTools.getCustomerId())
+                let tagDTO : TagDTO = TagDTO.init(id: tempTagId, collection_id: collection_id, comment: notes, created_at: Date.init(), location: location, badge: nil, tagged_in_collection_id: tagged_in_collection_id, tagged_in_channel_id: nil, tagged_in_channel_name: nil, type: tag_type?.getDatabaseName(), updated_at: Date.init(), user_id: PreferabliTools.getPreferabliUserId(), value: value, bin: bin, variant_id: variant.id, quantity: quantity, format_ml: format_ml, price: price, customer_id: PreferabliTools.getCustomerId())
                 let tag = try Storage.upsertTag(from: tagDTO, variant: variant, in: ctx)
                 product.updateCachedRelationships()
                 try ctx.save()
             }
             
             let payload: SParams = [
-                "type"         : tag_type.getDatabaseName(),
+                "type"         : tag_type?.getDatabaseName(),
                 "location"     : location,
                 "comment"      : notes,
                 "value"        : value,
@@ -2202,7 +2081,7 @@ public class Preferabli {
             quantity : Int? = nil,
             format_ml : Int? = nil,
         ) async throws {
-            let (product_id, collection_id, tag_type, value): (Int, Int, TagType, String?) =
+            let (product_id, collection_id, tag_type, value): (Int, Int, TagType?, String?) =
             try Storage.withContext { ctx in
                 guard let tag = try Storage.fetchById(Tag.self, id: tag_id, in: ctx) else {
                     throw PreferabliException.init(type: .BadSwiftData, message: "Tag not found.", code: 404)
@@ -2212,4 +2091,51 @@ public class Preferabli {
             
             try await createOrEditTagActual(tag_id: tag_id, product_id: product_id, year: year, collection_id: collection_id, value: value, tag_type: tag_type, location: location, notes: notes, price: price, quantity: quantity, format_ml: format_ml)
         }
+    
+    @discardableResult
+    public func ensureJumpstartCollection(force_refresh: Bool = false) async throws -> Int {
+        try await canWeContinue(needsToBeLoggedIn: false)
+        
+        let ks  = Storage.getKeyStore()
+        let key = BuiltInCollection.jumpstart.idKey
+        
+        var collectionID = ks.integer(forKey: key)
+        var needsFetch   = force_refresh || collectionID <= 0
+        
+        // If we have an id, make sure the Collection row actually exists.
+        if !needsFetch {
+            let exists = try Storage.withContext { ctx in
+                try Storage.fetchById(Collection.self, id: collectionID, in: ctx) != nil
+            }
+            if !exists {
+                needsFetch = true
+            }
+        }
+        
+        guard needsFetch else {
+            return collectionID
+        }
+        
+        Analytics.track(["event": "jumpstart_bootstrap"])
+        
+        // 1) Fetch Jumpstart collection from API
+        let dto: CollectionDTO = try await api
+            .getAlamo()
+            .get(APIEndpoints.jumpstartCollection)
+        
+        // 2) Upsert into SwiftData and grab the id
+        collectionID = try Storage.withContext { ctx in
+            let collection = try Storage.upsertCollection(from: dto, in: ctx)
+            try ctx.save()
+            return collection.id
+        }
+        
+        // 3) Persist id for future use
+        ks.set(collectionID, forKey: key)
+        
+        // If you still have an explicit ETag helper, wire it here:
+        // PreferabliTools.saveCollectionEtag(from: dto, collectionId: collectionID)
+        
+        return collectionID
+    }
 }

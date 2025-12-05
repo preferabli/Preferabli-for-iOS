@@ -257,31 +257,6 @@ internal class PreferabliTools {
         return symbol
     }
     
-    internal class func resizeImage(image: UIImage, newDimension: CGFloat) -> UIImage? {
-        var newHeight : CGFloat
-        var newWidth : CGFloat
-        
-        if (image.size.width <= newDimension && image.size.height <= newDimension) {
-            return image
-        } else if (image.size.width > image.size.height) {
-            newWidth = newDimension
-            let scale = newWidth / image.size.width
-            newHeight = image.size.height * scale
-        } else {
-            newHeight = newDimension
-            let scale = newHeight / image.size.height
-            newWidth = image.size.width * scale
-        }
-        
-        UIGraphicsBeginImageContext(CGSize(width: newWidth, height: newHeight))
-        image.draw(in: CGRect(x: 0, y: 0, width: newWidth, height: newHeight))
-        
-        let newImage = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        
-        return newImage
-    }
-    
     internal class func generateRandomLongId() -> Int {
         return -Int(arc4random() % 28147497)
     }

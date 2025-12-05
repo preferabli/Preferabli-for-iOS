@@ -9,14 +9,10 @@ import Foundation
 
 public struct CollectionOrderDTO: Decodable, Sendable {
     public let id: Int
-    public let tag_id: Int?
-    public let order: Int?
-    public let group_id: Int?
-    public let group: CollectionGroupRefDTO?
-    public let tag: TagRefDTO?
-
-    public struct CollectionGroupRefDTO: Decodable, Sendable { public let id: Int }
-    public struct TagRefDTO: Decodable, Sendable { public let id: Int }
+    public let tag_id: Int
+    public let order: Int
+    public let updated_at: Date?
+    public let created_at: Date?
 }
 
 public struct CollectionGroupDTO: Decodable, Sendable {
@@ -24,10 +20,9 @@ public struct CollectionGroupDTO: Decodable, Sendable {
     public let name: String?
     public let order: Int?
     public let orderings_count: Int?
-    public let version: CollectionVersionRefDTO?
     public let orderings: [CollectionOrderDTO]?
-
-    public struct CollectionVersionRefDTO: Decodable, Sendable { public let id: Int }
+    public let updated_at: Date?
+    public let created_at: Date?
 }
 
 public struct CollectionTraitDTO: Decodable, Sendable {
@@ -35,19 +30,17 @@ public struct CollectionTraitDTO: Decodable, Sendable {
     public let name: String?
     public let order: Int?
     public let restrict_to_ring_it: Bool?
-    public let collection: CollectionRefDTO?
-
-    public struct CollectionRefDTO: Decodable, Sendable { public let id: Int }
+    public let updated_at: Date?
+    public let created_at: Date?
 }
 
 public struct CollectionVersionDTO: Decodable, Sendable {
     public let id: Int
     public let name: String?
     public let order: Int?
-    public let collection: CollectionRefDTO?
     public let groups: [CollectionGroupDTO]?
-
-    public struct CollectionRefDTO: Decodable, Sendable { public let id: Int }
+    public let updated_at: Date?
+    public let created_at: Date?
 }
 
 public struct CollectionDTO: Decodable, Sendable {

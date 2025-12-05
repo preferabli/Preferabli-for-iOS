@@ -84,7 +84,7 @@ public final class Variant: HasIntID, HasTimestamps, HasTombstone {
     var cellar_tags: [Tag] {
         var collectionTags = [Tag]()
         for tag in tags {
-            if tag.tag_type == .CELLAR {
+            if tag.tag_type == .COLLECTION {
                 collectionTags.append(tag)
             }
         }

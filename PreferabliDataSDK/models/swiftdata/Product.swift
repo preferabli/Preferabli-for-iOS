@@ -102,7 +102,7 @@ public final class Product: HasIntID, HasTimestamps, HasImage {
         var cellarTags = [Tag]()
         for variant in variants {
             for tag in variant.tags {
-                if (tag.tag_type == .CELLAR) {
+                if (tag.tag_type == .COLLECTION) {
                     cellarTags.append(tag)
                 }
             }
@@ -331,7 +331,7 @@ extension Product {
         // Check cache first, then self, then fallback
         let v = ProductToneCache.shared.get(id)
         if let v = v {
-            let ui = UIColor.unpackRGB(v).lightenedForCardTone(strength: 0.30)
+            let ui = UIColor.unpackRGB(v).lightenedForCardTone()
             return Color(uiColor: ui)
         }
         return Self.tonePalette[0] // Fallback
@@ -373,7 +373,7 @@ extension Product {
 }
 
 /// The category of a ``Product``.
-public enum ProductCategory : Sendable, CaseIterable, Hashable {
+public enum ProductCategory : Identifiable, Sendable, CaseIterable, Hashable {
     case WHISKEY
     case MEZCAL
     case VODKA
@@ -384,6 +384,8 @@ public enum ProductCategory : Sendable, CaseIterable, Hashable {
     case CHEESE
     case BEER
     case WINE
+    
+    public var id: Self { self }
 
     public func getCategoryName() -> String {
         switch self {

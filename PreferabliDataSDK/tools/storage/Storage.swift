@@ -390,7 +390,7 @@ extension Storage {
                 try await Storage.withBackgroundContext(priority: .background) { ctx in
                     ctx.autosaveEnabled = false
                     ctx.author = "SearchReindexer"
-
+                    
                     try reindexTags(in: ctx, batchSize: batchSize, log: log)
                     
                     log("Completed search re-indexing for all Tags.")
@@ -400,7 +400,7 @@ extension Storage {
             }
         }
     }
-
+    
     /// Fetches all Tags in batches and updates their `searchableContent`.
     nonisolated private static func reindexTags(
         in ctx: ModelContext,
@@ -409,7 +409,7 @@ extension Storage {
     ) throws {
         var offset = 0
         var totalProcessed = 0
-
+        
         while true {
             var fd = FetchDescriptor<Tag>()
             fd.fetchOffset = offset
@@ -418,21 +418,47 @@ extension Storage {
             // Ensure we get relationships.
             // This is crucial for accessing product.name.
             fd.relationshipKeyPathsForPrefetching = [\Tag.variant, \Tag.variant.product]
-
+            
             let tagsToUpdate = try ctx.fetch(fd)
             if tagsToUpdate.isEmpty {
                 break // No more tags to process
             }
-
+            
             for tag in tagsToUpdate {
                 tag.updateSearchableContent()
             }
-
+            
             try ctx.save()
             
             offset += tagsToUpdate.count
             totalProcessed += tagsToUpdate.count
             log("Re-indexed batch of \(tagsToUpdate.count) tags (total: \(totalProcessed))")
         }
+    }
+}
+
+extension Storage {
+    /// Returns the subset of `candidateVariantIds` that are **not yet present** in SwiftData.
+    @discardableResult
+    nonisolated static func missingVariantIds(
+        from candidateVariantIds: [Int],
+        in ctx: ModelContext
+    ) throws -> [Int] {
+        guard !candidateVariantIds.isEmpty else { return [] }
+        
+        var fd = FetchDescriptor<Variant>(
+            predicate: #Predicate<Variant> { variant in
+                candidateVariantIds.contains(variant.id)
+            }
+        )
+        // We only care about the IDs
+        fd.propertiesToFetch = [\.id]
+        
+        let existing = try ctx.fetch(fd)
+        let existingIds = Set(existing.map { $0.id })
+        let allIds      = Set(candidateVariantIds)
+        let missing     = allIds.subtracting(existingIds)
+        
+        return Array(missing)
     }
 }

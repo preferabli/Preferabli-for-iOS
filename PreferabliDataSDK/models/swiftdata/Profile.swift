@@ -13,18 +13,24 @@ public final class Profile: HasIntID, HasTimestamps {
     
     /// A score that represents how developed a profile is.
     internal var score: Int?
+    internal var score_red: Int?
+    internal var score_white: Int?
+    internal var score_rose: Int?
+    internal var score_sparkling: Int?
+    internal var score_fortified: Int?
+    internal var score_whiskey: Int?
+    internal var score_tequila: Int?
+    internal var score_vodka: Int?
+    internal var score_gin: Int?
+    internal var score_rum: Int?
+    internal var score_sake: Int?
+    internal var score_cocktail: Int?
+    internal var score_beer: Int?
+    internal var score_cheese: Int?
     
     // Relationships
     @Relationship(deleteRule: .cascade, inverse: \ProfileStyle.profile) public var profile_styles: [ProfileStyle] = []
     public init(id: Int) { self.id = id }
-
-    init(id: Int, user_id: Int? = nil, customer_id: Int? = nil, score: Int? = nil, profile_styles: [ProfileStyle] = []) {
-        self.id = id
-        self.user_id = user_id
-        self.customer_id = customer_id
-        self.score = score
-        self.profile_styles = profile_styles
-    }
     
     public static func predicate(forID id: Int) -> Predicate<Profile> {
         #Predicate<Profile> { $0.id == id }

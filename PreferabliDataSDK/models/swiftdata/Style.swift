@@ -4,8 +4,8 @@ import SwiftData
 
 /// Styles express how product characteristics synthesize in the context of human perception and define the nature of consumer taste preferences. These are *not* unique for each customer, which are represented as ``ProfileStyle``.
 @Model
-public final class Style: HasIntID, HasTimestamps {
-    
+public final class Style: HasIntID, HasTimestamps, HasImage {
+
     @Attribute(.unique) public var id: Int
     public var created_at: Date = Foundation.Date.now
     public var updated_at: Date = Foundation.Date.now
@@ -41,6 +41,10 @@ public final class Style: HasIntID, HasTimestamps {
         return PreferabliTools.getImageUrl(image: primary_image_url, width: width, height: height, quality: quality)
     }
     
+    public func getPlaceholderImage() -> String? {
+        return nil
+    }
+    
     public static func predicate(forID id: Int) -> Predicate<Style> {
         #Predicate<Style> { $0.id == id }
     }
@@ -50,6 +54,12 @@ public final class Style: HasIntID, HasTimestamps {
     public func getProductType() -> ProductType? {
          return ProductType.getProductTypeFromString(value: type)
     }
+    
+    /// Get product subcategory of the style.
+    /// - Returns: ``ProductSubcategory`` of the style.
+    public func getProductSubcategory() -> ProductSubcategory? {
+       return ProductSubcategory.getProductSubcategoryFromString(value: type);
+   }
     
     /// Get product category of the style.
     /// - Returns: ``ProductCategory`` of the style.
