@@ -560,7 +560,7 @@ extension Storage {
     // MARK: - Customer
     
     @discardableResult
-    static func upsertCustomer(from dto: CustomerDTO, in ctx: ModelContext) throws -> Customer {
+    nonisolated static func upsertCustomer(from dto: CustomerDTO, in ctx: ModelContext) throws -> Customer {
         let c = try fetchOrInsert(Customer.self, id: dto.id, in: ctx) { Customer(id: dto.id) }
         c.created_at = dto.created_at ?? c.created_at
         c.updated_at = dto.updated_at ?? c.updated_at
@@ -576,7 +576,7 @@ extension Storage {
     // MARK: - Location
     
     @discardableResult
-    static func upsertLocation(from dto: LocationDTO, in ctx: ModelContext) throws -> Location {
+    nonisolated static func upsertLocation(from dto: LocationDTO, in ctx: ModelContext) throws -> Location {
         let l = try fetchOrInsert(Location.self, id: dto.id, in: ctx) { Location(id: dto.id) }
         l.created_at = dto.created_at ?? l.created_at
         l.updated_at = dto.updated_at ?? l.updated_at
@@ -589,7 +589,7 @@ extension Storage {
     // MARK: - Reservation
     
     @discardableResult
-    static func upsertReservation(from dto: ReservationDTO, in ctx: ModelContext) throws -> Reservation {
+    nonisolated static func upsertReservation(from dto: ReservationDTO, in ctx: ModelContext) throws -> Reservation {
         let r = try fetchOrInsert(Reservation.self, id: dto.id, in: ctx) { Reservation(id: dto.id) }
         r.created_at     = dto.created_at ?? r.created_at
         r.updated_at     = dto.updated_at ?? r.updated_at
@@ -614,6 +614,15 @@ extension Storage {
         s.primary_image_url = dto.primary_image_url
         s.product_category  = dto.product_category
         profile_style?.style = s
+        
+        s.locations.removeAll()
+
+        for locationDTO in dto.locations {
+            let location = try upsertLocation(from: locationDTO, in: ctx)
+            s.locations.append(location)
+        }
+
+        
         return s
     }
     

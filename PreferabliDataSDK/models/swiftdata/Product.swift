@@ -66,11 +66,11 @@ public final class Product: HasIntID, HasTimestamps, HasImage {
     }
 
     /// The ``RatingLevel`` of the most recent rating of a specific product for the current user.
-    var rating_level : RatingLevel {
+    var rating_level : RatingLevel? {
         if let mostRecentRating = cachedMostRecentRating {
             return RatingLevel.getRatingLevelBasedOffTagValue(value: mostRecentRating.value)
         }
-        return RatingLevel.NONE
+        return nil
     }
     
     public func getShareLink() -> String? {

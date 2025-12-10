@@ -37,9 +37,10 @@ public final class ProfileStyle: HasIntID, HasTimestamps {
        return getRatingType() == RatingLevel.LOVE || getRatingType() == RatingLevel.LIKE
    }
     
-    public func getRatingType() -> RatingLevel {
-        return RatingLevel.getRatingLevelBasedOffTagValue(value: String(describing: rating))
-   }
+    public func getRatingType() -> RatingLevel? {
+        guard let rating else { return nil }
+        return RatingLevel.getRatingLevelBasedOffTagValue(value: String(rating))
+    }
 }
 
 extension ProfileStyle {

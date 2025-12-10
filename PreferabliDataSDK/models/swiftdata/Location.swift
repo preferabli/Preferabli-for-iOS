@@ -14,12 +14,6 @@ public final class Location: HasIntID, HasTimestamps {
     public var zip_code: String?
 
     public init(id: Int) { self.id = id }
-
-    init(id: Int, latitude: Double? = nil, longitude: Double? = nil, zip_code: String? = nil) {
-        self.id = id
-        self.latitude = latitude
-        self.longitude = longitude
-    }
     
     public static func predicate(forID id: Int) -> Predicate<Location> {
         #Predicate<Location> { $0.id == id }

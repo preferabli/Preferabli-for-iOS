@@ -16,7 +16,7 @@ public final class Style: HasIntID, HasTimestamps, HasImage {
     public var product_category: String?
 
     // relationships
-    @Relationship(deleteRule: .cascade) public var locations: [Location] = []
+    @Relationship(deleteRule: .nullify) public var locations: [Location] = []
     @Relationship(deleteRule: .nullify) public var profile_styles: [ProfileStyle] = []
     
     public init(id: Int) { self.id = id }

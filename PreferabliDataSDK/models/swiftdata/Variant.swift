@@ -73,12 +73,13 @@ public final class Variant: HasIntID, HasTimestamps, HasTombstone {
     }
     
     /// The ``RatingLevel`` of the most recent rating of a specific variant for the current user.
-    var rating_level: RatingLevel {
+    var rating_level: RatingLevel? {
         if let mr = most_recent_rating {
             // Bridge to NSNumber if needed by the helper
             return RatingLevel.getRatingLevelBasedOffTagValue(value:  mr.value)
         }
-        return .NONE
+        
+        return nil
     }
     
     var cellar_tags: [Tag] {

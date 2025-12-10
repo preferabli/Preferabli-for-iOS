@@ -97,7 +97,7 @@ public final class Tag: HasIntID, HasTimestamps, HasTombstone {
     }
     
     /// The rating level of the tag. Only for tags of type ``TagType/RATING``.
-    public var rating_level : RatingLevel {
+    public var rating_level : RatingLevel? {
         return RatingLevel.getRatingLevelBasedOffTagValue(value: value)
     }
     
@@ -182,14 +182,10 @@ public enum RatingLevel {
     case SOSO
     /// A user disliked the product.
     case DISLIKE
-    /// Not a valid rating.
-    case NONE
     
-    static internal func getRatingLevelBasedOffTagValue(value : String?) -> RatingLevel {
+    static internal func getRatingLevelBasedOffTagValue(value : String?) -> RatingLevel? {
         if let value {
             switch value {
-            case "0":
-                return .NONE
             case "1":
                 return .DISLIKE
             case "2":
@@ -199,10 +195,10 @@ public enum RatingLevel {
             case "4":
                 return .LOVE
             default:
-                return .NONE
+                return nil
             }
         }
-        return .NONE
+        return nil
     }
     
     internal func getValue() -> String {
@@ -211,7 +207,15 @@ public enum RatingLevel {
         case .LIKE:    return "3"
         case .SOSO:    return "2"
         case .DISLIKE: return "1"
-        case .NONE:    return ""
+        }
+    }
+    
+    public func getRank() -> Int {
+        switch self {
+        case .LOVE:    return 4
+        case .LIKE:    return 3
+        case .SOSO:    return 2
+        case .DISLIKE: return 1
         }
     }
     
