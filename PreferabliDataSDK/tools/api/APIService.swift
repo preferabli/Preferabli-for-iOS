@@ -3,8 +3,6 @@
 //  Preferabli
 //
 //  Created by Nicholas Bortolussi on 10/10/16.
-//  Copyright © 2025 RingIT.
-//  Swift 6–safe rewrite: actor isolation + explicit main-actor hops
 //
 
 import Foundation
@@ -165,7 +163,7 @@ extension APIService {
                     let api = await Preferabli.main.api
                     let session = try await api.getAlamo()
 
-                    let sessionResponse = try await session.post(APIEndpoints.postSession, json: params)
+                    let sessionResponse = try await session.post(APIEndpoints.sessions, json: params)
 
                     if sessionResponse.error == nil,
                        let http2 = sessionResponse.response,
@@ -180,7 +178,7 @@ extension APIService {
                             sessionData = SessionData(map: dict)
                         } catch let e as PreferabliException {
                             // Enrich the thrown JSON error with the refresh endpoint + raw
-                            var msg = "[\(APIEndpoints.postSession)] \(e.getMessage())"
+                            var msg = "[\(APIEndpoints.sessions)] \(e.getMessage())"
                             if let raw2 = sessionResponse.data, !raw2.isEmpty {
                                 let snippet = String(decoding: raw2.prefix(1000), as: UTF8.self)
                                 msg += "\n── Raw (first 1000 bytes) ──\n\(snippet)\n────────"
@@ -289,7 +287,7 @@ extension APIService {
 
 internal struct APIEndpoints {
     internal static let baseUrl = "https://api.preferabli.com/api/6.2/"
-    internal static let postSession = baseUrl + "sessions"
+    internal static let sessions = baseUrl + "sessions"
     internal static let getRec = baseUrl + "recs"
     internal static let styles = baseUrl + "styles"
     internal static let postMedia = baseUrl + "media"
@@ -301,11 +299,16 @@ internal struct APIEndpoints {
     internal static let lttt = baseUrl + "lttt"
     internal static let flttt = baseUrl + "flttt"
     internal static let foods = baseUrl + "foods"
-    internal static let wheretobuy = baseUrl + "wheretobuy"
+    internal static let foodCategories = baseUrl + "food-categories"
+    internal static let whereToBuy = baseUrl + "wheretobuy"
     internal static let magicLink = baseUrl + "sessions/magic-link"
     internal static let preferenceData = baseUrl + "wili"
     internal static let qrCode = "https://api.qr-code-generator.com/v1/create?access-token=" + SDKConfig.qrKey
     internal static let jumpstartCollection = baseUrl + "jumpstart-collection"
+    internal static let stylesToTry = baseUrl + "styles-to-try-styles"
+    internal static let stylesToTryRecs = baseUrl + "styles-to-try"
+    internal static let styleSuggestions = baseUrl + "suggest"
+
     
     internal static func integration(id: Int) -> String { baseUrl + "integrations/\(id)" }
     internal static func lookupConversion(id: Int) -> String { baseUrl + "integrations/\(id)/lookups" }

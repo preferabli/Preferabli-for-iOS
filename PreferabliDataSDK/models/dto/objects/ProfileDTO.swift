@@ -35,9 +35,9 @@ public struct StyleDTO: Decodable, Sendable {
     public let id: Int
     public let created_at: Date?
     public let updated_at: Date?
-    public let desc: String?
+    public let description: String?
     public let name: String?
-    public let type: String?
+    public let type: String
     public let primary_image_url: String?
     public let product_category: String?
     public let locations : [LocationDTO]

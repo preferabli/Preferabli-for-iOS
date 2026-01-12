@@ -3,7 +3,6 @@
 //  WineRingSDKTest
 //
 //  Created by Nicholas Bortolussi on 5/29/20.
-//  Copyright © 2020 RingIT, Inc,. All rights reserved.
 //
 
 import UIKit

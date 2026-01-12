@@ -307,7 +307,7 @@ extension Storage {
         c.channel_id = dto.channel_id ?? c.channel_id
         c.sort_channel_id = dto.sort_channel_id ?? c.sort_channel_id
         c.code = dto.code ?? c.code
-        c.desc = dto.desc ?? c.desc
+        c.desc = dto.description ?? c.desc
         c.end_date = dto.end_date ?? c.end_date
         c.updated_at = dto.updated_at ?? c.updated_at
         c.auto_wili = dto.auto_wili ?? c.auto_wili
@@ -500,8 +500,6 @@ extension Storage {
             try upsertProfileStyle(from: pStyle, profile: p, in: ctx)
         }
         
-        ProfileAnalytics.recomputeAndStoreStats(for: p)
-
         return p
     }
 
@@ -605,10 +603,10 @@ extension Storage {
     
     @discardableResult
     nonisolated static func upsertStyle(from dto: StyleDTO, profile_style: ProfileStyle? = nil, in ctx: ModelContext) throws -> Style {
-        let s = try fetchOrInsert(Style.self, id: dto.id, in: ctx) { Style(id: dto.id) }
+        let s = try fetchOrInsert(Style.self, id: dto.id, in: ctx) { Style(id: dto.id, type: dto.type) }
         s.created_at        = dto.created_at ?? s.created_at
         s.updated_at        = dto.updated_at ?? s.updated_at
-        s.desc              = dto.desc
+        s.desc              = dto.description
         s.name              = dto.name
         s.type              = dto.type
         s.primary_image_url = dto.primary_image_url

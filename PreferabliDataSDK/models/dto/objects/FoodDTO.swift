@@ -21,5 +21,4 @@ public struct FoodCategoryDTO: Decodable, Sendable {
     public let updated_at: Date?
     public let name: String?
     public let icon_url: String?
-    public let styles: [StyleDTO]?  
 }

@@ -12,10 +12,11 @@ import CoreGraphics
 
 /// How to rank "top" product kinds.
 public enum TopProductMetric {
-    case breadth        // % of styles explored (breadth)
-    case depth          // % of score vs highest (depth)
-    case appealingRatio // appealing / (appealing + unappealing)
-    case topScore       // Andrew’s topScore metric
+    case breadth
+    case depth
+    case appealingRatio
+    case topScore
+    case mostRatings   // ✅ NEW: sort by rating tag count
 }
 
 public enum ProfileAnalytics {
@@ -24,12 +25,49 @@ public enum ProfileAnalytics {
 
     /// Key for storing stats blob in your existing key store.
     /// Feel free to version this if you change structure later.
-    private static let statsKey = "profile_statistics_v2"
+    private static let statsKey = "profile_statistics_v5"
+    
+    private static func currentOwnerKey() -> Int {
+        if Preferabli.isCustomerLoggedIn() {
+            return PreferabliTools.getCustomerId()
+        } else if Preferabli.isPreferabliUserLoggedIn() {
+            return PreferabliTools.getPreferabliUserId()
+        } else {
+            return 0
+        }
+    }
+    
+    public struct RatingRegionSample: Codable, Hashable, Sendable {
+        public let kind: ProfileProductKind
+        public let region: String
+        public let isAppealing: Bool
+
+        // ✅ lat/lon naming (no brand_ prefix)
+        public let countryCode: String?
+        public let lat: Double?
+        public let lon: Double?
+
+        public init(
+            kind: ProfileProductKind,
+            region: String,
+            isAppealing: Bool,
+            countryCode: String?,
+            lat: Double?,
+            lon: Double?
+        ) {
+            self.kind = kind
+            self.region = region
+            self.isAppealing = isAppealing
+            self.countryCode = countryCode
+            self.lat = lat
+            self.lon = lon
+        }
+    }
 
     // MARK: - Decoupled inputs
 
     /// Lightweight profile scores input (map from your Profile model).
-    public struct ProfileInput {
+    public struct ProfileInput : Sendable {
         public var score_red: Int
         public var score_white: Int
         public var score_rose: Int
@@ -77,36 +115,56 @@ public enum ProfileAnalytics {
             self.score_cocktail = score_cocktail
         }
     }
+    
+    public struct RatingsCountInput : Sendable {
+        public var counts: [ProfileProductKind: Int]
+        public init(counts: [ProfileProductKind: Int] = [:]) {
+            self.counts = counts
+        }
+    }
 
     /// Minimal input needed per preference style.
-    public struct PreferenceStyleInput {
+    public struct PreferenceStyleInput : Sendable {
         public var kind: ProfileProductKind
-        public var rating: Int?          // was Double
-        public var orderRecommend: Int?  // was Double
+        public var rating: Int?
+        public var orderRecommend: Int?
+        public var orderProfile: Int?            // ✅ NEW
         public var isAppealing: Bool
         public var isUnappealing: Bool
         public var styleId: Int
         public var styleName: String?
         public var styleImageURL: URL?
 
+        public var productCategory: String?
+        public var productSubcategory: String?
+        public var productType: String?
+
         public init(
             kind: ProfileProductKind,
             rating: Int?,
             orderRecommend: Int?,
+            orderProfile: Int? = nil,            // ✅ NEW
             isAppealing: Bool,
             isUnappealing: Bool,
             styleId: Int,
             styleName: String?,
-            styleImageURL: URL?
+            styleImageURL: URL?,
+            productCategory: String? = nil,
+            productSubcategory: String? = nil,
+            productType: String? = nil
         ) {
             self.kind = kind
             self.rating = rating
             self.orderRecommend = orderRecommend
+            self.orderProfile = orderProfile     // ✅ NEW
             self.isAppealing = isAppealing
             self.isUnappealing = isUnappealing
             self.styleId = styleId
             self.styleName = styleName
             self.styleImageURL = styleImageURL
+            self.productCategory = productCategory
+            self.productSubcategory = productSubcategory
+            self.productType = productType
         }
     }
 
@@ -118,17 +176,28 @@ public enum ProfileAnalytics {
     /// You call this **after** you upsert the profile + styles into your persistence layer.
     public static func recomputeAndStoreStats(
         profile: ProfileInput,
-        preferenceStyles: [PreferenceStyleInput]
+        preferenceStyles: [PreferenceStyleInput],
+        ratings: RatingsCountInput = .init(),
+        ratingSamples: [RatingRegionSample] = []   // ✅ instead of ratingTags
     ) {
-        let stats = computeStats(profile: profile, preferenceStyles: preferenceStyles)
+        let stats = computeStats(profile: profile,
+                                 preferenceStyles: preferenceStyles,
+                                 ratings: ratings,
+                                 ratingSamples: ratingSamples)
         save(stats: stats)
     }
 
     /// Load stats from storage (if previously computed).
     public static func loadStats() -> ProfileStatistics? {
-        guard let data = Storage.getKeyStore().data(forKey: statsKey) else { return nil }
-        return try? JSONDecoder().decode(ProfileStatistics.self, from: data)
+        guard let data = Storage.getKeyStore().data(forKey: statsKey),
+              let decoded = try? JSONDecoder().decode(ProfileStatistics.self, from: data)
+        else { return nil }
+
+        // ✅ NEW: protect against showing stats for a different user/customer
+        let ok = decoded.ownerKey != 0 && decoded.ownerKey == currentOwnerKey()
+        return ok ? decoded : nil
     }
+
 
     /// Top product kinds according to a metric (default: Andrew’s top score).
     public static func topProductKinds(
@@ -263,7 +332,9 @@ public enum ProfileAnalytics {
 
     private static func computeStats(
         profile: ProfileInput,
-        preferenceStyles: [PreferenceStyleInput]
+        preferenceStyles: [PreferenceStyleInput],
+        ratings: RatingsCountInput,
+        ratingSamples: [RatingRegionSample]        // ✅
     ) -> ProfileStatistics {
         var perType: [ProfileProductKind: ProfileTypeStats] = [:]
         var preferenceCount = 0
@@ -293,31 +364,39 @@ public enum ProfileAnalytics {
                 appealingCount: 0,
                 unappealingCount: 0,
                 myScore: score(for: kind),
-                topScore: 0
+                topScore: 0,
+                ratingCount: ratings.counts[kind] ?? 0   // ✅ NEW
             )
         }
 
         // 2. Walk through preference styles: counts + topScore components.
-        var appealingStylesForTop: [PreferenceStyleInput] = []
+        var appealingStylesForTopOverall: [PreferenceStyleInput] = []
+        var appealingStylesForTopByKind: [ProfileProductKind: [PreferenceStyleInput]] = [:]
 
         for ps in preferenceStyles {
-            // Andrew’s topScore formula using Int → Double only for math.
+
+            // ✅ Restore Andrew’s per-style TopScore contribution
             if let orderInt = ps.orderRecommend,
                orderInt != 0,
                let ratingInt = ps.rating {
+
                 let rating   = Double(ratingInt)
                 let orderRec = Double(orderInt)
                 let multiplier = ps.kind.topScoreMultiplier
+
+                // Same formula you had before
                 let delta = CGFloat(rating / orderRec) * multiplier
                 perType[ps.kind]?.topScore += delta
             }
 
+            // ✅ Counts (unchanged)
             if ps.isAppealing {
                 preferenceCount += 1
                 perType[ps.kind]?.appealingCount += 1
 
                 if let orderInt = ps.orderRecommend, orderInt != 0 {
-                    appealingStylesForTop.append(ps)
+                    appealingStylesForTopOverall.append(ps)
+                    appealingStylesForTopByKind[ps.kind, default: []].append(ps)
                 }
             } else if ps.isUnappealing {
                 preferenceCount += 1
@@ -325,44 +404,156 @@ public enum ProfileAnalytics {
             }
         }
 
-        // 3. Find "top style" similar to legacy approach.
-        let topStyleSummary = computeTopStyle(from: appealingStylesForTop)
+
+        // Build topScoreByKind from perType (topScore already computed above)
+        let topScoreByKind: [ProfileProductKind: CGFloat] = perType.mapValues { $0.topScore }
+
+        // ✅ Overall: compute from ALL appealing styles (not just orderRecommend != 0)
+        let topStyleSummary = computeTopStyle(
+            from: preferenceStyles,
+            topScoreByKind: topScoreByKind
+        )
+
+        // ✅ Per-kind: compute from ALL appealing styles for that kind
+        var topStylePerType: [ProfileProductKind: ProfileStatistics.TopStyleSummary] = [:]
+        for kind in ProfileProductKind.allCases {
+            let subset = preferenceStyles.filter { $0.kind == kind }
+            if let s = computeTopStyle(from: subset, topScoreByKind: topScoreByKind) {
+                topStylePerType[kind] = s
+            }
+        }
+
+        let topRegions = computeTopRegions(from: ratingSamples)
 
         return ProfileStatistics(
+            ownerKey: currentOwnerKey(),
+            generatedAt: Date(),
             perType: perType,
             preferenceCount: preferenceCount,
-            topStyle: topStyleSummary
+            topStyle: topStyleSummary,
+            topStylePerType: topStylePerType,                  // ✅ NEW
+            topRegionPerType: topRegions.perType,
+            topRegionOverall: topRegions.overall
         )
+
     }
+    
+    private static func computeTopRegions(
+        from samples: [RatingRegionSample]
+    ) -> (
+        perType: [ProfileProductKind: ProfileStatistics.TopRegionSummary],
+        overall: ProfileStatistics.TopRegionSummary?
+    ) {
+
+        var overallCounts: [String: Int] = [:]
+        var perKindCounts: [ProfileProductKind: [String: Int]] = [:]
+
+        // ✅ representative metadata for each region (first seen is fine)
+        var metaByRegion: [String: (country: String?, lat: Double?, lon: Double?)] = [:]
+
+        let appealing = samples.filter { $0.isAppealing }
+        let pool = !appealing.isEmpty ? appealing : samples
+
+        for s in pool {
+            overallCounts[s.region, default: 0] += 1
+            perKindCounts[s.kind, default: [:]][s.region, default: 0] += 1
+            if metaByRegion[s.region] == nil {
+                metaByRegion[s.region] = (s.countryCode, s.lat, s.lon)
+            }
+        }
+
+        func topSummary(from counts: [String: Int]) -> ProfileStatistics.TopRegionSummary? {
+            guard !counts.isEmpty else { return nil }
+
+            let best = counts.sorted { a, b in
+                if a.value == b.value {
+                    return a.key.localizedCaseInsensitiveCompare(b.key) == .orderedAscending
+                }
+                return a.value > b.value
+            }.first!
+
+            let meta = metaByRegion[best.key]
+            return .init(
+                region: best.key,
+                count: best.value,
+                countryCode: meta?.country,
+                lat: meta?.lat,
+                lon: meta?.lon
+            )
+        }
+
+        var perType: [ProfileProductKind: ProfileStatistics.TopRegionSummary] = [:]
+        for (kind, counts) in perKindCounts {
+            if let top = topSummary(from: counts) { perType[kind] = top }
+        }
+
+        return (perType, topSummary(from: overallCounts))
+    }
+
+
 
     /// Legacy-like top style selection.
     private static func computeTopStyle(
-        from styles: [PreferenceStyleInput]
+        from styles: [PreferenceStyleInput],
+        topScoreByKind: [ProfileProductKind: CGFloat]
     ) -> ProfileStatistics.TopStyleSummary? {
-        guard !styles.isEmpty else { return nil }
+        // Keep old behavior: if there are no appealing styles, no "top style"
+        let appealing = styles.filter { $0.isAppealing }
+        guard !appealing.isEmpty else { return nil }
 
-        // Max by rating, then by orderRecommend, treating nil as 0.
-        guard let best = styles.max(by: { lhs, rhs in
-            let lr = lhs.rating ?? 0
-            let rr = rhs.rating ?? 0
-            if lr == rr {
-                let lo = lhs.orderRecommend ?? 0
-                let ro = rhs.orderRecommend ?? 0
-                return lo < ro
-            } else {
-                return lr < rr
-            }
-        }) else {
-            return nil
+        func orderRecommendKey(_ s: PreferenceStyleInput) -> Int { s.orderRecommend ?? 0 }
+        func orderProfileKey(_ s: PreferenceStyleInput) -> Int { s.orderProfile ?? Int.max }
+        func kindTopScore(_ s: PreferenceStyleInput) -> CGFloat { topScoreByKind[s.kind] ?? 0 }
+        func nameKey(_ s: PreferenceStyleInput) -> String { s.styleName ?? "" }
+
+        func alphaLess(_ a: PreferenceStyleInput, _ b: PreferenceStyleInput) -> Bool {
+            nameKey(a).localizedCaseInsensitiveCompare(nameKey(b)) == .orderedAscending
         }
+
+        // Sort using the same logic as ProfileStyle.sortByPreference
+        let sorted = appealing.sorted { lhs, rhs in
+            let loRec = orderRecommendKey(lhs)
+            let roRec = orderRecommendKey(rhs)
+
+            let lHasRec = loRec != 0
+            let rHasRec = roRec != 0
+
+            // Appealing + order_recommend != 0 first
+            if lHasRec != rHasRec { return lHasRec && !rHasRec }
+
+            if lHasRec && rHasRec {
+                // 1) order_recommend asc
+                if loRec != roRec { return loRec < roRec }
+
+                // 2) tie-break: kind topScore desc
+                let lTop = kindTopScore(lhs)
+                let rTop = kindTopScore(rhs)
+                if lTop != rTop { return lTop > rTop }
+
+                // 3) alpha
+                return alphaLess(lhs, rhs)
+            } else {
+                // order_recommend == 0 => order_profile asc
+                let lo = orderProfileKey(lhs)
+                let ro = orderProfileKey(rhs)
+                if lo != ro { return lo < ro }
+
+                // alpha
+                return alphaLess(lhs, rhs)
+            }
+        }
+
+        guard let best = sorted.first else { return nil }
 
         return .init(
             styleId: best.styleId,
             name: best.styleName ?? "Unknown",
-            imageURL: best.styleImageURL
+            imageURL: best.styleImageURL,
+            productCategory: best.productCategory,
+            productSubcategory: best.productSubcategory,
+            productType: best.productType
         )
     }
-
 
     private static func save(stats: ProfileStatistics) {
         if let data = try? JSONEncoder().encode(stats) {
@@ -382,6 +573,8 @@ public enum ProfileAnalytics {
 
             let value: Double
             switch metric {
+            case .mostRatings:
+                value = Double(typeStats.ratingCount)
             case .breadth:
                 let total = Double(kind.totalStyleCount)
                 value = total > 0
@@ -469,29 +662,71 @@ extension ProfileAnalytics.ProfileInput {
     }
 }
 
-/// Optional convenience so you can call this right after you upsert a Profile.
 extension ProfileAnalytics {
-    public static func recomputeAndStoreStats(for profile: Profile) {
-        let profileInput = ProfileInput(from: profile)
+    // MARK: - All Categories (global) stats
 
-        let prefInputs: [PreferenceStyleInput] = profile.profile_styles.compactMap { ps in
-            guard let kind = ps.analyticsKind(),
-                  let style = ps.style else {
-                return nil
-            }
+    public struct AllCategoriesMetrics: Hashable {
+        public let ratingsCount: Int
+        public let stylesCount: Int
+        public let categoriesCount: Int
 
-            return PreferenceStyleInput(
-                kind: kind,
-                rating: ps.rating,
-                orderRecommend: ps.order_recommend,
-                isAppealing: ps.isAppealing(),
-                isUnappealing: ps.isUnappealing(),
-                styleId: ps.style_id,
-                styleName: style.name,
-                styleImageURL: style.getImage(width: 400, height: 400)
-            )
-        }
+        public let breadthPercent: Int
+        public let depthPercent: Int
 
-        recomputeAndStoreStats(profile: profileInput, preferenceStyles: prefInputs)
+        public let mostBreadthKind: ProfileProductKind?
+        public let mostDepthKind: ProfileProductKind?
+        public let mostRatingsKind: ProfileProductKind?
+        public let mostAppealingKind: ProfileProductKind?
+        public let topKind: ProfileProductKind?
     }
+
+    public static func allCategoriesMetrics() -> AllCategoriesMetrics? {
+        guard let stats = loadStats() else { return nil }
+
+        // Totals across all kinds
+        let totalStylesAll = ProfileProductKind.allCases.map(\.totalStyleCount).reduce(0, +)
+        let totalHighestAll = ProfileProductKind.allCases.map(\.highestScore).reduce(0, +)
+
+        let stylesCount = stats.perType.values.map(\.myStyleCount).reduce(0, +)
+        let scoreSum = stats.perType.values.map(\.myScore).reduce(0, +)
+
+        let categoriesCount = stats.perType.values.filter { $0.myStyleCount > 0 }.count
+
+        // If ratingsCount is not being populated yet, fall back to preferenceCount.
+        let summedRatingsCount = stats.perType.values.map(\.ratingCount).reduce(0, +)
+        let ratingsCount = summedRatingsCount > 0 ? summedRatingsCount : stats.preferenceCount
+
+        // Global normalized %s
+        let breadthPctDouble = (totalStylesAll > 0)
+            ? (Double(stylesCount) / Double(totalStylesAll)) * 100
+            : 0
+
+        let depthPctDouble = (totalHighestAll > 0)
+            ? (Double(scoreSum) / Double(totalHighestAll)) * 100
+            : 0
+
+        let breadthPercent = max(0, min(100, Int(breadthPctDouble.rounded())))
+        let depthPercent   = max(0, min(100, Int(depthPctDouble.rounded())))
+
+        // “Best of” kinds (these already compute per-kind normalized %s)
+        let topKind          = topProductKinds(metric: .topScore).first
+        let mostRatingsKind  = topProductKinds(metric: .mostRatings).first
+        let mostAppealingKind = topProductKinds(metric: .appealingRatio).first
+        let mostBreadthKind  = topProductKinds(metric: .breadth).first
+        let mostDepthKind    = topProductKinds(metric: .depth).first
+
+        return AllCategoriesMetrics(
+            ratingsCount: ratingsCount,
+            stylesCount: stylesCount,
+            categoriesCount: categoriesCount,
+            breadthPercent: breadthPercent,
+            depthPercent: depthPercent,
+            mostBreadthKind: mostBreadthKind,
+            mostDepthKind: mostDepthKind,
+            mostRatingsKind: mostRatingsKind,
+            mostAppealingKind: mostAppealingKind,
+            topKind: topKind
+        )
+    }
+
 }

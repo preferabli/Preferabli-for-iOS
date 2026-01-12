@@ -11,7 +11,7 @@ public final class Style: HasIntID, HasTimestamps, HasImage {
     public var updated_at: Date = Foundation.Date.now
     public var desc: String?
     public var name: String?
-    public var type: String?
+    public var type: String
     public var primary_image_url: String?
     public var product_category: String?
 
@@ -19,18 +19,12 @@ public final class Style: HasIntID, HasTimestamps, HasImage {
     @Relationship(deleteRule: .nullify) public var locations: [Location] = []
     @Relationship(deleteRule: .nullify) public var profile_styles: [ProfileStyle] = []
     
-    public init(id: Int) { self.id = id }
-
-    init(desc: String? = nil, id: Int, name: String? = nil, type: String? = nil, primary_image_url: String? = nil, product_category: String? = nil, locations: [Location] = []) {
-        self.desc = desc
+    public init(id: Int, type : String) {
         self.id = id
-        self.name = name
         self.type = type
-        self.primary_image_url = primary_image_url
-        self.product_category = product_category
-        self.locations = locations
     }
     
+
     /// Get the style image.
     /// - Parameters:
     ///   - width: returns an image with the specified width in pixels.

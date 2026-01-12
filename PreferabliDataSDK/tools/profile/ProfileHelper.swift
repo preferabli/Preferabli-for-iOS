@@ -24,13 +24,10 @@ final class ProfileHelper {
     func getProfile(force_refresh: Bool = false) async throws -> Int {
         let key = try currentProfileOwnerKey()
 
-        // If a fetch is already running for this profile owner and we're not forcing refresh,
-        // just join that Task.
         if !force_refresh, let inflight = profileFetches[key] {
             return try await inflight.value
         }
 
-        // Start a new Task, store it in the map so other callers can join.
         let task = Task<Int, Error> { [weak self] in
             guard let self else {
                 throw PreferabliException(
@@ -38,7 +35,7 @@ final class ProfileHelper {
                     message: "Preferabli deallocated while fetching profile."
                 )
             }
-            return try await self.fetchProfileAndRecomputeAnalytics(force_refresh: force_refresh)
+            return try await self.fetchAndPersistProfile(force_refresh: force_refresh)
         }
 
         profileFetches[key] = task
@@ -55,24 +52,17 @@ final class ProfileHelper {
 
     // MARK: - Private helpers
 
-    /// Unique key per "profile owner" (either customer or user).
     private func currentProfileOwnerKey() throws -> Int {
         if Preferabli.isCustomerLoggedIn() {
             let cid = PreferabliTools.getCustomerId()
             guard cid != 0 else {
-                throw PreferabliException(
-                    type: .OtherError,
-                    message: "No customer id available for profile fetch."
-                )
+                throw PreferabliException(type: .OtherError, message: "No customer id available for profile fetch.")
             }
             return cid
         } else if Preferabli.isPreferabliUserLoggedIn() {
             let uid = PreferabliTools.getPreferabliUserId()
             guard uid != 0 else {
-                throw PreferabliException(
-                    type: .OtherError,
-                    message: "No user id available for profile fetch."
-                )
+                throw PreferabliException(type: .OtherError, message: "No user id available for profile fetch.")
             }
             return uid
         } else {
@@ -80,23 +70,21 @@ final class ProfileHelper {
         }
     }
 
-    /// Actual implementation of fetching/upserting profile & styles and recomputing analytics.
-    private func fetchProfileAndRecomputeAnalytics(force_refresh: Bool) async throws -> Int {
+    private func fetchAndPersistProfile(force_refresh: Bool) async throws -> Int {
         do {
             try await preferabli.canWeContinue(needsToBeLoggedIn: true)
             Analytics.track(["event" : "get_profile"])
 
             let needsRefresh = force_refresh || PreferabliTools.hasMinutesPassed(
-                minutes: 5,
+                minutes: 1,
                 startDate: Storage.getKeyStore().object(forKey: "lastCalledProfile") as? Date
-            )
+            ) || !Preferabli.userHasTasteProfile()
 
-            // If we don't need a fresh API call, just return the cached id.
             guard needsRefresh else {
                 return Storage.getKeyStore().integer(forKey: "profile_id")
             }
 
-            // Fetch profile from API (customer or user)
+            // 1) Fetch profile from API
             let profileResponse: ProfileDTO = try await preferabli.api.getAlamo().get(
                 Preferabli.isCustomerLoggedIn()
                 ? APIEndpoints.customerProfile(id: Preferabli.CHANNEL_ID,
@@ -104,17 +92,16 @@ final class ProfileHelper {
                 : APIEndpoints.profile(id: PreferabliTools.getPreferabliUserId())
             )
 
-            // 1️⃣ Upsert Profile + ProfileStyles, track which styles need a full StyleDTO fetch.
-            let prefMapByStyleId: [Int: ProfileStyle] = try Storage.withContext { ctx in
+            let result: ([Int: ProfileStyle], Bool) = try Storage.withContext { ctx in
                 let persistedProfile = try Storage.upsertProfile(from: profileResponse, in: ctx)
-
                 var prefMapByStyleId: [Int: ProfileStyle] = [:]
 
+                var hasRecommendableStyle: Bool = false
                 for psJSON in profileResponse.preference_styles {
-                    let ps = try Storage.upsertProfileStyle(from: psJSON,
-                                                            profile: persistedProfile,
-                                                            in: ctx)
-                    let s  = try Storage.fetchById(Style.self, id: ps.style_id, in: ctx)
+                    let ps = try Storage.upsertProfileStyle(from: psJSON, profile: persistedProfile, in: ctx)
+                    let s = try Storage.fetchById(Style.self, id: ps.style_id, in: ctx)
+                    
+                    if (ps.recommend ?? false) { hasRecommendableStyle = true }
 
                     if force_refresh || s == nil {
                         prefMapByStyleId[ps.style_id] = ps
@@ -124,10 +111,14 @@ final class ProfileHelper {
                 }
 
                 try ctx.save()
-                return prefMapByStyleId
+                
+                // 3. Return them together as a tuple
+                return (prefMapByStyleId, hasRecommendableStyle)
             }
+            
+            let prefMapByStyleId = result.0
 
-            // 2️⃣ Fetch missing StyleDTOs from API (batched), if any.
+            // 3) Fetch missing StyleDTOs batched
             if !prefMapByStyleId.isEmpty {
                 let allStyleIds = Array(prefMapByStyleId.keys)
                 let chunkSize   = 50
@@ -148,7 +139,6 @@ final class ProfileHelper {
                     index = end
                 }
 
-                // Persist styles and attach to ProfileStyles
                 try Storage.withContext { ctx in
                     for styleDict in allStylesResp {
                         try Storage.upsertStyle(
@@ -157,52 +147,19 @@ final class ProfileHelper {
                             in: ctx
                         )
                     }
-
                     try ctx.save()
                 }
             }
+            
+            
 
-            // 3️⃣ ALWAYS recompute analytics from whatever is persisted now.
-            try Storage.withContext { ctx in
-                guard let persistedProfile: Profile = try? Storage.fetchById(
-                    Profile.self,
-                    id: profileResponse.id,
-                    in: ctx
-                ) else {
-                    return
-                }
-
-                let profileInput = ProfileAnalytics.ProfileInput(from: persistedProfile)
-
-                let preferenceInputs: [ProfileAnalytics.PreferenceStyleInput] =
-                    persistedProfile.profile_styles.compactMap { ps in
-                        guard let kind = ps.analyticsKind() else { return nil }
-
-                        return ProfileAnalytics.PreferenceStyleInput(
-                            kind: kind,
-                            rating: ps.rating,
-                            orderRecommend: ps.order_recommend,
-                            isAppealing: ps.isAppealing(),
-                            isUnappealing: ps.isUnappealing(),
-                            styleId: ps.style_id,
-                            styleName: ps.style?.name,
-                            styleImageURL: ps.style?.getImage(width: 300, height: 300)
-                        )
-                    }
-
-                ProfileAnalytics.recomputeAndStoreStats(
-                    profile: profileInput,
-                    preferenceStyles: preferenceInputs
-                )
-
-                try ctx.save()
-            }
-
+            // 4) Persist metadata
             Storage.getKeyStore().set(profileResponse.id, forKey: "profile_id")
             Storage.getKeyStore().set(Date(), forKey: "lastCalledProfile")
+            Storage.getKeyStore().set(!profileResponse.preference_styles.isEmpty, forKey: "hasTasteProfile")
+            Storage.getKeyStore().set(result.1, forKey: "hasRecommendableStyle")
 
             try await preferabli.canWeContinue(needsToBeLoggedIn: true)
-
             return profileResponse.id
 
         } catch {

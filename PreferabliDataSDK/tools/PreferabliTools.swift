@@ -129,20 +129,20 @@ internal class PreferabliTools {
     internal class func addSDKProperties() {
         let id = Preferabli.isPreferabliUserLoggedIn() ? PreferabliTools.getPreferabliUserId() : PreferabliTools.getCustomerId()
         let email = Storage.getKeyStore().object(forKey: "email") as? String
-        let phone = Storage.getKeyStore().object(forKey: "phone") as? String
+        let zip = Storage.getKeyStore().object(forKey: "zipCode") as? String
         let display_name = Storage.getKeyStore().object(forKey: "displayName") as? String
-        let isTeamRingIt = Storage.getKeyStore().bool(forKey: "isTeamRingIT")
+        let isTeamPreferabli = Storage.getKeyStore().bool(forKey: "isTeamPreferabli")
         
         if (id != 0) {
             Mixpanel.mainInstance().identify(distinctId: String(id))
-            Mixpanel.mainInstance().people.set(properties: [(Preferabli.isPreferabliUserLoggedIn() ? "user_id" : "customer_id") : id, "is_team_ringit" : isTeamRingIt])
+            Mixpanel.mainInstance().people.set(properties: [(Preferabli.isPreferabliUserLoggedIn() ? "user_id" : "customer_id") : id, "is_team_preferabli" : isTeamPreferabli])
             
             if (!email.isEmptyOrWhitespace) {
                 Mixpanel.mainInstance().people.set(properties: ["$email": email!])
             }
             
-            if (!phone.isEmptyOrWhitespace) {
-                Mixpanel.mainInstance().people.set(properties: ["phone": phone!])
+            if (!zip.isEmptyOrWhitespace) {
+                Mixpanel.mainInstance().people.set(properties: ["zip_code": zip!])
             }
             
             if (!display_name.isEmptyOrWhitespace) {

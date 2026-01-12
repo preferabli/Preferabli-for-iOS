@@ -174,7 +174,7 @@ public final class Variant: HasIntID, HasTimestamps, HasTombstone {
     }
 }
 
-public enum PriceTier: Int, CaseIterable, Hashable, Identifiable {
+public enum PriceTier: Int, CaseIterable, Hashable, Identifiable, Sendable {
     case one = 1, two = 2, three = 3, four = 4, five = 5
     public var id: Int { rawValue }
     public var label: String {

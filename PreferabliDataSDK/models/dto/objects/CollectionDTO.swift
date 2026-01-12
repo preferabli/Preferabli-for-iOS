@@ -48,7 +48,7 @@ public struct CollectionDTO: Decodable, Sendable {
     public let channel_id: Int?
     public let sort_channel_id: Int?
     public let code: String?
-    public let desc: String?
+    public let description: String?
     public let end_date: Date?
     public let updated_at: Date?
     public let auto_wili: Bool?

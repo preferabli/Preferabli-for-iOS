@@ -41,11 +41,7 @@ public final class Tag: HasIntID, HasTimestamps, HasTombstone {
     public var customer_id: Int?
     
     // relationships
-    @Relationship(deleteRule: .nullify) public var variant: Variant {
-        didSet {
-            updateSearchableContent()
-        }
-    }
+    @Relationship(deleteRule: .deny) public var variant: Variant
     @Relationship(deleteRule: .cascade) public var orderings: [CollectionOrder] = []
     
     // local only
@@ -81,6 +77,12 @@ public final class Tag: HasIntID, HasTimestamps, HasTombstone {
     public func isRating() -> Bool {
         return tag_type == .RATING
     }
+    
+    var isAppealingRating: Bool {
+            guard tag_type == .RATING, !isTombstoned else { return false }
+            guard let lvl = rating_level else { return false }
+            return lvl == .LOVE || lvl == .LIKE
+        }
     
     // Lets us know is the Tag is a Wishlist or not
     public func isWishlist() -> Bool {
@@ -173,7 +175,7 @@ public enum ServingFormat : String, CaseIterable, Identifiable {
 }
 
 /// The degree of appeal for a product as identified by a ``Tag``.
-public enum RatingLevel {
+public enum RatingLevel : Sendable {
     /// A user loved the product.
     case LOVE
     /// A user liked the product.

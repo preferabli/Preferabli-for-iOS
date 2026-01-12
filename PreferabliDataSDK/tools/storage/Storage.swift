@@ -3,15 +3,6 @@
 //  PreferabliDataSDK
 //
 //  Created by Nicholas Bortolussi on 8/29/25.
-//  Copyright © 2025 RingIT, Inc,. All rights reserved.
-//
-
-//
-//  Storage.swift  (actor-based)
-//  PreferabliDataSDK
-//
-//  Converted to actor-based hybrid on request.
-//  NOTE: Pure helpers remain static to avoid churn in call sites.
 //
 
 import SwiftData
@@ -32,6 +23,23 @@ public enum Storage {
     internal static var container: ModelContainer = {
         makeContainer()
     }()
+    
+    /// The SDK's current container (read-only to the app).
+    public static var sharedContainer: ModelContainer {
+        container
+    }
+
+    /// Create a brand-new container instance.
+    /// Use this from the app when logging out (or when you need a fresh container).
+    public static func makeNewContainer() -> ModelContainer {
+        makeContainer()
+    }
+
+    /// (Optional) Replace the SDK's shared container reference.
+    /// Only needed if SDK code elsewhere reads Storage.container directly.
+    public static func replaceSharedContainer(_ newContainer: ModelContainer) {
+        container = newContainer
+    }
 
     @MainActor
     private static func makeContainer() -> ModelContainer {
@@ -62,6 +70,31 @@ public enum Storage {
                            "even after nuking the store: \(error)")
             }
         }
+    }
+    
+    @MainActor
+    internal static func wipePersistentStoreFilesAndRebuild() {
+        do {
+            try nukePersistentStoreFiles()
+        } catch {
+            NSLog("[PreferabliDataSDK] Failed to remove store files: \(error)")
+        }
+        resetDatabaseKeystore()
+        rebuildSharedContainer()
+    }
+
+    
+    /// Create a brand-new container instance (no caching).
+    @MainActor
+    internal static func newContainerInstance() -> ModelContainer {
+        makeContainer()
+    }
+
+    /// Replace the global container reference with a brand-new instance.
+    /// Useful if parts of the SDK still reference Storage.container directly.
+    @MainActor
+    internal static func rebuildSharedContainer() {
+        container = makeContainer()
     }
     
     private static func nukePersistentStoreFiles() throws {
@@ -231,7 +264,7 @@ public struct StorageFacade {
 
 extension Storage {
     @inline(__always)
-    nonisolated static internal func fetchById<T: HasIntID>(
+    nonisolated static public func fetchById<T: HasIntID>(
         _ type: T.Type,
         id: Int?,
         in ctx: ModelContext
@@ -322,59 +355,104 @@ extension Storage {
     nonisolated public static func pruneTombstones(
         batchSize: Int = 500,
         log: @Sendable @escaping (String) -> Void = { _ in }
-    ) {
-        let logger: @Sendable (String) -> Void = log
+    ) async {
+        do {
+            try await Storage.withBackgroundContext(priority: .background) { ctx in
+                ctx.autosaveEnabled = false
+                ctx.author = "TombstonePruner"
 
-        Task.detached(priority: .background) {
-            do {
-                try await Storage.withBackgroundContext(priority: .background) { ctx in
-                    ctx.autosaveEnabled = false
-                    ctx.author = "TombstonePruner"
+                try pruneTags(in: ctx, batchSize: batchSize, log: log)
+                log("Pruned tombstoned Tags")
 
-                    try pruneTags(in: ctx, batchSize: batchSize)
-                    log("Pruned tombstoned Tags")
+                try pruneVariants(in: ctx, batchSize: batchSize, log: log)
+                log("Pruned tombstoned Variants")
+            }
+        } catch {
+            log("Tombstone prune failed: \(error)")
+        }
+    }
 
-                    try pruneVariants(in: ctx, batchSize: batchSize)
-                    log("Pruned tombstoned Variants")
+    nonisolated private static func pruneTags(
+            in ctx: ModelContext,
+            batchSize: Int,
+            log: @Sendable @escaping (String) -> Void
+        ) throws {
+            while true {
+                try autoreleasepool {
+                    // 1) Fetch only IDs (thin fetch)
+                    var fd = FetchDescriptor<Tag>(
+                        predicate: #Predicate<Tag> { $0.isTombstoned == true }
+                    )
+                    fd.fetchLimit = batchSize
+                    fd.propertiesToFetch = [\.id]
+                    fd.sortBy = [SortDescriptor(\Tag.id, order: .forward)]
+
+                    let doomed = try ctx.fetch(fd)
+                    if doomed.isEmpty { return }
+
+                    let ids = doomed.map(\.id)
+
+                    // 2) Resolve each by id and delete
+                    //    (safer than deleting large batches of fully materialized objects)
+                    for id in ids {
+                        var byId = FetchDescriptor<Tag>(
+                            predicate: #Predicate<Tag> { $0.id == id }
+                        )
+                        byId.fetchLimit = 1
+                        byId.propertiesToFetch = [] // fetch full object for deletion
+
+                        if let tag = try ctx.fetch(byId).first {
+                            ctx.delete(tag)
+                        }
+                    }
+
+                    // 3) Save per batch
+                    try ctx.save()
+                    log("Pruned \(ids.count) Tags (batch)")
                 }
-            } catch {
-                log("Tombstone prune failed: \(error)")
             }
         }
-    }
 
-    // Delete tombstoned Tags in batches
-    nonisolated private static func pruneTags(in ctx: ModelContext, batchSize: Int) throws {
-        while true {
-            var fd = FetchDescriptor<Tag>(
-                predicate: #Predicate<Tag> { $0.isTombstoned == true }
-            )
-            fd.fetchLimit = batchSize
+        // Delete tombstoned Variants in batches (enhanced)
+        nonisolated private static func pruneVariants(
+            in ctx: ModelContext,
+            batchSize: Int,
+            log: @Sendable @escaping (String) -> Void
+        ) throws {
+            while true {
+                try autoreleasepool {
+                    // 1) Fetch only IDs (thin fetch)
+                    var fd = FetchDescriptor<Variant>(
+                        predicate: #Predicate<Variant> { $0.isTombstoned == true }
+                    )
+                    fd.fetchLimit = batchSize
+                    fd.propertiesToFetch = [\.id]
+                    fd.sortBy = [SortDescriptor(\Variant.id, order: .forward)]
 
-            let doomed = try ctx.fetch(fd)
-            if doomed.isEmpty { break }
+                    let doomed = try ctx.fetch(fd)
+                    if doomed.isEmpty { return }
 
-            doomed.forEach { ctx.delete($0) }
-            try ctx.save()
-            // no ctx.reset(); not universally available and not required
+                    let ids = doomed.map(\.id)
+
+                    // 2) Resolve each by id and delete
+                    for id in ids {
+                        var byId = FetchDescriptor<Variant>(
+                            predicate: #Predicate<Variant> { $0.id == id }
+                        )
+                        byId.fetchLimit = 1
+                        byId.propertiesToFetch = [] // fetch full object for deletion
+
+                        if let variant = try ctx.fetch(byId).first {
+                            ctx.delete(variant)
+                        }
+                    }
+
+                    // 3) Save per batch
+                    try ctx.save()
+                    log("Pruned \(ids.count) Variants (batch)")
+                }
+            }
         }
-    }
-
-    // Delete tombstoned Variants in batches
-    nonisolated private static func pruneVariants(in ctx: ModelContext, batchSize: Int) throws {
-        while true {
-            var fd = FetchDescriptor<Variant>(
-                predicate: #Predicate<Variant> { $0.isTombstoned == true }
-            )
-            fd.fetchLimit = batchSize
-
-            let doomed = try ctx.fetch(fd)
-            if doomed.isEmpty { break }
-
-            doomed.forEach { ctx.delete($0) }
-            try ctx.save()
-        }
-    }
 }
 
 extension Storage {
@@ -382,22 +460,19 @@ extension Storage {
     /// This is useful if underlying Product data (name, brand, etc.) has changed.
     /// Executes on a background ModelContext separate from the UI.
     nonisolated public static func reindexSearchableContent(
-        batchSize: Int = 250, // Batches can be smaller for updates
+        batchSize: Int = 250,
         log: @Sendable @escaping (String) -> Void = { _ in }
-    ) {
-        Task.detached(priority: .background) {
-            do {
-                try await Storage.withBackgroundContext(priority: .background) { ctx in
-                    ctx.autosaveEnabled = false
-                    ctx.author = "SearchReindexer"
-                    
-                    try reindexTags(in: ctx, batchSize: batchSize, log: log)
-                    
-                    log("Completed search re-indexing for all Tags.")
-                }
-            } catch {
-                log("Search re-indexing failed: \(error)")
+    ) async {
+        do {
+            try await Storage.withBackgroundContext(priority: .background) { ctx in
+                ctx.autosaveEnabled = false
+                ctx.author = "SearchReindexer"
+
+                try reindexTags(in: ctx, batchSize: batchSize, log: log)
+                log("Completed search re-indexing for all Tags.")
             }
+        } catch {
+            log("Search re-indexing failed: \(error)")
         }
     }
     
@@ -407,32 +482,38 @@ extension Storage {
         batchSize: Int,
         log: @Sendable @escaping (String) -> Void
     ) throws {
+
         var offset = 0
         var totalProcessed = 0
-        
+
         while true {
-            var fd = FetchDescriptor<Tag>()
-            fd.fetchOffset = offset
-            fd.fetchLimit = batchSize
-            
-            // Ensure we get relationships.
-            // This is crucial for accessing product.name.
-            fd.relationshipKeyPathsForPrefetching = [\Tag.variant, \Tag.variant.product]
-            
-            let tagsToUpdate = try ctx.fetch(fd)
-            if tagsToUpdate.isEmpty {
-                break // No more tags to process
+            try autoreleasepool {
+                var fd = FetchDescriptor<Tag>()
+                fd.fetchOffset = offset
+                fd.fetchLimit  = batchSize
+
+                // Deterministic batches (helps reproducibility)
+                fd.sortBy = [SortDescriptor(\Tag.id, order: .forward)]
+
+                // Prefetch relationships needed by updateSearchableContent()
+                fd.relationshipKeyPathsForPrefetching = [
+                    \Tag.variant,
+                    \Tag.variant.product
+                ]
+
+                let tags = try ctx.fetch(fd)
+                if tags.isEmpty { return }
+
+                for tag in tags {
+                    tag.updateSearchableContent()
+                }
+
+                try ctx.save()
+
+                offset += tags.count
+                totalProcessed += tags.count
+                log("Re-indexed batch of \(tags.count) tags (total: \(totalProcessed))")
             }
-            
-            for tag in tagsToUpdate {
-                tag.updateSearchableContent()
-            }
-            
-            try ctx.save()
-            
-            offset += tagsToUpdate.count
-            totalProcessed += tagsToUpdate.count
-            log("Re-indexed batch of \(tagsToUpdate.count) tags (total: \(totalProcessed))")
         }
     }
 }

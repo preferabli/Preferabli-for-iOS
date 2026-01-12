@@ -365,7 +365,7 @@ extension Product {
     // Your original `flag` now returns the emoji
     public var flag: URL? {
         if let country_code = country_code {
-            return URL.init(string: "https://purecatamphetamine.github.io/country-flag-icons/3x2/" + country_code + ".svg")
+            return URL.init(string: "https://purecatamphetamine.github.io/country-flag-icons/3x2/" + country_code.uppercased() + ".svg")
         } else {
             return nil
         }
@@ -412,7 +412,7 @@ public enum ProductCategory : Identifiable, Sendable, CaseIterable, Hashable {
         }
     }
 
-    static internal func getProductCategoryFromString(value : String?) -> ProductCategory? {
+    static public func getProductCategoryFromString(value : String?) -> ProductCategory? {
         if let value {
             switch value.lowercased() {
             case "whiskey":
@@ -445,6 +445,7 @@ public enum ProductCategory : Identifiable, Sendable, CaseIterable, Hashable {
 
 /// The subcategory of a ``Product``.
 public enum ProductSubcategory : Sendable, CaseIterable, Hashable {
+    // beers, ciders, seltzers
     case ALE
     case LAGER
     case GF
@@ -454,6 +455,13 @@ public enum ProductSubcategory : Sendable, CaseIterable, Hashable {
     case FLAVORED
     case NON_ALC_BEVERAGE
     case CIDER
+    
+    // whiskies
+    case BOURBON
+    case FLAVORED_WHISKEY
+    case RYE
+    case SCOTCH
+    case WHISKEY
 
     public func getSubcategoryName() -> String {
         switch self {
@@ -475,10 +483,21 @@ public enum ProductSubcategory : Sendable, CaseIterable, Hashable {
             return "non_alcoholic_beverage"
         case .CIDER:
             return "cider"
+            
+        case .BOURBON:
+            return "bourbon"
+        case .FLAVORED_WHISKEY:
+            return "flavored_whiskey"
+        case .RYE:
+            return "rye"
+        case .SCOTCH:
+            return "scotch"
+        case .WHISKEY:
+            return "whiskey"
         }
     }
 
-    static internal func getProductSubcategoryFromString(value : String?) -> ProductSubcategory? {
+    static public func getProductSubcategoryFromString(value : String?) -> ProductSubcategory? {
             if let value {
                 let lowercasedValue = value.lowercased()
                 switch lowercasedValue {
@@ -500,6 +519,17 @@ public enum ProductSubcategory : Sendable, CaseIterable, Hashable {
                     return .NON_ALC_BEVERAGE
                 case "cider":
                     return .CIDER
+                    
+                case "bourbon":
+                    return .BOURBON
+                case "flavored_whiskey":
+                    return .FLAVORED_WHISKEY
+                case "rye":
+                    return .RYE
+                case "scotch":
+                    return .SCOTCH
+                case "whiskey":
+                    return .WHISKEY
                 default:
                     return nil
                 }
@@ -531,7 +561,7 @@ public enum ProductType : Sendable, CaseIterable, Hashable {
         }
     }
 
-    static internal func getProductTypeFromString(value : String?) -> ProductType? {
+    static public func getProductTypeFromString(value : String?) -> ProductType? {
         if let value {
             switch value.lowercased() {
             case "red":
@@ -593,5 +623,38 @@ public final class ProductToneCache: @unchecked Sendable {
         let s = CurrentValueSubject<Int, Never>(versions[id] ?? 0)
         subjects[id] = s
         return s.eraseToAnyPublisher()
+    }
+}
+
+extension Product {
+    func analyticsKind() -> ProfileProductKind? {
+        // 1) Wine type mapping (red/white/rose/sparkling/fortified)
+        if let wineType = product_type {
+            switch wineType {
+            case .RED:       return .red
+            case .WHITE:     return .white
+            case .ROSE:      return .rose
+            case .SPARKLING: return .sparkling
+            case .FORTIFIED: return .fortified
+            }
+        }
+
+        // 2) Category mapping (spirits/beer/cheese/etc)
+        if let cat = product_category {
+            switch cat {
+            case .WHISKEY:  return .whiskey
+            case .MEZCAL:   return .mezcal
+            case .BEER:     return .beer
+            case .WINE:     return .red      // fallback if wine type missing
+            case .CHEESE:   return .cheese
+            case .VODKA:    return .vodka
+            case .GIN:      return .gin
+            case .RUM:      return .rum
+            case .SAKE:     return .sake
+            case .COCKTAIL: return .cocktail
+            }
+        }
+
+        return nil
     }
 }

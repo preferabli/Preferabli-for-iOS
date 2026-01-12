@@ -3,7 +3,6 @@
 //  PreferabliDataSDK
 //
 //  Created by Nicholas Bortolussi on 9/2/25.
-//  Copyright © 2025 RingIT, Inc,. All rights reserved.
 //
 
 import Foundation

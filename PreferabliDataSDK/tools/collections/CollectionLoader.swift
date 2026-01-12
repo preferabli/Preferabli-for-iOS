@@ -112,6 +112,14 @@ public enum BuiltInCollection: CollectionSpec {
 public actor CollectionLoader {
     public static let shared = CollectionLoader()
     
+    private var onDone: [String: (@Sendable (CollectionEvent) async -> Void)] = [:]
+
+    public func setOnDone(_ spec: CollectionSpec,
+                          action: @escaping @Sendable (CollectionEvent) async -> Void) {
+        guard let key = resolvedKey(spec) else { return }
+        onDone[key] = action
+    }
+    
     // Per-collection state
     private struct RunState {
         var task: Task<Void, Never>?
@@ -554,5 +562,71 @@ public actor CollectionLoader {
     private func broadcast(_ event: CollectionEvent, key: String) {
         guard let listeners = runs[key]?.listeners else { return }
         for (_, cont) in listeners { cont.yield(event) }
+
+        // Fire hook once on terminal events
+        switch event {
+        case .done, .failed:
+            if let hook = onDone[key] {
+                Task { await hook(event) }
+                onDone.removeValue(forKey: key)
+            }
+        default:
+            break
+        }
+    }
+}
+
+extension CollectionLoader {
+
+    /// Checks if the collection is loaded and fresh.
+    /// - If fresh: returns immediately.
+    /// - If stale/empty: triggers a load and awaits the `.done` or `.failed` event (with a timeout).
+    public func ensureLoaded(_ spec: CollectionSpec, timeout: TimeInterval = 10) async {
+        let key = spec.idKey
+        let cid = Storage.getKeyStore().integer(forKey: key)
+        
+        // 1. Safety check: If no collection ID exists, we can't load it.
+        guard cid > 0 else { return }
+
+        // 2. Fast Path: Check metadata directly
+        // We use the same keys CollectionLoader uses internally
+        let statusKey = "hasLoaded\(spec.namespace)#\(cid)"
+        let timeKey   = "lastCalled\(spec.namespace)#\(cid)"
+        
+        let hasLoaded = Storage.getKeyStore().bool(forKey: statusKey)
+        let lastCalled = Storage.getKeyStore().object(forKey: timeKey) as? Date
+        
+        // Check staleness
+        let isStale = PreferabliTools.hasMinutesPassed(minutes: spec.freshnessMinutes, startDate: lastCalled)
+
+        if hasLoaded && !isStale {
+            return // ✅ Fresh enough, no wait needed.
+        }
+
+        // 3. Slow Path: It's stale or empty. Trigger load and wait.
+        let stream = self.observe(spec)
+        self.ensureWarm(spec)
+
+        // Race the stream against a timeout
+        await withTaskGroup(of: Void.self) { group in
+            // Task A: Wait for completion
+            group.addTask {
+                for await event in stream {
+                    switch event {
+                    case .done, .failed: return
+                    default: continue
+                    }
+                }
+            }
+
+            // Task B: Timeout
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            }
+
+            // First one to finish wins
+            _ = await group.next()
+            group.cancelAll()
+        }
     }
 }

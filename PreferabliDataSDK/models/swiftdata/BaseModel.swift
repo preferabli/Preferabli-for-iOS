@@ -3,7 +3,6 @@
 //  PreferabliDataSDK
 //
 //  Created by Nicholas Bortolussi on 8/29/25.
-//  Copyright © 2025 RingIT, Inc,. All rights reserved.
 //
 
 import SwiftData
