@@ -264,9 +264,39 @@ extension APIService {
                 throw PreferabliException(type: e.type, message: msg, code: http.statusCode)
             }
         }
+        
+        if let af = response.error {
+            // Alamofire explicit cancellation (most common)
+            if af.isExplicitlyCancelledError {
+                throw PreferabliException(
+                    type: .Cancelled,
+                    message: "[\(endpoint)] Request cancelled.",
+                    code: 0
+                )
+            }
+
+            // URLSession cancellation (sometimes shows up as underlying URLError.cancelled)
+            if let urlErr = af.underlyingError as? URLError, urlErr.code == .cancelled {
+                throw PreferabliException(
+                    type: .Cancelled,
+                    message: "[\(endpoint)] Request cancelled.",
+                    code: urlErr.errorCode
+                )
+            }
+        }
 
         // No HTTP response or data
-        throw PreferabliException(type: .NetworkError, message: "[\(endpoint)] No HTTP response or data.", code: status ?? 0)
+        let af = response.error
+        let underlying = (af?.underlyingError as? URLError)
+        let ucode = underlying?.code.rawValue ?? 0
+        let udesc = underlying?.localizedDescription ?? af?.localizedDescription ?? "Unknown network error"
+
+        throw PreferabliException(
+            type: .NetworkError,
+            message: "[\(endpoint)] No HTTP response or data. Underlying: \(udesc)",
+            code: ucode
+        )
+
     }
 
     internal static func continueOrThrowJSONException(data: Data) throws -> Any {
@@ -308,6 +338,8 @@ internal struct APIEndpoints {
     internal static let stylesToTry = baseUrl + "styles-to-try-styles"
     internal static let stylesToTryRecs = baseUrl + "styles-to-try"
     internal static let styleSuggestions = baseUrl + "suggest"
+    internal static let avatars = baseUrl + "avatar-options"
+    internal static let channels = baseUrl + "channels"
 
     
     internal static func integration(id: Int) -> String { baseUrl + "integrations/\(id)" }

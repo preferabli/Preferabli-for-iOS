@@ -11,7 +11,14 @@ import SwiftData
 
 // MARK: - Public Events
 
+public enum InitialLoadState: Sendable {
+    case alreadyLoaded
+    case notStartedYet   // never loaded before, but no run in progress
+    case running         // never loaded before, run is active
+}
+
 public enum CollectionEvent: Sendable {
+    case started               // ✅ new
     case snapshot(count: Int)
     case page(insertedCount: Int)
     case done(total: Int)
@@ -147,6 +154,19 @@ public actor CollectionLoader {
         }
     }
     
+    public func initialLoadState(_ spec: CollectionSpec) -> InitialLoadState {
+        let ks = Storage.getKeyStore()
+        let cid = ks.integer(forKey: spec.idKey)
+        guard cid > 0 else { return .alreadyLoaded }
+
+        let statusKey = "hasLoaded\(spec.namespace)#\(cid)"
+        let hasLoadedBefore = ks.bool(forKey: statusKey)
+        if hasLoadedBefore { return .alreadyLoaded }
+
+        guard let key = resolvedKey(spec) else { return .notStartedYet }
+        return (runs[key]?.isRunning == true) ? .running : .notStartedYet
+    }
+    
     /// Optional: explicit refresh hook for pull-to-refresh UX.
     public func forceRefresh(_ spec: CollectionSpec) {
         guard let key = resolvedKey(spec) else { return }
@@ -218,6 +238,7 @@ public actor CollectionLoader {
         let stale = PreferabliTools.hasMinutesPassed(minutes: spec.freshnessMinutes, startDate: last)
         return !has || stale
     }
+
     
     private func resolvedKey(_ spec: CollectionSpec) -> String? {
         let ks = Storage.getKeyStore()
@@ -240,6 +261,7 @@ public actor CollectionLoader {
         ensureState(for: key)
         guard runs[key]!.isRunning == false else { return }
         runs[key]!.isRunning = true
+        broadcast(.started, key: key)
         
         runs[key]!.task = Task.detached { [weak self] in
             do {
@@ -570,7 +592,7 @@ public actor CollectionLoader {
                 Task { await hook(event) }
                 onDone.removeValue(forKey: key)
             }
-        default:
+        case .started, .snapshot, .page:
             break
         }
     }

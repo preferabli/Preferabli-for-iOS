@@ -210,6 +210,8 @@ private enum ModelRegistry {
         add(UserCollection.self)
         add(Reservation.self)
         add(Location.self)
+        add(Channel.self)
+        add(ChannelVenue.self)
     }
 
     /// Publicly consumed lists—both derived from the single `register` body above.

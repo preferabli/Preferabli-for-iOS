@@ -26,6 +26,8 @@ public struct PreferabliUserDTO: Decodable, Sendable {
     public let rating_collection_id: Int?
     public let provided_feedback_at: Date?
     public let wishlist_collection_id: Int?
+    public let avatar_background_color: String?
+    public let avatar_text_color: String?
 
     public let avatar: MediaDTO?
 }

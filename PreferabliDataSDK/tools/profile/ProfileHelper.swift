@@ -12,8 +12,19 @@ import SwiftData
 final class ProfileHelper {
 
     private unowned let preferabli: Preferabli
+
     /// Dedupes concurrent getProfile calls per "owner" (user or customer).
     private var profileFetches: [Int: Task<Int, Error>] = [:]
+
+    public func isFetchingCurrentProfile() -> Bool {
+        guard let key = try? currentProfileOwnerKey() else { return false }
+        return profileFetches[key] != nil
+    }
+
+    /// Optional: true if *any* owner fetch is running (useful for debugging)
+    public var isFetchingAnyProfile: Bool {
+        !profileFetches.isEmpty
+    }
 
     init(preferabli: Preferabli) {
         self.preferabli = preferabli
@@ -24,6 +35,7 @@ final class ProfileHelper {
     func getProfile(force_refresh: Bool = false) async throws -> Int {
         let key = try currentProfileOwnerKey()
 
+        // ✅ Deduping: if an in-flight task exists, join it.
         if !force_refresh, let inflight = profileFetches[key] {
             return try await inflight.value
         }
@@ -39,15 +51,9 @@ final class ProfileHelper {
         }
 
         profileFetches[key] = task
+        defer { profileFetches[key] = nil }
 
-        do {
-            let result = try await task.value
-            profileFetches[key] = nil
-            return result
-        } catch {
-            profileFetches[key] = nil
-            throw error
-        }
+        return try await task.value
     }
 
     // MARK: - Private helpers
@@ -70,37 +76,80 @@ final class ProfileHelper {
         }
     }
 
+    /// ✅ Fix C: only allow id-only fast path if the Profile row exists locally.
+    /// NOTE: We intentionally do NOT require profile_styles to be non-empty,
+    /// because a new user can have a valid Profile with zero styles.
+    private func isProfilePersistedLocally(profileID: Int) -> Bool {
+        guard profileID > 0 else { return false }
+        do {
+            return try Storage.withContext { ctx in
+                var fd = FetchDescriptor<Profile>(
+                    predicate: Profile.predicate(forID: profileID)
+                )
+                fd.fetchLimit = 1
+                return try ctx.fetch(fd).first != nil
+            }
+        } catch {
+            return false
+        }
+    }
+
     private func fetchAndPersistProfile(force_refresh: Bool) async throws -> Int {
         do {
             try await preferabli.canWeContinue(needsToBeLoggedIn: true)
             Analytics.track(["event" : "get_profile"])
 
-            let needsRefresh = force_refresh || PreferabliTools.hasMinutesPassed(
-                minutes: 1,
-                startDate: Storage.getKeyStore().object(forKey: "lastCalledProfile") as? Date
-            ) || !Preferabli.userHasTasteProfile()
+            let ks = Storage.getKeyStore()
 
+            let cachedProfileID = ks.integer(forKey: "profile_id")
+
+            // Existing freshness logic
+            let minutesPassed =
+                PreferabliTools.hasMinutesPassed(
+                    minutes: 1,
+                    startDate: ks.object(forKey: "lastCalledProfile") as? Date
+                )
+
+            // We keep your semantics: if userHasTasteProfile() is false, we consider we need refresh.
+            // (Even if the Profile exists locally, the flags indicate we haven't loaded/confirmed taste state.)
+            let needsRefresh =
+                force_refresh ||
+                minutesPassed ||
+                !Preferabli.userHasTasteProfile() ||
+                cachedProfileID <= 0 ||
+                !isProfilePersistedLocally(profileID: cachedProfileID)
+
+            // ✅ Fast path ONLY if SwiftData agrees (Fix C)
             guard needsRefresh else {
-                return Storage.getKeyStore().integer(forKey: "profile_id")
+                return cachedProfileID
             }
+
+            // ✅ Network path only: toggle loading state here (Option B).
+            preferabli.loadState.isProfileLoading = true
+            defer { preferabli.loadState.isProfileLoading = false }
 
             // 1) Fetch profile from API
             let profileResponse: ProfileDTO = try await preferabli.api.getAlamo().get(
                 Preferabli.isCustomerLoggedIn()
-                ? APIEndpoints.customerProfile(id: Preferabli.CHANNEL_ID,
-                                               and: PreferabliTools.getCustomerId())
+                ? APIEndpoints.customerProfile(
+                    id: Preferabli.CHANNEL_ID,
+                    and: PreferabliTools.getCustomerId()
+                )
                 : APIEndpoints.profile(id: PreferabliTools.getPreferabliUserId())
             )
 
-            let result: ([Int: ProfileStyle], Bool) = try Storage.withContext { ctx in
+            // 2) Persist profile + determine which styles need fetching
+            let result: (prefMapByStyleId: [Int: ProfileStyle], hasRecommendableStyle: Bool) =
+            try Storage.withContext { ctx in
                 let persistedProfile = try Storage.upsertProfile(from: profileResponse, in: ctx)
-                var prefMapByStyleId: [Int: ProfileStyle] = [:]
 
+                var prefMapByStyleId: [Int: ProfileStyle] = [:]
                 var hasRecommendableStyle: Bool = false
+
                 for psJSON in profileResponse.preference_styles {
                     let ps = try Storage.upsertProfileStyle(from: psJSON, profile: persistedProfile, in: ctx)
-                    let s = try Storage.fetchById(Style.self, id: ps.style_id, in: ctx)
-                    
+                    let s  = try Storage.fetchById(Style.self, id: ps.style_id, in: ctx)
+
                     if (ps.recommend ?? false) { hasRecommendableStyle = true }
 
                     if force_refresh || s == nil {
@@ -111,16 +160,12 @@ final class ProfileHelper {
                 }
 
                 try ctx.save()
-                
-                // 3. Return them together as a tuple
                 return (prefMapByStyleId, hasRecommendableStyle)
             }
-            
-            let prefMapByStyleId = result.0
 
             // 3) Fetch missing StyleDTOs batched
-            if !prefMapByStyleId.isEmpty {
-                let allStyleIds = Array(prefMapByStyleId.keys)
+            if !result.prefMapByStyleId.isEmpty {
+                let allStyleIds = Array(result.prefMapByStyleId.keys)
                 let chunkSize   = 50
 
                 var allStylesResp: [StyleDTO] = []
@@ -143,21 +188,19 @@ final class ProfileHelper {
                     for styleDict in allStylesResp {
                         try Storage.upsertStyle(
                             from: styleDict,
-                            profile_style: prefMapByStyleId[styleDict.id],
+                            profile_style: result.prefMapByStyleId[styleDict.id],
                             in: ctx
                         )
                     }
                     try ctx.save()
                 }
             }
-            
-            
 
             // 4) Persist metadata
-            Storage.getKeyStore().set(profileResponse.id, forKey: "profile_id")
-            Storage.getKeyStore().set(Date(), forKey: "lastCalledProfile")
-            Storage.getKeyStore().set(!profileResponse.preference_styles.isEmpty, forKey: "hasTasteProfile")
-            Storage.getKeyStore().set(result.1, forKey: "hasRecommendableStyle")
+            ks.set(profileResponse.id, forKey: "profile_id")
+            ks.set(Date(), forKey: "lastCalledProfile")
+            ks.set(!profileResponse.preference_styles.isEmpty, forKey: "hasTasteProfile")
+            ks.set(result.hasRecommendableStyle, forKey: "hasRecommendableStyle")
 
             try await preferabli.canWeContinue(needsToBeLoggedIn: true)
             return profileResponse.id

@@ -17,6 +17,13 @@ import SwiftUI
 @MainActor
 public class Preferabli {
     
+    @MainActor
+    public final class PreferabliLoadState: ObservableObject {
+        @Published public internal(set) var isProfileLoading: Bool = false
+        @Published public internal(set) var isRatingsLoading: Bool = false
+        @Published public internal(set) var isBootstrappingUserData: Bool = false
+    }
+    
     private static var _main: Preferabli?
     
     /// Use this instance to make Preferabli API calls.
@@ -26,7 +33,9 @@ public class Preferabli {
     }
     
     public static var storage: StorageFacade { StorageFacade() }
-    
+    public let loadState = PreferabliLoadState()
+    private let sessionBootstrapper = UserSessionBootstrapper()
+
     internal static let versionCode = 12
     
     public let loggingEnabled : Bool
@@ -120,7 +129,6 @@ public class Preferabli {
         }
     }
 
-    
     private func isInternal() -> Bool {
         return Preferabli.INTEGRATION_ID == -1
     }
@@ -167,39 +175,20 @@ public class Preferabli {
         keyStore.set(integration_id, forKey: "INTEGRATION_ID")
         keyStore.set(client_interface, forKey: "CLIENT_INTERFACE")
     }
-    
+
+    public func bootstrapUserSessionIfNeeded(force: Bool = false) async {
+        await sessionBootstrapper.bootstrapIfNeeded(preferabli: self, force: force)
+    }
+
     private func loadUserData() {
         guard Preferabli.isPreferabliUserLoggedIn() || Preferabli.isCustomerLoggedIn() else { return }
 
-        Task.detached(priority: .background) { [weak self] in
-            guard let self else { return }
-
-            // 1) Profile fetch (explicit, awaited)
-            do {
-                _ = try await self.getProfile()
-                await self.profileStatsCoordinator.invalidate()
-                await self.profileStatsCoordinator.recomputeIfReady()
-            } catch {
-                // handled elsewhere
-            }
-
-            // 2) React to ratings completion
-            await CollectionLoader.shared.setOnDone(BuiltInCollection.ratings) { [weak self] _ in
-                guard let self else { return }
-                await self.profileStatsCoordinator.invalidate()
-                await self.profileStatsCoordinator.recomputeIfReady()
-            }
-
-            // 3) Start warmups (fire-and-forget)
-            await CollectionLoader.shared.ensureWarm(BuiltInCollection.ratings)
-            await CollectionLoader.shared.ensureWarm(BuiltInCollection.wishlist)
+        // Fire and forget is fine here; TasteView can await bootstrapUserSessionIfNeeded() too.
+        Task { [weak self] in
+            await self?.bootstrapUserSessionIfNeeded(force: false)
         }
     }
 
-
-
-
-    
     private func createAnonymousSession(create_anonymous_user: Bool) async throws {
         // already have a token? nothing to do
         if !Storage.getKeyStore().string(forKey: "access_token").isEmptyOrWhitespace { return }
@@ -214,14 +203,9 @@ public class Preferabli {
         if create_anonymous_user {
             let createParams: SParams = ["anonymous": true]
             
-            let dto: PreferabliUserDTO = try await api.getAlamo().post(APIEndpoints.users, sjson: createParams)
+            let user: PreferabliUserDTO = try await api.getAlamo().post(APIEndpoints.users, sjson: createParams)
             
-            try Storage.withContext { ctx in
-                let user = try Storage.upsertPreferabliUser(from: dto, in: ctx)
-                try ctx.save()
-                PreferabliTools.setUserProperties(user: user)
-            }
-            PreferabliTools.addSDKProperties()
+            try userUpdated(dto: user)
         }
     }
     
@@ -377,14 +361,34 @@ public class Preferabli {
                 dto = try await api.getAlamo().put(APIEndpoints.user(id: user_id), sjson: paramss2)
             }
             
-            try Storage.withContext { ctx in
-                let user = try Storage.upsertPreferabliUser(from: dto, in: ctx)
-                try ctx.save()
-                PreferabliTools.setUserProperties(user: user)
-            }
-            
-            PreferabliTools.addSDKProperties()
+            try userUpdated(dto: dto)
+
             loadUserData()
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func updatePreferabliUser(firstName: String? = nil, lastName: String? = nil) async throws {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            
+            Analytics.track( ["event" : "update_user"])
+            
+            if (!firstName.isEmptyOrWhitespace || !lastName.isEmptyOrWhitespace) {
+                let params: SParams = [
+                    "fname": firstName,
+                    "lname": lastName
+                ]
+                
+                let dto : PreferabliUserDTO = try await api.getAlamo().put(APIEndpoints.user(id: Preferabli.USER_ID), sjson: params)
+                
+                try userUpdated(dto: dto)
+
+                loadUserData()
+            }
             
         } catch {
             handleError(error: error)
@@ -403,6 +407,8 @@ public class Preferabli {
             
             try await clearAllData()
             
+            sessionBootstrapper.reset(preferabli: self)
+            
             try await createAnonymousSession(create_anonymous_user: isInternal())
             
         } catch {
@@ -411,33 +417,64 @@ public class Preferabli {
         }
     }
     
-    public func updateAvatar(image: Data? = nil) async throws {
+    public func updateAvatar(
+        image: Data? = nil,
+        avatarId: Int? = nil,
+        initialsBackgroundHex: String? = nil,
+        initialsTextHex: String? = nil
+    ) async throws {
         do {
             try await canWeContinue(needsToBeLoggedIn: true)
             Analytics.track(["event": "update_avatar"])
-            
-            
-            let imageId : Int
-            if (image == nil) {
-                imageId = -1
+
+            let finalAvatarId: Int
+            if let avatarId {
+                // ✅ Selecting an existing media avatar (no upload)
+                finalAvatarId = avatarId
+            } else if let image {
+                // ✅ Upload local/cropped image, then set avatar_id to uploaded media id
+                let mediaResponse: MediaDTO = try await api.getAlamo().upload(APIEndpoints.postMedia, data: image)
+                finalAvatarId = mediaResponse.id
             } else {
-                let mediaResponse: MediaDTO = try await api.getAlamo().upload(APIEndpoints.postMedia, data: image!)
-                imageId = mediaResponse.id
+                // ✅ Initials avatar
+                finalAvatarId = -1
             }
-            
-            let params: SParams = [
-                "avatar_id": imageId,
+
+            var params: SParams = [
+                "avatar_id": finalAvatarId
             ]
+
+            // ✅ Optional initials styling (you said you'll handle details server-side)
+            if let initialsBackgroundHex {
+                params["initials_bg"] = initialsBackgroundHex   // TODO: confirm param name
+            }
+            if let initialsTextHex {
+                params["initials_text"] = initialsTextHex       // TODO: confirm param name
+            }
+
+            let user : PreferabliUserDTO = try await api
+                .getAlamo()
+                .put(APIEndpoints.user(id: PreferabliTools.getPreferabliUserId()), sjson: params)
             
-            let userDTO = try await api.getAlamo().put(APIEndpoints.user(id: PreferabliTools.getPreferabliUserId()), sjson: params)
-            
+            try userUpdated(dto: user)
+
             try await canWeContinue(needsToBeLoggedIn: true)
-            
+
         } catch {
             handleError(error: error)
             throw error
         }
     }
+    
+    internal func userUpdated(dto : PreferabliUserDTO) throws {
+        try Storage.withContext { ctx in
+            let user = try Storage.upsertPreferabliUser(from: dto, in: ctx)
+            try ctx.save()
+            PreferabliTools.setUserProperties(user: user)
+        }
+        PreferabliTools.addSDKProperties()
+    }
+
 
     /// Performs label recognition on a supplied image. Returns matches as an array of ``Product`` ids.
     /// - Parameters:
@@ -726,7 +763,7 @@ public class Preferabli {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
             
-            Analytics.track(["event": "food_categories"])
+            Analytics.track(["event": "get_food_categories"])
                         
             var params: SParams = [
                 "limit": 9999
@@ -752,6 +789,36 @@ public class Preferabli {
             }
             
             return foodIds
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func getAvatars() async throws -> [Int] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            
+            Analytics.track(["event": "get_avatars"])
+
+            let body: [MediaDTO] = try await api.getAlamo().get(APIEndpoints.avatars)
+
+            let mediaIds = try Storage.withContext { ctx in
+                
+                var mediaIds: [Int] = []
+                
+                for media in body {
+                    let media = try Storage.upsertMedia(from: media, in: ctx)
+                    mediaIds.append(media.id)
+                }
+                
+                try ctx.save()
+                
+                return mediaIds
+            }
+            
+            return mediaIds
             
         } catch {
             handleError(error: error)
@@ -799,7 +866,7 @@ public class Preferabli {
         }
     }
     
-    public func getStylesToTryRecommendations(style_id : Int) async throws -> [Int]
+    public func getStylesToTryRecommendations(category : ProductCategory, type : ProductType?, style_id : Int) async throws -> [Int]
     {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
@@ -811,8 +878,12 @@ public class Preferabli {
                 "user_id":  PreferabliTools.getPreferabliUserId(),
                 "style_ids[]": style_id,
                 "limit": 10,
-                "type": "red"
+                "category": category.getCategoryName(),
             ]
+            
+            if let type {
+                params["type"] = type.getTypeName()
+            }
             
             let body: [StyleRecResponseDTO] = try await api.getAlamo().get(APIEndpoints.stylesToTryRecs, sparams: params)
 
@@ -842,7 +913,7 @@ public class Preferabli {
         }
     }
     
-    public func getStyleSuggestions(style_id : Int, conflict : Bool) async throws -> [Int]
+    public func getStyleSuggestions(product_category: ProductCategory?, product_subcategory: ProductSubcategory?, product_type: ProductType?,style_id : Int, conflict : Bool) async throws -> [Int]
     {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
@@ -854,8 +925,8 @@ public class Preferabli {
                 "user_id":  PreferabliTools.getPreferabliUserId(),
                 "style_id": style_id,
                 "mode": conflict ? "ambiguous" : "low_experience",
-                "product_category": "wine",
-                "type": "red"
+                "product_category": product_category?.getCategoryName(),
+                "type": product_type?.getTypeName()
             ]
             
             let body: [StyleRecResponseDTO] = try await api.getAlamo().get(APIEndpoints.styleSuggestions, sparams: params)
@@ -1027,6 +1098,36 @@ public class Preferabli {
         }
     }
     
+    public func getChannels(force_refresh : Bool = false) async throws -> [Int]
+    {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            
+            Analytics.track(["event": "get_channels"])
+            
+                let body: [ChannelDTO] = try await api.getAlamo().get(APIEndpoints.channels)
+                
+                // --- 3. WRITE PHASE ---
+                // Open a new, clean context *just* for writing
+            let channelIds = try await Storage.withBackgroundContext { ctx in
+                    var channelIds = [Int]()
+                    for channelDTO in body {
+                        let channel = try Storage.upsertChannel(from: channelDTO, in: ctx)
+                        channelIds.append(channel.id)
+                    }
+                    // Save the write context
+                    try ctx.save()
+                    return channelIds
+                }
+            
+            return channelIds
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
     /// Get product details like a taste profile and food pairings.
     /// - Parameters:
     ///   - force_refresh: if you want to force a refresh of the data
@@ -1178,9 +1279,7 @@ public class Preferabli {
     ///   - force_refresh: pass true if you want to force a refresh from the API and wait for the results to return. Otherwise, the call will load locally if available and run a background refresh only if one has not been initiated in the past 5 minutes. Defaults to *false*.
     /// Get the Preference Profile of the customer (or user).
     /// This now delegates to ProfileHelper, which handles deduping and analytics.
-    public func getProfile(
-        force_refresh: Bool = false
-    ) async throws -> Int {
+    public func getProfile(force_refresh: Bool = false) async throws -> Int {
         try await profileHelper.getProfile(force_refresh: force_refresh)
     }
     

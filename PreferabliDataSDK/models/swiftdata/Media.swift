@@ -4,7 +4,7 @@ import SwiftData
 
 /// An image or video.
 @Model
-public final class Media: HasIntID, HasTimestamps {
+public final class Media: HasIntID, HasTimestamps, HasImage {
     
     @Attribute(.unique) public var id: Int
     public var created_at: Date = Foundation.Date.now
@@ -22,6 +22,10 @@ public final class Media: HasIntID, HasTimestamps {
     /// - Returns: the URL of the requested image.
     public func getImage(width : Int, height : Int, quality : Int = 80) -> URL? {
         return PreferabliTools.getImageUrl(image: path, width: width, height: height, quality: quality )
+    }
+    
+    public func getPlaceholderImage() -> String? {
+        return nil
     }
     
     public static func predicate(forID id: Int) -> Predicate<Media> {

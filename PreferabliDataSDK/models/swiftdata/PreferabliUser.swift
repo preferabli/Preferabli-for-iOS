@@ -24,8 +24,10 @@ public final class PreferabliUser : HasIntID, HasTimestamps, HasImage {
     public var rating_collection_id: Int?
     public var provided_feedback_at: Date?
     public var wishlist_collection_id: Int?
+    public var avatar_background_color: String?
+    public var avatar_text_color: String?
     
-    @Relationship(deleteRule: .nullify) var avatar: Media?
+    @Relationship(deleteRule: .nullify) public var avatar: Media?
 
     public init(id: Int) { self.id = id }
 
@@ -61,11 +63,51 @@ public final class PreferabliUser : HasIntID, HasTimestamps, HasImage {
         return PreferabliTools.getImageUrl(image: avatar?.path, width: width, height: height, quality: quality)
     }
     
+    public var isAvatarNotSet: Bool {
+        avatar_background_color == nil &&
+        avatar_text_color == nil &&
+        avatar == nil
+    }
+
+    public var isAvatarSet: Bool { !isAvatarNotSet }
+    
     public func getPlaceholderImage() -> String? {
         return nil
     }
     
     public static func predicate(forID id: Int) -> Predicate<PreferabliUser> {
         #Predicate<PreferabliUser> { $0.id == id }
+    }
+    
+    public var userInitials: String? {
+        let name: String? = {
+            if let dn = display_name?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               !dn.isEmpty {
+                return dn
+            }
+
+            let fn = fname?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let ln = lname?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let parts = [fn, ln].compactMap { $0 }.filter { !$0.isEmpty }
+            return parts.isEmpty ? nil : parts.joined(separator: " ")
+        }()
+
+        guard let name else { return nil }
+
+        let components = name
+            .split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+
+        guard let first = components.first else { return nil }
+
+        let firstChar = first.first.map(String.init) ?? ""
+        let lastChar = (components.count > 1 ? components.last?.first : nil)
+            .map(String.init) ?? ""
+
+        return (firstChar + lastChar).uppercased()
     }
 }

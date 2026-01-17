@@ -25,6 +25,16 @@ extension Color {
         self.init(red: r, green: g, blue: b)
     }
     
+    public init?(hex: String?) {
+            guard var hex = hex?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !hex.isEmpty else { return nil }
+
+            if hex.hasPrefix("#") { hex.removeFirst() }
+            hex = hex.uppercased()
+
+            self.init(hex: hex)
+    }
+    
     func toHex(includeAlpha: Bool = false) -> String? {
         UIColor(self).toHex(includeAlpha: includeAlpha)
     }
@@ -105,3 +115,95 @@ extension UIColor {
         }
     }
 }
+
+extension UIImage {
+    /// Draws a circular initials avatar with provided colors.
+    public static func initialsAvatar(
+        initials: String,
+        diameter: CGFloat,
+        backgroundColor: UIColor,
+        textColor: UIColor,
+        fontWeight: UIFont.Weight = .semibold
+    ) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = UIScreen.main.scale
+        format.opaque = false
+
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: diameter, height: diameter), format: format)
+        return renderer.image { ctx in
+            let rect = CGRect(origin: .zero, size: CGSize(width: diameter, height: diameter))
+
+            // Circle fill
+            backgroundColor.setFill()
+            UIBezierPath(ovalIn: rect).fill()
+
+            // Initials text
+            let fontSize = diameter * 0.34
+            let font = UIFont.systemFont(ofSize: fontSize, weight: fontWeight)
+
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: textColor,
+                .paragraphStyle: paragraph
+            ]
+
+            // Slight vertical tweak tends to look better for 2 letters
+            let text = initials.uppercased()
+            let textSize = text.size(withAttributes: attrs)
+            let textRect = CGRect(
+                x: (diameter - textSize.width) / 2,
+                y: (diameter - textSize.height) / 2,
+                width: textSize.width,
+                height: textSize.height
+            )
+
+            text.draw(in: textRect, withAttributes: attrs)
+        }
+    }
+}
+
+extension UIColor {
+    /// Supports: "#RRGGBB", "RRGGBB", "#AARRGGBB", "AARRGGBB"
+    convenience init?(hex: String?) {
+        guard var hex = hex?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !hex.isEmpty else { return nil }
+
+        if hex.hasPrefix("#") { hex.removeFirst() }
+        hex = hex.uppercased()
+
+        var value: UInt64 = 0
+        guard Scanner(string: hex).scanHexInt64(&value) else { return nil }
+
+        let r, g, b, a: CGFloat
+        switch hex.count {
+        case 6: // RRGGBB
+            a = 1.0
+            r = CGFloat((value & 0xFF0000) >> 16) / 255.0
+            g = CGFloat((value & 0x00FF00) >> 8) / 255.0
+            b = CGFloat(value & 0x0000FF) / 255.0
+        case 8: // AARRGGBB
+            a = CGFloat((value & 0xFF000000) >> 24) / 255.0
+            r = CGFloat((value & 0x00FF0000) >> 16) / 255.0
+            g = CGFloat((value & 0x0000FF00) >> 8) / 255.0
+            b = CGFloat(value & 0x000000FF) / 255.0
+        default:
+            return nil
+        }
+
+        self.init(red: r, green: g, blue: b, alpha: a)
+    }
+    
+    public var hexString: String {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        getRed(&r, green: &g, blue: &b, alpha: &a)
+        let ri = Int(round(r * 255))
+        let gi = Int(round(g * 255))
+        let bi = Int(round(b * 255))
+        let ai = Int(round(a * 255))
+        return String(format: "#%02X%02X%02X%02X", ri, gi, bi, ai)
+    }
+}
+

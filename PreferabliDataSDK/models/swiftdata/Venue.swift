@@ -20,7 +20,8 @@ import SwiftData
 
 /// A venue represents the details for a specific location. If returned as part of ``WhereToBuy``, will contain an array of ``MerchantProductLink``s as ``links``.
 @Model
-public final class Venue: HasIntID, HasTimestamps {
+public final class Venue: HasIntID, HasTimestamps, HasImage {
+    
     @Attribute(.unique) public var id: Int
     public var created_at: Date = Foundation.Date.now
     public var updated_at: Date = Foundation.Date.now
@@ -53,6 +54,8 @@ public final class Venue: HasIntID, HasTimestamps {
     @Relationship(deleteRule: .cascade, inverse: \DeliveryMethod.venue) public var active_delivery_methods: [DeliveryMethod] = []
     @Relationship(deleteRule: .cascade) public var images: [Media] = []
     @Relationship(deleteRule: .cascade, inverse: \VenueHour.venue) public var hours: [VenueHour] = []
+    @Relationship(deleteRule: .cascade, inverse: \ChannelVenue.venue)
+    public var channel_venues: [ChannelVenue] = []
 
     // MARK: - Transient (non-persisted) properties
     /// All of the links in stock at this venue. Call Where to Buy to populate.
@@ -117,6 +120,14 @@ public final class Venue: HasIntID, HasTimestamps {
         self.active_delivery_methods = active_delivery_methods
         self.images = images
         self.hours = hours
+    }
+    
+    @Transient
+    public var channel: Channel? {
+        if let primary = channel_venues.first(where: { ($0.is_primary ?? false) && !($0.archived ?? false) })?.channel {
+            return primary
+        }
+        return channel_venues.first(where: { !($0.archived ?? false) })?.channel
     }
 
     // MARK: - Legacy helpers (ported)
@@ -183,6 +194,21 @@ public final class Venue: HasIntID, HasTimestamps {
             }
         }
         return ""
+    }
+    
+    var primary_image : Media? {
+        if (channel != nil) {
+            return channel?.primary_image
+        }
+        return images.first
+    }
+    
+    public func getImage(width : Int, height : Int, quality : Int = 80) -> URL? {
+        return PreferabliTools.getImageUrl(image: primary_image?.path, width: width, height: height, quality: quality)
+    }
+    
+    public func getPlaceholderImage() -> String? {
+        return nil
     }
 
     /// Does the venue offer shipping?

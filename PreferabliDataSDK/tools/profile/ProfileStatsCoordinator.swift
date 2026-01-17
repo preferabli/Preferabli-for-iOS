@@ -61,12 +61,31 @@ public actor ProfileStatsCoordinator {
             await CollectionLoader.shared.ensureLoaded(BuiltInCollection.ratings, timeout: timeout)
 
             // 3) Recompute (deduped)
-            await recomputeIfReady(ownerKey: ownerKey, timeout: timeout)
+            await recomputeForced(ownerKey: ownerKey)
         } catch {
             // If not logged in or anything else, just no-op.
             // Stats UI can show empty state / fallback.
         }
     }
+    
+    private func recomputeForced(ownerKey: Int) async {
+        // Dedup per owner
+        if let t = recomputeTasks[ownerKey] {
+            await t.value
+            return
+        }
+
+        let task = Task<Void, Never> { [weak self] in
+            guard let self else { return }
+            await self.recomputeFromLocal()
+            await self.setDirty(false, ownerKey: ownerKey)
+        }
+
+        recomputeTasks[ownerKey] = task
+        await task.value
+        recomputeTasks[ownerKey] = nil
+    }
+
 
     /// Called from background hooks (startup, ratings warm done, etc).
     /// Only recomputes if:

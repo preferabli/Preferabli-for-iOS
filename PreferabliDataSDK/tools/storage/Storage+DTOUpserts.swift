@@ -688,7 +688,9 @@ extension Storage {
         u.rating_collection_id  = dto.rating_collection_id ?? u.rating_collection_id
         u.provided_feedback_at  = dto.provided_feedback_at ?? u.provided_feedback_at
         u.wishlist_collection_id = dto.wishlist_collection_id ?? u.wishlist_collection_id
-        
+        u.avatar_background_color                 = dto.avatar_background_color ?? u.avatar_background_color
+        u.avatar_text_color                 = dto.avatar_text_color ?? u.avatar_text_color
+
         if let avatarDTO = dto.avatar {
             let media = try upsertMedia(from: avatarDTO, in: ctx)
             u.avatar = media
@@ -696,4 +698,113 @@ extension Storage {
         
         return u
     }
+    
+    // MARK: - Channel
+
+    @discardableResult
+    nonisolated static func upsertChannel(from dto: ChannelDTO, in ctx: ModelContext) throws -> Channel {
+        let c = try fetchOrInsert(Channel.self, id: dto.id, in: ctx) { Channel(id: dto.id) }
+
+        // Core fields
+        c.account_id = dto.account_id ?? c.account_id
+        c.name = dto.name ?? c.name
+        c.description_text = dto.description ?? c.description_text
+        c.order = dto.order ?? c.order
+        c.archived = dto.archived ?? c.archived
+        c.published = dto.published ?? c.published
+
+        // Display defaults
+        c.default_display_vintages = dto.default_display_vintages ?? c.default_display_vintages
+        c.default_display_variants = dto.default_display_variants ?? c.default_display_variants
+        c.default_display_variant_details = dto.display_variant_details ?? c.default_display_variant_details
+        c.default_display_price = dto.default_display_price ?? c.default_display_price
+        c.default_display_quantity = dto.default_display_quantity ?? c.default_display_quantity
+        c.default_display_bin = dto.default_display_bin ?? c.default_display_bin
+        c.default_downweight_previous_recs_duration = dto.default_downweight_previous_recs_duration ?? c.default_downweight_previous_recs_duration
+
+        // Download flags
+        c.has_download_pdf = dto.has_download_pdf ?? c.has_download_pdf
+        c.has_download_csv = dto.has_download_csv ?? c.has_download_csv
+        c.has_download_xlsx = dto.has_download_xlsx ?? c.has_download_xlsx
+
+        // Channel classification
+        c.is_retailer = dto.is_retailer ?? c.is_retailer
+        c.is_producer = dto.is_producer ?? c.is_producer
+        c.is_restaurant = dto.is_restaurant ?? c.is_restaurant
+        c.is_hospitality = dto.is_hospitality ?? c.is_hospitality
+        c.is_event = dto.is_event ?? c.is_event
+        c.is_verified = dto.is_verified ?? c.is_verified
+
+        // Defaults
+        c.default_timezone = dto.default_timezone ?? c.default_timezone
+        c.default_currency = dto.default_currency ?? c.default_currency
+        c.default_badge_method = dto.default_badge_method ?? c.default_badge_method
+
+        // Cutoffs
+        c.num_dollar_signs_cutoff_1 = dto.num_dollar_signs_cutoff_1 ?? c.num_dollar_signs_cutoff_1
+        c.num_dollar_signs_cutoff_2 = dto.num_dollar_signs_cutoff_2 ?? c.num_dollar_signs_cutoff_2
+        c.num_dollar_signs_cutoff_3 = dto.num_dollar_signs_cutoff_3 ?? c.num_dollar_signs_cutoff_3
+        c.num_dollar_signs_cutoff_4 = dto.num_dollar_signs_cutoff_4 ?? c.num_dollar_signs_cutoff_4
+        c.num_dollar_signs_cutoff_5 = dto.num_dollar_signs_cutoff_5 ?? c.num_dollar_signs_cutoff_5
+
+        // FX
+        c.currency_exchange_multiplier_from_foreign_to_usd =
+            dto.currency_exchange_multiplier_from_foreign_to_usd ?? c.currency_exchange_multiplier_from_foreign_to_usd
+
+        // Optional IDs
+        c.featured_collection_id = dto.featured_collection_id ?? c.featured_collection_id
+        c.primary_inventory_id = dto.primary_inventory_id ?? c.primary_inventory_id
+        c.primary_questionnaire_id = dto.primary_questionnaire_id ?? c.primary_questionnaire_id
+        c.default_curation_batch_id = dto.default_curation_batch_id ?? c.default_curation_batch_id
+        c.default_curation_questions_batch_id = dto.default_curation_questions_batch_id ?? c.default_curation_questions_batch_id
+        c.max_number_of_venues = dto.max_number_of_venues ?? c.max_number_of_venues
+
+        // Timestamps
+        c.created_at = dto.created_at ?? c.created_at
+        c.updated_at = dto.updated_at ?? c.updated_at
+
+        // Possible shipping types (replace list)
+        if let pst = dto.possible_shipping_types {
+            c.possible_shipping_types = pst
+        }
+
+        // Primary image
+        if let imgDTO = dto.primary_image {
+            let media = try upsertMedia(from: imgDTO, in: ctx)
+            if c.primary_image !== media {
+                c.primary_image = media
+            }
+        }
+
+        // Images
+        if let imgDTOs = dto.images {
+            c.images = try imgDTOs.map { try upsertMedia(from: $0, in: ctx) }
+        }
+
+        // Join rows: channel_venues (preserve per-edge flags)
+        if let joinDTOs = dto.channel_venues {
+            c.channel_venues = try joinDTOs.map { j in
+                let cv = try fetchOrInsert(ChannelVenue.self, id: j.id, in: ctx) { ChannelVenue(id: j.id) }
+
+                cv.is_primary = j.is_primary ?? cv.is_primary
+                cv.archived = j.archived ?? cv.archived
+
+                if cv.channel?.id != c.id {
+                    cv.channel = c
+                }
+
+                if let vDTO = j.venue {
+                    let v = try upsertVenue(from: vDTO, in: ctx)
+                    if cv.venue?.id != v.id {
+                        cv.venue = v
+                    }
+                }
+
+                return cv
+            }
+        }
+
+        return c
+    }
+
 }

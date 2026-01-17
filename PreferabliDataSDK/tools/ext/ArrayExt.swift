@@ -18,4 +18,9 @@ extension Array {
         }
         return result
     }
+    
+    subscript(safe idx: Int) -> Element? {
+        guard idx >= 0, idx < count else { return nil }
+        return self[idx]
+    }
 }

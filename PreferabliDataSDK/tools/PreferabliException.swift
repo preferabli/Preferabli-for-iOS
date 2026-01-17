@@ -82,6 +82,8 @@ public enum PreferabliExceptionType : Sendable {
     case MappingNotFound
     /// An error in the SwiftData database.
     case BadSwiftData
+    /// User or system cancelled the request
+    case Cancelled
 
     
     /// A general description of this type of exception.
@@ -112,6 +114,8 @@ public enum PreferabliExceptionType : Sendable {
             return "Could not match your supplied ids to a Preferabli product. Are you sure this product is mapped?"
         case .BadSwiftData:
             return "SwiftData returned bad data. Contact support."
+        case .Cancelled:
+            return "Request cancelled."
         }
     }
 }
