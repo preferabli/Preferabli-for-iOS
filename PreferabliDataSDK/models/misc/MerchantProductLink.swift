@@ -53,44 +53,44 @@ public class MerchantProductLink : BaseObject {
     ///   - lookups: an array of links to be filtered.
     ///   - search_text: search terms as a string.
     /// - Returns: a filtered array of links.
-    static public func filterLinks(lookups : Array<MerchantProductLink>, search_text : String) -> Array<MerchantProductLink> {
-        var filteredLookups = Array<MerchantProductLink>()
-        if (search_text.isEmptyOrWhitespace()) {
-            filteredLookups = lookups
-        } else {
-            let searchTerms = search_text.components(separatedBy: " ")
-            filteredLookups = lookups.filter() {
-                for searchTerm in searchTerms {
-                    if ($0.filterLink(search_term: searchTerm)) {
-                        continue
-                    } else {
-                        return false
-                    }
-                }
-                return true
-            }
-        }
-        
-        filteredLookups = filteredLookups.filter() { $0.getVenues().count > 0 }
-        
-        return filteredLookups
-    }
+//    static public func filterLinks(lookups : Array<MerchantProductLink>, search_text : String) -> Array<MerchantProductLink> {
+//        var filteredLookups = Array<MerchantProductLink>()
+//        if (search_text.isEmptyOrWhitespace()) {
+//            filteredLookups = lookups
+//        } else {
+//            let searchTerms = search_text.components(separatedBy: " ")
+//            filteredLookups = lookups.filter() {
+//                for searchTerm in searchTerms {
+//                    if ($0.filterLink(search_term: searchTerm)) {
+//                        continue
+//                    } else {
+//                        return false
+//                    }
+//                }
+//                return true
+//            }
+//        }
+//        
+//        filteredLookups = filteredLookups.filter() { $0.getVenues().count > 0 }
+//        
+//        return filteredLookups
+//    }
     
-    internal func filterLink(search_term : String) -> Bool {
-        if (search_term.isEmptyOrWhitespace()) {
-            return true
-        } else if (product_name?.containsIgnoreCase(search_term) ?? false) {
-            return true
-        } else {
-            for venue in getVenues() {
-                if (venue.filterVenue(search_term: search_term)) {
-                    return true
-                }
-            }
-        }
-        
-        return false
-    }
+//    internal func filterLink(search_term : String) -> Bool {
+//        if (search_term.isEmptyOrWhitespace()) {
+//            return true
+//        } else if (product_name?.containsIgnoreCase(search_term) ?? false) {
+//            return true
+//        } else {
+//            for venue in getVenues() {
+//                if (venue.filterVenue(search_term: search_term)) {
+//                    return true
+//                }
+//            }
+//        }
+//        
+//        return false
+//    }
     
     /// Gets an array of Where to Buy venues.
     /// - Returns: an array of ``Venue``. Returns an empty array if not populated.

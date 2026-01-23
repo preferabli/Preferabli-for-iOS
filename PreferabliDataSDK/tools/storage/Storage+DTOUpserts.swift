@@ -144,32 +144,31 @@ extension Storage {
     
     @discardableResult
     nonisolated static func upsertVariant(from dto: VariantDTO, product: Product, in ctx: ModelContext) throws -> Variant {
-        let v : Variant
+        let v: Variant
         if let temp = product.getVariantWithYear(year: dto.year) {
             v = temp
-            v.id = dto.id
         } else {
-            v = try fetchOrInsert(Variant.self, id: dto.id, in: ctx) { Variant(id: dto.id, year: dto.year, product: product) }
+            v = try fetchOrInsert(Variant.self, id: dto.id, in: ctx) {
+                Variant(id: dto.id, year: dto.year, product: product)
+            }
         }
+
+        // ✅ Re-assert required fields
+        v.id = dto.id
+        v.year = dto.year
+        if v.product.id != product.id { v.product = product }
+
         v.created_at = dto.created_at ?? v.created_at
         v.updated_at = dto.updated_at ?? v.updated_at
         v.num_dollar_signs = dto.num_dollar_signs ?? v.num_dollar_signs
         v.price = dto.price ?? v.price
         v.recommendable = dto.recommendable ?? v.recommendable
-        v.year = dto.year
-        
+
         if let imgDTO = dto.primary_image {
             let media = try upsertMedia(from: imgDTO, in: ctx)
-            if v.primary_image !== media {            // <-- add this line
-                v.primary_image = media
-            }
+            if v.primary_image !== media { v.primary_image = media }
         }
-        
-        let currentMostRecentVariantYear = product.cachedMostRecentVariant?.year ?? -2
-        if (v.year > currentMostRecentVariantYear) {
-            product.cachedMostRecentVariant = v
-        }
-        
+
         return v
     }
     
@@ -226,6 +225,7 @@ extension Storage {
     @discardableResult
     nonisolated static func upsertMedia(from dto: MediaDTO, in ctx: ModelContext) throws -> Media {
         let m = try fetchOrInsert(Media.self, id: dto.id, in: ctx) { Media(id: dto.id) }
+        m.id = dto.id
         m.path = dto.path ?? m.path
         m.created_at = dto.created_at ?? m.created_at
         m.updated_at = dto.updated_at ?? m.updated_at
@@ -346,9 +346,9 @@ extension Storage {
         if let vers = dto.versions {
             c.versions = try vers.map { try upsertCollectionVersion(from: $0, collection: c, in: ctx) }
         }
-        if let traits = dto.traits {
-            c.traits = try traits.map { try upsertCollectionTrait(from: $0, in: ctx) }
-        }
+//        if let traits = dto.traits {
+//            c.traits = try traits.map { try upsertCollectionTrait(from: $0, in: ctx) }
+//        }
         
         return c
     }

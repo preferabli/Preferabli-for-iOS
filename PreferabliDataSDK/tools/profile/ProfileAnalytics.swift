@@ -568,41 +568,59 @@ public enum ProfileAnalytics {
         metric: TopProductMetric
     ) -> [ProfileProductKind] {
 
-        let pairs: [(ProfileProductKind, Double)] = ProfileProductKind.allCases.compactMap { kind in
-            guard let typeStats = stats.perType[kind] else { return nil }
+        // Build candidates with computed metric values
+        let candidates: [(kind: ProfileProductKind, value: Double, myStyleCount: Int, ratingCount: Int)] =
+            ProfileProductKind.allCases.compactMap { kind in
+                guard let typeStats = stats.perType[kind] else { return nil }
 
-            let value: Double
-            switch metric {
-            case .mostRatings:
-                value = Double(typeStats.ratingCount)
-            case .breadth:
-                let total = Double(kind.totalStyleCount)
-                value = total > 0
-                    ? Double(typeStats.myStyleCount) / total * 100
-                    : 0
+                let myStyleCount = typeStats.myStyleCount
+                let ratingCount  = typeStats.ratingCount
 
-            case .depth:
-                let maxScore = Double(kind.highestScore)
-                value = maxScore > 0
-                    ? Double(typeStats.myScore) / maxScore * 100
-                    : 0
+                // ✅ Eligibility filter per metric
+                switch metric {
+                case .mostRatings:
+                    guard ratingCount > 0 else { return nil }
+                default:
+                    // For breadth/depth/appeal/topScore, require actual style data
+                    guard myStyleCount > 0 else { return nil }
+                }
 
-            case .appealingRatio:
-                let denom = Double(typeStats.myStyleCount)
-                value = denom > 0
-                    ? Double(typeStats.appealingCount) / denom * 100
-                    : 0
+                let value: Double
+                switch metric {
+                case .mostRatings:
+                    value = Double(ratingCount)
 
-            case .topScore:
-                value = Double(typeStats.topScore * 1000) // scale for int-like behavior
+                case .breadth:
+                    let total = Double(kind.totalStyleCount)
+                    value = total > 0 ? (Double(myStyleCount) / total) * 100 : 0
+
+                case .depth:
+                    let maxScore = Double(kind.highestScore)
+                    let depth = maxScore > 0 ? (Double(typeStats.myScore) / maxScore) * 100 : 0
+                    value = max(0, depth) // ✅ clamp negatives so “-3%” doesn’t “win” weirdly
+
+                case .appealingRatio:
+                    let denom = Double(myStyleCount)
+                    value = denom > 0 ? (Double(typeStats.appealingCount) / denom) * 100 : 0
+
+                case .topScore:
+                    value = Double(typeStats.topScore * 1000) // your scaling
+                }
+
+                return (kind, value, myStyleCount, ratingCount)
             }
 
-            return (kind, value)
-        }
+        // If nothing eligible, return empty → UI should not show a fake kind
+        guard !candidates.isEmpty else { return [] }
 
-        return pairs
-            .sorted { $0.1 > $1.1 } // descending
-            .map { $0.0 }
+        return candidates
+            .sorted { a, b in
+                if a.value != b.value { return a.value > b.value }                 // metric desc
+                if a.myStyleCount != b.myStyleCount { return a.myStyleCount > b.myStyleCount } // styles desc
+                if a.ratingCount != b.ratingCount { return a.ratingCount > b.ratingCount }     // ratings desc
+                return a.kind.rawValue < b.kind.rawValue                           // stable tie-break
+            }
+            .map(\.kind)
     }
 
     /// Average percent across breadth (styles) and depth (score).

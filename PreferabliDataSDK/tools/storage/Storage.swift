@@ -116,12 +116,14 @@ public enum Storage {
       }
 
     @inline(__always)
-        public static func withContext<T>(_ body: @MainActor (ModelContext) throws -> T) rethrows -> T {
-            // --- FIX ---
-            // Use the container's mainContext since we're on the MainActor
-            try body(container.mainContext)
-            // -----------
-        }
+    public static func withContext<T>(_ body: @MainActor (ModelContext) throws -> T) rethrows -> T {
+        let ctx = container.mainContext
+        let old = ctx.autosaveEnabled
+        ctx.autosaveEnabled = false
+        defer { ctx.autosaveEnabled = old }
+
+        return try body(ctx)
+    }
 
     // still updates UI since it is from the same container
     nonisolated

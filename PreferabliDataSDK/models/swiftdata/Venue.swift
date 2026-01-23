@@ -48,6 +48,17 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
     public var url_youtube: String?
     public var zip_code: String?
     public var notes: String?
+    
+    // new stuff not on api yet
+    public var logo: Media?
+    public var video: Media?
+    public var desc: String?
+    var primary_image : Media? {
+        if (channel != nil) {
+            return channel?.primary_image
+        }
+        return images.first
+    }
 
     // MARK: - Relationships
     @Relationship(deleteRule: .nullify) public var collections: [Collection] = []
@@ -57,9 +68,7 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
     @Relationship(deleteRule: .cascade, inverse: \ChannelVenue.venue)
     public var channel_venues: [ChannelVenue] = []
 
-    // MARK: - Transient (non-persisted) properties
-    /// All of the links in stock at this venue. Call Where to Buy to populate.
-    @Transient public var links: [MerchantProductLink] = []
+
     /// Available delivery methods for the current user. Call Where to Buy to populate.
     @Transient internal var hasShipping: Bool?
     @Transient internal var hasLocalDelivery: Bool?
@@ -196,13 +205,6 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
         return ""
     }
     
-    var primary_image : Media? {
-        if (channel != nil) {
-            return channel?.primary_image
-        }
-        return images.first
-    }
-    
     public func getImage(width : Int, height : Int, quality : Int = 80) -> URL? {
         return PreferabliTools.getImageUrl(image: primary_image?.path, width: width, height: height, quality: quality)
     }
@@ -283,42 +285,6 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
             }
         }
     }
-
-    /// Filter venues by a user's search.
-    /// - Parameters:
-    ///   - venues: an array of venues to be filtered.
-    ///   - search_text: user's search query as a string.
-    /// - Returns: a filtered array of venues.
-    static public func filterVenues(venues : [Venue], search_text : String) -> [Venue] {
-        var filteredVenues = [Venue]()
-        if (search_text.isEmptyOrWhitespace()) {
-            filteredVenues = venues
-        } else {
-            let searchTerms = search_text.components(separatedBy: " ")
-            filteredVenues = venues.filter {
-                for searchTerm in searchTerms {
-                    if ($0.filterVenue(search_term: searchTerm)) { continue } else { return false }
-                }
-                return true
-            }
-        }
-        filteredVenues = filteredVenues.filter { $0.links.count > 0 }
-        return filteredVenues
-    }
-
-    internal func filterVenue(search_term : String) -> Bool {
-        if (search_term.isEmptyOrWhitespace()) { return true }
-        if (country?.containsIgnoreCase(search_term) ?? false) { return true }
-        if (city?.containsIgnoreCase(search_term) ?? false) { return true }
-        if (display_name?.containsIgnoreCase(search_term) ?? false) { return true }
-        if (name?.containsIgnoreCase(search_term) ?? false) { return true }
-        if (state?.containsIgnoreCase(search_term) ?? false) { return true }
-        if (address_l1?.containsIgnoreCase(search_term) ?? false) { return true }
-        if (address_l2?.containsIgnoreCase(search_term) ?? false) { return true }
-        for lookup in links { if (lookup.filterLink(search_term: search_term)) { return true } }
-        return false
-    }
-
     /// Get the Facebook url for a venue.
     /// - Returns: the full Facebook url of the venue.
     public func getFacebookUrl() -> String { "https://www.facebook.com/" + (url_facebook ?? "") }
@@ -380,50 +346,5 @@ public enum ShippingType {
 
     public func compare(_ other: ShippingType) -> ComparisonResult {
         return self.getDatabaseName().caseInsensitiveCompare(other.getDatabaseName())
-    }
-}
-
-/// Represents a day of the week for use within ``VenueHour``.
-public enum Weekday {
-    case MONDAY
-    case TUESDAY
-    case WEDNESDAY
-    case THURSDAY
-    case FRIDAY
-    case SATURDAY
-    case SUNDAY
-    case NONE
-
-    static internal func getWeekdayFromString(weekday : String?) -> Weekday {
-        if let w = weekday {
-            switch w {
-            case "monday":    return .MONDAY
-            case "tuesday":   return .TUESDAY
-            case "wednesday": return .WEDNESDAY
-            case "thursday":  return .THURSDAY
-            case "friday":    return .FRIDAY
-            case "saturday":  return .SATURDAY
-            case "sunday":    return .SUNDAY
-            default:          return .NONE
-            }
-        }
-        return .NONE
-    }
-
-    internal func getStringFromWeekday() -> String {
-        switch self {
-        case .MONDAY:    return "monday"
-        case .TUESDAY:   return "tuesday"
-        case .WEDNESDAY: return "wednesday"
-        case .THURSDAY:  return "thursday"
-        case .FRIDAY:    return "friday"
-        case .SATURDAY:  return "saturday"
-        case .SUNDAY:    return "sunday"
-        case .NONE:      return "none"
-        }
-    }
-
-    public func compare(_ other: Weekday) -> ComparisonResult {
-        return self.getStringFromWeekday().caseInsensitiveCompare(other.getStringFromWeekday())
     }
 }
