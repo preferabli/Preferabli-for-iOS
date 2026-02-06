@@ -19,12 +19,4 @@ public final class Location: HasIntID, HasTimestamps {
     public static func predicate(forID id: Int) -> Predicate<Location> {
         #Predicate<Location> { $0.id == id }
     }
-    
-    public var flag: URL? {
-        if let country_code = country_code {
-            return URL(string: "https://purecatamphetamine.github.io/country-flag-icons/3x2/" + country_code + ".svg")
-        } else {
-            return nil
-        }
-    }
 }

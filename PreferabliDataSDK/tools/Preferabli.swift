@@ -111,21 +111,21 @@ public class Preferabli {
 
             // 2) Only after startup work completes, do maintenance (background).
             // Serialize prune -> reindex to avoid concurrent graph churn.
-            Task.detached(priority: .background) {
-                await Storage.pruneTombstones(batchSize: 500, log: log)
-
-                // Gate expensive reindex so it only runs when needed.
-                // Tie it to versionCode (or schema hash) so upgrades trigger it.
-                let ks = Storage.getKeyStore()
-                let reindexKey = "didReindexSearchableContent_v\(await Preferabli.versionCode)"
-
-                if !ks.bool(forKey: reindexKey) {
-                    await Storage.reindexSearchableContent(batchSize: 250, log: log)
-                    ks.set(true, forKey: reindexKey)
-                } else {
-                    log("Skipping reindex (already completed for \(reindexKey))")
-                }
-            }
+//            Task.detached(priority: .background) {
+//                await Storage.pruneTombstones(batchSize: 150, log: log)
+//
+//                // Gate expensive reindex so it only runs when needed.
+//                // Tie it to versionCode (or schema hash) so upgrades trigger it.
+//                let ks = Storage.getKeyStore()
+//                let reindexKey = "didReindexSearchableContent_v\(await Preferabli.versionCode)"
+//
+//                if !ks.bool(forKey: reindexKey) {
+//                    await Storage.reindexSearchableContent(batchSize: 250, log: log)
+//                    ks.set(true, forKey: reindexKey)
+//                } else {
+//                    log("Skipping reindex (already completed for \(reindexKey))")
+//                }
+//            }
         }
     }
 
@@ -427,29 +427,26 @@ public class Preferabli {
             try await canWeContinue(needsToBeLoggedIn: true)
             Analytics.track(["event": "update_avatar"])
 
-            let finalAvatarId: Int
+            var params: SParams = [:]
+
             if let avatarId {
                 // ✅ Selecting an existing media avatar (no upload)
-                finalAvatarId = avatarId
+                params["avatar_id"] = avatarId
             } else if let image {
                 // ✅ Upload local/cropped image, then set avatar_id to uploaded media id
                 let mediaResponse: MediaDTO = try await api.getAlamo().upload(APIEndpoints.postMedia, data: image)
-                finalAvatarId = mediaResponse.id
+                params["avatar_id"] = mediaResponse.id
             } else {
                 // ✅ Initials avatar
-                finalAvatarId = -1
+                params["avatar_id"] = NSNull()
             }
-
-            var params: SParams = [
-                "avatar_id": finalAvatarId
-            ]
 
             // ✅ Optional initials styling (you said you'll handle details server-side)
             if let initialsBackgroundHex {
-                params["initials_bg"] = initialsBackgroundHex   // TODO: confirm param name
+                params["avatar_background_color_hex"] = initialsBackgroundHex   // TODO: confirm param name
             }
             if let initialsTextHex {
-                params["initials_text"] = initialsTextHex       // TODO: confirm param name
+                params["avatar_text_color_hex"] = initialsTextHex       // TODO: confirm param name
             }
 
             let user : PreferabliUserDTO = try await api
@@ -759,6 +756,29 @@ public class Preferabli {
         }
     }
     
+    public func getScripts() async throws -> [String : String] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            
+            Analytics.track( ["event" : "get_scripts"])
+            
+            let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+            let buildInt = Int(buildNumber)
+            
+            var params: SParams = [
+                "platform": "ios_tastefuli_app",
+                "version" : buildInt
+            ]
+            
+            let scripts = try await api.getAlamo().getText(APIEndpoints.scripts, sparams: params)
+            return PreferabliTools.splitCombinedScriptsToDictionary(from: scripts)
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
     public func getFoodCategories(style_id : Int? = nil) async throws -> [Int] {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
@@ -836,12 +856,12 @@ public class Preferabli {
             var params: SParams = [
                 "collection_id": Preferabli.PRIMARY_INVENTORY_ID,
                 "user_id":  PreferabliTools.getPreferabliUserId(),
-                "category": category.getCategoryName(),
+                "product_category": category.getCategoryName(),
                 "limit": 10,
             ]
             
             if let type {
-                params["type"] = type.getTypeName()
+                params["product_type"] = type.getTypeName()
             }
             
             let body: [StyleDTO] = try await api.getAlamo().get(APIEndpoints.stylesToTry, sparams: params)
@@ -878,11 +898,11 @@ public class Preferabli {
                 "user_id":  PreferabliTools.getPreferabliUserId(),
                 "style_ids[]": style_id,
                 "limit": 10,
-                "category": category.getCategoryName(),
+                "product_category": category.getCategoryName(),
             ]
             
             if let type {
-                params["type"] = type.getTypeName()
+                params["product_type"] = type.getTypeName()
             }
             
             let body: [StyleRecResponseDTO] = try await api.getAlamo().get(APIEndpoints.stylesToTryRecs, sparams: params)
@@ -926,8 +946,11 @@ public class Preferabli {
                 "style_id": style_id,
                 "mode": conflict ? "ambiguous" : "low_experience",
                 "product_category": product_category?.getCategoryName(),
-                "type": product_type?.getTypeName()
             ]
+            
+            if let product_type {
+                params["type"] = product_type.getTypeName()
+            }
             
             let body: [StyleRecResponseDTO] = try await api.getAlamo().get(APIEndpoints.styleSuggestions, sparams: params)
             
@@ -1128,6 +1151,54 @@ public class Preferabli {
         }
     }
     
+    public func getMarkets(force_refresh: Bool = false) async throws -> [Int] {
+        let api = self.api
+        let loggingEnabled = self.loggingEnabled // if needed later
+
+        return try await MarketsLoader.shared.run { [weak self] in
+            guard let self else { return [] }
+
+            do {
+                try await self.canWeContinue(needsToBeLoggedIn: false)
+                Analytics.track(["event": "get_markets"])
+
+                if !force_refresh, Storage.getKeyStore().bool(forKey: "hasLoadedMarkets") {
+                    let localIds: [Int] = try await Storage.withBackgroundContext { ctx in
+                        let markets = try ctx.fetch(FetchDescriptor<Market>())
+                        return markets.map { $0.id }
+                    }
+                    if !localIds.isEmpty { return localIds }
+                }
+
+                let body: [MarketDTO] = try await api.getAlamo().get(APIEndpoints.markets)
+
+                let dtoIds: [Int] = {
+                    var out: [Int] = []
+                    func walk(_ m: MarketDTO) {
+                        out.append(m.id)
+                        for c in m.submarkets { walk(c) }
+                    }
+                    for m in body { walk(m) }
+                    return out
+                }()
+
+                try await Storage.withBackgroundContext { ctx in
+                    _ = try Storage.upsertMarketsSourceOfTruth(from: body, in: ctx)
+                    try ctx.save()
+                }
+
+                Storage.getKeyStore().set(true, forKey: "hasLoadedMarkets")
+                return dtoIds
+
+            } catch {
+                await MainActor.run {
+                    self.handleError(error: error)
+                }
+                throw error
+            }
+        }
+    }
+    
     /// Get product details like a taste profile and food pairings.
     /// - Parameters:
     ///   - force_refresh: if you want to force a refresh of the data
@@ -1170,109 +1241,144 @@ public class Preferabli {
         }
     }
     
-    //    /// Get help finding out where a ``Product`` is in stock.
-    //    /// - Parameters:
-    //    ///   - product_id: id of the starting ``Product``.  Only pass a Preferabli product id. If necessary, call ``Preferabli/getPreferabliProductId(merchant_product_id:merchant_variant_id:onCompletion:onFailure:)`` to convert your product id into a Preferabli product id.
-    //    ///   - fulfill_sort: pass ``FulfillSort`` for sorting & filtering options. If sorting by distance, ``Location`` MUST be present!
-    //    ///   - append_nonconforming_results: pass true if you want results that *DO NOT* conform to all filtering & sorting parameters to be returned. Useful so that something is returned even if the user's filter parameters are too narrow. All results that do not conform contain nonconforming_result = true within. Defaults to *true*.
-    //    ///   - lock_to_integration: pass true if you only want to draw results from your integration. Defaults to *true*.
-    //    ///   - onCompletion: returns ``WhereToBuy`` if the call was successful. *Returns on the main thread.*
-    //    ///   - onFailure: returns ``PreferabliException``  if the call fails. *Returns on the main thread.*
-    //    public func whereToBuy(product_id : Int, fulfill_sort : FulfillSort = FulfillSort.init(), append_nonconforming_results : Bool = true, lock_to_integration : Bool = true, onCompletion: @escaping (WhereToBuy) -> () = {_ in }, onFailure: @escaping (PreferabliException) -> () = {_ in }) {
-    //        PreferabliTools.startNewAsyncWorkThread(priority: .veryHigh, {
-    //            await self.whereToBuyActual(product_id: product_id, fulfill_sort: fulfill_sort, append_nonconforming_results: append_nonconforming_results, lock_to_integration: lock_to_integration, onCompletion: onCompletion, onFailure: onFailure)
-    //        })
-    //    }
-    //
-    //    private func whereToBuyActual(product_id : Int, fulfill_sort : FulfillSort, append_nonconforming_results : Bool, lock_to_integration : Bool, onCompletion: @escaping (WhereToBuy) -> (), onFailure: @escaping (PreferabliException) -> ()) async {
-    //        do {
-    //            try await canWeContinue(needsToBeLoggedIn: false)
-    //
-    //            Analytics.track( ["event" : "where_to_buy"])
-    //
-    //            var sort_by = "nearest_first"
-    //            if (fulfill_sort.type == .DISTANCE && fulfill_sort.ascending) {
-    //                sort_by = "nearest_first"
-    //            } else if (fulfill_sort.type == .DISTANCE) {
-    //                sort_by = "furthest_first"
-    //            } else if (fulfill_sort.ascending){
-    //                sort_by = "price_asc"
-    //            } else {
-    //                sort_by = "price_desc"
-    //            }
-    //
-    //            var params = ["product_id" : product_id, "sort_by" : sort_by, "merge_products" : true, "pickup" : fulfill_sort.include_pickup, "local_delivery" : fulfill_sort.include_delivery, "standard_shipping" : fulfill_sort.include_shipping, "append_nonconforming_results" : append_nonconforming_results, "limit" : 1000, "offset" : 0, "distance_miles" : fulfill_sort.distance_miles] as [String : Any]
-    //
-    //            if (fulfill_sort.type == .DISTANCE && fulfill_sort.location == nil) {
-    //                throw PreferabliException.init(type: .OtherError, message: "Sort by distance requires a location.")
-    //            } else if (fulfill_sort.location != nil) {
-    //                if (PreferabliTools.isNullOrWhitespace(string: fulfill_sort.location!.zip_code)) {
-    //                    params["lat"] = fulfill_sort.location!.latitude
-    //                    params["long"] = fulfill_sort.location!.longitude
-    //                } else {
-    //                    params["zip_code"] = fulfill_sort.location!.zip_code
-    //                }
-    //            } else {
-    //                params["in_stock_anywhere"] = true
-    //            }
-    //
-    //            if (lock_to_integration) {
-    //                var channelIds = Array<Int>()
-    //                channelIds.append(Preferabli.CHANNEL_ID)
-    //                params["channel_ids"] = channelIds
-    //            }
-    //
-    //            if (fulfill_sort.variant_year != Variant.NON_VARIANT) {
-    //                var years = Array<Int>()
-    //                years.append(fulfill_sort.variant_year)
-    //                params["years"] = years
-    //            }
-    //
-    //            var marketplaceResponse = try Preferabli.api.getAlamo().get(APIEndpoints.wheretobuy, params: params)
-    //            marketplaceResponse = try await APIService.continueOrThrowPreferabliException(response: marketplaceResponse)
-    //            let dictionary = try APIService.continueOrThrowJSONException(data: marketplaceResponse.data!) as! NSArray
-    //
-    //            let firstElement = dictionary.firstObject as? [String : Any]
-    //            let venueResults = firstElement?["venue_results"] as? Array<[String : Any]>
-    //            let lookupResults = firstElement?["lookup_results"] as? Array<[String : Any]>
-    //
-    //            try await Storage.withContext { ctx in
-    //                var venues = Array<Venue>()
-    //                if (venueResults != nil) {
-    //                    for venueObject in venueResults! {
-    //                        let venue = try Storage.upsertVenue(from: venueObject, in: ctx)
-    //                        venues.append(venue)
-    //                    }
-    //                }
-    //
-    //            var lookups = Array<MerchantProductLink>()
-    //            if (lookupResults != nil) {
-    //                for lookupObject in lookupResults! {
-    //                    let lookup = MerchantProductLink.init(map: lookupObject)
-    //                    if (lookupObject["venues"] != nil) {
-    //                        var venues = Array<Venue>()
-    //                        for venue in lookupObject["venues"] as! Array<[String : Any]> {
-    //                            let venue = try Storage.upsertVenue(from: venue, in: ctx)
-    //                            venues.append(venue)
-    //                        }
-    //                        lookup.venues = venues
-    //                    }
-    //                    lookups.append(lookup)
-    //                }
-    //            }
-    //            try ctx.save()
-    //        }
-    //
-    ////            let WTB = WhereToBuy(links: lookups, venues: venues)
-    ////
-    ////            DispatchQueue.main.async {
-    ////                onCompletion(WTB)
-    ////            }
-    //
-    //        } catch {
-    //            handleError(error: error, onFailure: onFailure)
-    //        }
-    //    }
+    public func getVenue(force_refresh : Bool = false, venue_id : Int) async throws -> Int
+    {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            
+            Analytics.track(["event": "venue_refresh"])
+            
+            var needsRefresh = true
+            
+            if (!force_refresh) {
+                try Storage.withContext { ctx in
+                    if let venue = try Storage.fetchById(Venue.self, id: venue_id, in: ctx) {
+                        needsRefresh = PreferabliTools.hasMinutesPassed(minutes: 60, startDate: Storage.getKeyStore().object(forKey: "lastCalledVenue\(venue_id)") as? Date)
+                    }
+                }
+            }
+            
+            if needsRefresh {
+                let body: VenueDTO = try await api.getAlamo().get(APIEndpoints.product(id: venue_id))
+                
+                try Storage.withContext { ctx in
+                    try Storage.upsertVenue(from: body, in: ctx)
+                    
+                    try ctx.save()
+                }
+            }
+            
+            return venue_id
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func getExperience(force_refresh : Bool = false, experience_id : Int) async throws -> Int
+    {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            
+            Analytics.track(["event": "experience_refresh"])
+//            
+//            var needsRefresh = true
+//            
+//            if (!force_refresh) {
+//                try Storage.withContext { ctx in
+//                    if let venue = try Storage.fetchById(Venue.self, id: venue_id, in: ctx) {
+//                        needsRefresh = PreferabliTools.hasMinutesPassed(minutes: 60, startDate: Storage.getKeyStore().object(forKey: "lastCalledVenue\(venue_id)") as? Date)
+//                    }
+//                }
+//            }
+//            
+//            if needsRefresh {
+//                let body: VenueDTO = try await api.getAlamo().get(APIEndpoints.product(id: venue_id))
+//                
+//                try Storage.withContext { ctx in
+//                    try Storage.upsertVenue(from: body, in: ctx)
+//                    
+//                    try ctx.save()
+//                }
+//            }
+//            
+            return experience_id
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+        /// Get help finding out where a ``Product`` is in stock.
+        /// - Parameters:
+        ///   - product_id: id of the starting ``Product``.  Only pass a Preferabli product id. If necessary, call ``Preferabli/getPreferabliProductId(merchant_product_id:merchant_variant_id:onCompletion:onFailure:)`` to convert your product id into a Preferabli product id.
+        ///   - fulfill_sort: pass ``FulfillSort`` for sorting & filtering options. If sorting by distance, ``Location`` MUST be present!
+        ///   - append_nonconforming_results: pass true if you want results that *DO NOT* conform to all filtering & sorting parameters to be returned. Useful so that something is returned even if the user's filter parameters are too narrow. All results that do not conform contain nonconforming_result = true within. Defaults to *true*.
+        ///   - lock_to_integration: pass true if you only want to draw results from your integration. Defaults to *false*.
+        public func whereToBuy(product_id : Int, fulfill_sort : FulfillSort = FulfillSort.init(), append_nonconforming_results : Bool = true, lock_to_integration : Bool = false) async throws -> WhereToBuyDTO {
+
+            do {
+                try await canWeContinue(needsToBeLoggedIn: false)
+    
+                Analytics.track( ["event" : "where_to_buy"])
+    
+                var sort_by = "nearest_first"
+                if (fulfill_sort.type == .DISTANCE && fulfill_sort.ascending) {
+                    sort_by = "nearest_first"
+                } else if (fulfill_sort.type == .DISTANCE) {
+                    sort_by = "furthest_first"
+                } else if (fulfill_sort.ascending){
+                    sort_by = "price_asc"
+                } else {
+                    sort_by = "price_desc"
+                }
+    
+                var params : SParams = ["product_id" : product_id, "sort_by" : sort_by, "merge_products" : true, "in-person" : fulfill_sort.include_in_person, "pickup" : fulfill_sort.include_pickup, "local_delivery" : fulfill_sort.include_delivery, "standard_shipping" : fulfill_sort.include_shipping, "append_nonconforming_results" : append_nonconforming_results, "limit" : 1000, "offset" : 0, "distance_miles" : fulfill_sort.distance_miles]
+    
+                if (fulfill_sort.type == .DISTANCE && fulfill_sort.location == nil) {
+                    throw PreferabliException.init(type: .OtherError, message: "Sort by distance requires a location.")
+                } else if let location = fulfill_sort.location {
+                    if (location.zip_code.isEmptyOrWhitespace) {
+                        params["lat"] = location.latitude
+                        params["long"] = location.longitude
+                    } else {
+                        params["zip_code"] = location.zip_code
+                    }
+                } else {
+                    params["in_stock_anywhere"] = true
+                }
+    
+                if (lock_to_integration) {
+                    var channelIds = Array<Int>()
+                    channelIds.append(Preferabli.CHANNEL_ID)
+                    params["channel_ids"] = channelIds
+                }
+    
+                if (fulfill_sort.variant_year != Variant.NON_VARIANT) {
+                    var years = Array<Int>()
+                    years.append(fulfill_sort.variant_year)
+                    params["years"] = years
+                }
+    
+                let marketplaceResponse : [WhereToBuyDTO] = try await api.getAlamo().get(APIEndpoints.whereToBuy, sparams: params)
+
+                guard let result = marketplaceResponse.first else {
+                    throw PreferabliException.init(type: .BadData, message: "No Where to Buy data passed!", code: 765)
+                }
+                
+                if ((result.lookup_results?.isEmpty ?? true) && (result.venue_results?.isEmpty ?? true)) {
+                    throw PreferabliException.init(type: .APIError, message: "No Where to Buy data passed!", code: 765)
+                }
+                
+                return result
+                
+            } catch {
+                handleError(error: error)
+                throw error
+            }
+        }
     
     /// Get the Preference Profile of the customer. Customer must be logged in to run this call.
     /// - Parameters:
@@ -1512,8 +1618,8 @@ public class Preferabli {
         
         try await canWeContinue(needsToBeLoggedIn: false)
         
-        let tempProductId = PreferabliTools.generateRandomLongId()
-        let tempVariantId = PreferabliTools.generateRandomLongId()
+        let tempProductId = Storage.generateRandomLongId()
+        let tempVariantId = Storage.generateRandomLongId()
         
         try Storage.withContext { ctx in
             let productDTO = ProductDTO(id: tempProductId, name: name, category: category.getCategoryName(), subcategory: subcategory?.getSubcategoryName(), type: type?.getTypeName())
@@ -1578,8 +1684,8 @@ public class Preferabli {
         do {
             try await canWeContinue(needsToBeLoggedIn: true)
             
-            let tempTagId = tag_id ?? PreferabliTools.generateRandomLongId()
-            let tempVariantId = PreferabliTools.generateRandomLongId()
+            let tempTagId = tag_id ?? Storage.generateRandomLongId()
+            let tempVariantId = Storage.generateRandomLongId()
             var needsRefresh = false
             
             try Storage.withContext { ctx in

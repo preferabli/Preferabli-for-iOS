@@ -371,6 +371,31 @@ extension Session {
         }
     }
     
+    internal func getText(
+        _ url: URLConvertible,
+        sparams: SParams? = nil
+    ) async throws -> String {
+
+        let raw = try await get(url, sparams: sparams) // uses your existing helper returning AFDataResponse<Data?>
+        let validated = try await APIService.continueOrThrowPreferabliException(response: raw)
+
+        guard let data = validated.data else {
+            throw PreferabliException(type: .JSONError, message: "Empty response body while expecting text.")
+        }
+
+        // Most scripts will be UTF-8. If server sends non-utf8, this will fail and you’ll see it.
+        guard let text = String(data: data, encoding: .utf8) else {
+            let snippet = String(decoding: data.prefix(300), as: UTF8.self)
+            throw PreferabliException(
+                type: .JSONError,
+                message: "Unable to decode response as UTF-8 text.\n── Raw (first 300 bytes as UTF8 lossy) ──\n\(snippet)\n────────",
+                code: validated.response?.statusCode ?? 0
+            )
+        }
+
+        return text
+    }
+    
     @discardableResult
     internal func delete(_ url: URLConvertible) async throws {
         let raw = await deleteActual(url)

@@ -256,11 +256,7 @@ internal class PreferabliTools {
         }
         return symbol
     }
-    
-    internal class func generateRandomLongId() -> Int {
-        return -Int(arc4random() % 28147497)
-    }
-    
+
     internal class func hasDaysPassed(days: Int, startDate: Date?) -> Bool {
         if let startDate = startDate {
             let calendar = NSCalendar.current
@@ -280,6 +276,39 @@ internal class PreferabliTools {
         } else {
             // never called API before!
             return true
+        }
+    }
+    
+    internal class func splitCombinedScriptsToDictionary(from fullScript: String) -> [String: String] {
+        let pattern = #"(?=if\s*\(!window\.__([A-Z0-9_]+)_LOADED__\)\s*\{)"#
+
+        do {
+            let regex = try NSRegularExpression(pattern: pattern, options: [])
+            let nsrange = NSRange(fullScript.startIndex..<fullScript.endIndex, in: fullScript)
+
+            let matches = regex.matches(in: fullScript, options: [], range: nsrange)
+
+            guard !matches.isEmpty else { return ["UNKNOWN": fullScript] }
+
+            var scriptDict: [String: String] = [:]
+
+            for (i, match) in matches.enumerated() {
+                guard let nameRange = Range(match.range(at: 1), in: fullScript) else { continue }
+                let scriptName = String(fullScript[nameRange])
+
+                let start = match.range.lowerBound
+                let end = (i + 1 < matches.count) ? matches[i + 1].range.lowerBound : nsrange.upperBound
+
+                if let range = Range(NSRange(location: start, length: end - start), in: fullScript) {
+                    let scriptBody = String(fullScript[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    scriptDict[scriptName] = scriptBody
+                }
+            }
+
+            return scriptDict
+        } catch {
+            print("Regex error: \(error)")
+            return ["ERROR": fullScript]
         }
     }
     

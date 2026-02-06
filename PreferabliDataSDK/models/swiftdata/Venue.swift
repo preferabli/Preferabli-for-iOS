@@ -52,7 +52,6 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
     // new stuff not on api yet
     public var logo: Media?
     public var video: Media?
-    public var desc: String?
     var primary_image : Media? {
         if (channel != nil) {
             return channel?.primary_image
@@ -67,12 +66,19 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
     @Relationship(deleteRule: .cascade, inverse: \VenueHour.venue) public var hours: [VenueHour] = []
     @Relationship(deleteRule: .cascade, inverse: \ChannelVenue.venue)
     public var channel_venues: [ChannelVenue] = []
+    @Relationship(deleteRule: .cascade, inverse: \Experience.venue)
+    public var experiences: [Experience] = []
+    @Relationship(deleteRule: .nullify, inverse: \MarketTrait.venue)
+    public var traits: [MarketTrait] = []
+    @Relationship(deleteRule: .nullify, inverse: \Market.venues)
+    public var markets: [Market] = []
 
 
     /// Available delivery methods for the current user. Call Where to Buy to populate.
     @Transient internal var hasShipping: Bool?
     @Transient internal var hasLocalDelivery: Bool?
     @Transient internal var hasPickup: Bool?
+    @Transient internal var hasInPerson: Bool?
 
     // MARK: - Init
     public init(id: Int) { self.id = id }
@@ -233,6 +239,11 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
         if (hasPickup == nil) { getDeliveryMethods() }
         return hasPickup ?? false
     }
+    
+    public func getHasInPerson() -> Bool {
+        if (hasInPerson == nil) { getDeliveryMethods() }
+        return hasInPerson ?? false
+    }
 
     /// Get the open time for the given day of the week for a venue.
     /// - Parameter weekday: a day of the week.
@@ -274,7 +285,8 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
         hasShipping = false
         hasLocalDelivery = false
         hasPickup = false
-
+        hasInPerson = false
+        
         for delivery_method in active_delivery_methods {
             if (delivery_method.shipping_type == ShippingType.SHIPPING.getDatabaseName()) {
                 hasShipping = true
@@ -282,6 +294,8 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
                 hasLocalDelivery = true
             } else if (delivery_method.shipping_type == ShippingType.PICKUP.getDatabaseName()) {
                 hasPickup = true
+            } else if (delivery_method.shipping_type == ShippingType.IN_PERSON.getDatabaseName()) {
+                hasInPerson = true
             }
         }
     }
@@ -323,6 +337,7 @@ public enum ShippingType {
     case SHIPPING
     case LOCAL_DELIVERY
     case PICKUP
+    case IN_PERSON
 
     static internal func getShippingTypeBasedOffDatabaseName(value : String?) -> ShippingType {
         if let v = value {
@@ -330,6 +345,7 @@ public enum ShippingType {
             case "standard_shipping": return .SHIPPING
             case "local_delivery":    return .LOCAL_DELIVERY
             case "pickup":            return .PICKUP
+            case "in-person":         return .IN_PERSON
             default:                  return .SHIPPING
             }
         }
@@ -341,6 +357,7 @@ public enum ShippingType {
         case .SHIPPING:       return "standard_shipping"
         case .LOCAL_DELIVERY: return "local_delivery"
         case .PICKUP:         return "pickup"
+        case .IN_PERSON:      return "in-person"
         }
     }
 

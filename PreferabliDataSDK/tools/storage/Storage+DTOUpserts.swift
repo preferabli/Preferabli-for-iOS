@@ -64,7 +64,7 @@ extension Storage {
         
         if let latest_variant_num_dollar_signs = dto.latest_variant_num_dollar_signs, latest_variant_num_dollar_signs != 0 {
             if product.variants.isEmpty {
-                let variant = Variant(id: PreferabliTools.generateRandomLongId(), year: Variant.CURRENT_VARIANT_YEAR, product: product)
+                let variant = Variant(id: generateRandomLongId(), year: Variant.CURRENT_VARIANT_YEAR, product: product)
                 product.cachedMostRecentVariant = variant
                 variant.num_dollar_signs = dto.latest_variant_num_dollar_signs!
                 ctx.insert(variant)
@@ -152,23 +152,23 @@ extension Storage {
                 Variant(id: dto.id, year: dto.year, product: product)
             }
         }
-
+        
         // ✅ Re-assert required fields
         v.id = dto.id
         v.year = dto.year
         if v.product.id != product.id { v.product = product }
-
+        
         v.created_at = dto.created_at ?? v.created_at
         v.updated_at = dto.updated_at ?? v.updated_at
         v.num_dollar_signs = dto.num_dollar_signs ?? v.num_dollar_signs
         v.price = dto.price ?? v.price
         v.recommendable = dto.recommendable ?? v.recommendable
-
+        
         if let imgDTO = dto.primary_image {
             let media = try upsertMedia(from: imgDTO, in: ctx)
             if v.primary_image !== media { v.primary_image = media }
         }
-
+        
         return v
     }
     
@@ -231,6 +231,34 @@ extension Storage {
         m.updated_at = dto.updated_at ?? m.updated_at
         m.type = dto.type ?? m.type
         return m
+    }
+    
+    @discardableResult
+    nonisolated static func upsertExperience(from dto: ExperienceDTO, venue: Venue, in ctx: ModelContext) throws -> Experience {
+        
+        let e = try fetchOrInsert(Experience.self, id: dto.id, in: ctx) {
+            Experience(id: dto.id, venue: venue)
+        }
+        
+        // Timestamps
+        e.created_at = dto.created_at ?? e.created_at
+        e.updated_at = dto.updated_at ?? e.updated_at
+        
+        // Fields
+        e.name = dto.name ?? e.name
+        e.desc = dto.description ?? e.desc
+        e.primary_inventory_id = dto.primary_inventory_id ?? e.primary_inventory_id
+        
+        e.reservations_provider = dto.reservations_provider ?? e.reservations_provider
+        e.booking_link = dto.booking_link ?? e.booking_link
+        e.discount_code = dto.discount_code ?? e.discount_code
+        
+        // Images (replace list if present)
+        if let imgs = dto.images {
+            e.images = try imgs.map { try upsertMedia(from: $0, in: ctx) }
+        }
+        
+        return e
     }
     
     // MARK: Venue
@@ -346,15 +374,15 @@ extension Storage {
         if let vers = dto.versions {
             c.versions = try vers.map { try upsertCollectionVersion(from: $0, collection: c, in: ctx) }
         }
-//        if let traits = dto.traits {
-//            c.traits = try traits.map { try upsertCollectionTrait(from: $0, in: ctx) }
-//        }
+        //        if let traits = dto.traits {
+        //            c.traits = try traits.map { try upsertCollectionTrait(from: $0, in: ctx) }
+        //        }
         
         return c
     }
     
     // MARK: - CollectionVersion / CollectionGroup / CollectionOrder
-
+    
     @discardableResult
     nonisolated static func upsertCollectionVersion(
         from dto: CollectionVersionDTO,
@@ -383,7 +411,7 @@ extension Storage {
         
         return v
     }
-
+    
     @discardableResult
     nonisolated static func upsertCollectionGroup(
         from dto: CollectionGroupDTO,
@@ -393,23 +421,23 @@ extension Storage {
         let g = try fetchOrInsert(CollectionGroup.self, id: dto.id, in: ctx) {
             CollectionGroup(id: dto.id, version: version)
         }
-
+        
         g.created_at      = dto.created_at      ?? g.created_at
         g.updated_at      = dto.updated_at      ?? g.updated_at
         g.name            = dto.name            ?? g.name
         g.order           = dto.order           ?? g.order
         g.orderings_count = dto.orderings_count ?? g.orderings_count
-
+        
         if g.version.id != version.id {
             g.version = version
         }
-
+        
         // NOTE: we don't upsert orders here directly because we need Tags first.
         // The loader can handle that in a second pass once tags/products are in place.
         
         return g
     }
-
+    
     @discardableResult
     nonisolated static func upsertCollectionOrder(
         from dto: CollectionOrderDTO,
@@ -432,7 +460,7 @@ extension Storage {
         o.updated_at = dto.updated_at ?? o.updated_at
         
         // Order
-       o.order = dto.order
+        o.order = dto.order
         
         // Keep relationships in sync
         if o.group.id != group.id {
@@ -445,7 +473,7 @@ extension Storage {
         
         return o
     }
-
+    
     
     @discardableResult
     nonisolated static func upsertCollectionTrait(from dto: CollectionTraitDTO, in ctx: ModelContext) throws -> CollectionTrait {
@@ -454,9 +482,9 @@ extension Storage {
         t.order = dto.order ?? t.order
         t.restrict_to_ring_it = dto.restrict_to_ring_it ?? t.restrict_to_ring_it
         
-//        if let cref = dto.collection?.id {
-//            t.collection = try resolveCollection(id: cref, in: ctx)
-//        }
+        //        if let cref = dto.collection?.id {
+        //            t.collection = try resolveCollection(id: cref, in: ctx)
+        //        }
         return t
     }
     
@@ -467,14 +495,14 @@ extension Storage {
         let p = try fetchOrInsert(Profile.self, id: dto.id, in: ctx) {
             Profile(id: dto.id)
         }
-
+        
         // Core identity / ownership fields
         p.user_id = dto.user_id
         p.customer_id = dto.customer_id
-
+        
         // Overall score
         p.score = dto.score
-
+        
         // Per-category scores (all optionals, 1:1 mapping from DTO)
         p.score_red       = dto.score_red
         p.score_white     = dto.score_white
@@ -490,11 +518,11 @@ extension Storage {
         p.score_cocktail  = dto.score_cocktail
         p.score_beer      = dto.score_beer     // remember: RTD is combined with beer at analytics layer
         p.score_cheese    = dto.score_cheese
-
+        
         // Timestamps (keep existing values if DTO doesn’t send them)
         p.created_at = dto.created_at ?? p.created_at
         p.updated_at = dto.updated_at ?? p.updated_at
-
+        
         // Preference styles
         for pStyle in dto.preference_styles {
             try upsertProfileStyle(from: pStyle, profile: p, in: ctx)
@@ -502,7 +530,7 @@ extension Storage {
         
         return p
     }
-
+    
     
     @discardableResult
     nonisolated static func upsertProfileStyle(from dto: ProfileStyleDTO, profile : Profile, in ctx: ModelContext) throws -> ProfileStyle {
@@ -535,11 +563,11 @@ extension Storage {
         uc.created_at = dto.created_at ?? uc.created_at
         uc.updated_at = dto.updated_at ?? uc.updated_at
         
-//        if let col = dto.collection {
-//            uc.collection = try upsertCollection(from: col, in: ctx)
-//        } else if let cid = dto.collection_id {
-//            uc.collection = try resolveCollection(id: cid, in: ctx)
-//        }
+        //        if let col = dto.collection {
+        //            uc.collection = try upsertCollection(from: col, in: ctx)
+        //        } else if let cid = dto.collection_id {
+        //            uc.collection = try resolveCollection(id: cid, in: ctx)
+        //        }
         return uc
     }
     
@@ -614,12 +642,12 @@ extension Storage {
         profile_style?.style = s
         
         s.locations.removeAll()
-
+        
         for locationDTO in dto.locations {
             let location = try upsertLocation(from: locationDTO, in: ctx)
             s.locations.append(location)
         }
-
+        
         
         return s
     }
@@ -688,23 +716,25 @@ extension Storage {
         u.rating_collection_id  = dto.rating_collection_id ?? u.rating_collection_id
         u.provided_feedback_at  = dto.provided_feedback_at ?? u.provided_feedback_at
         u.wishlist_collection_id = dto.wishlist_collection_id ?? u.wishlist_collection_id
-        u.avatar_background_color                 = dto.avatar_background_color ?? u.avatar_background_color
-        u.avatar_text_color                 = dto.avatar_text_color ?? u.avatar_text_color
-
+        u.avatar_background_color_hex                 = dto.avatar_background_color_hex ?? u.avatar_background_color_hex
+        u.avatar_text_color_hex                 = dto.avatar_text_color_hex ?? u.avatar_text_color_hex
+        
         if let avatarDTO = dto.avatar {
             let media = try upsertMedia(from: avatarDTO, in: ctx)
             u.avatar = media
+        } else {
+            u.avatar = nil
         }
         
         return u
     }
     
     // MARK: - Channel
-
+    
     @discardableResult
     nonisolated static func upsertChannel(from dto: ChannelDTO, in ctx: ModelContext) throws -> Channel {
         let c = try fetchOrInsert(Channel.self, id: dto.id, in: ctx) { Channel(id: dto.id) }
-
+        
         // Core fields
         c.account_id = dto.account_id ?? c.account_id
         c.name = dto.name ?? c.name
@@ -712,7 +742,7 @@ extension Storage {
         c.order = dto.order ?? c.order
         c.archived = dto.archived ?? c.archived
         c.published = dto.published ?? c.published
-
+        
         // Display defaults
         c.default_display_vintages = dto.default_display_vintages ?? c.default_display_vintages
         c.default_display_variants = dto.default_display_variants ?? c.default_display_variants
@@ -721,12 +751,12 @@ extension Storage {
         c.default_display_quantity = dto.default_display_quantity ?? c.default_display_quantity
         c.default_display_bin = dto.default_display_bin ?? c.default_display_bin
         c.default_downweight_previous_recs_duration = dto.default_downweight_previous_recs_duration ?? c.default_downweight_previous_recs_duration
-
+        
         // Download flags
         c.has_download_pdf = dto.has_download_pdf ?? c.has_download_pdf
         c.has_download_csv = dto.has_download_csv ?? c.has_download_csv
         c.has_download_xlsx = dto.has_download_xlsx ?? c.has_download_xlsx
-
+        
         // Channel classification
         c.is_retailer = dto.is_retailer ?? c.is_retailer
         c.is_producer = dto.is_producer ?? c.is_producer
@@ -734,23 +764,23 @@ extension Storage {
         c.is_hospitality = dto.is_hospitality ?? c.is_hospitality
         c.is_event = dto.is_event ?? c.is_event
         c.is_verified = dto.is_verified ?? c.is_verified
-
+        
         // Defaults
         c.default_timezone = dto.default_timezone ?? c.default_timezone
         c.default_currency = dto.default_currency ?? c.default_currency
         c.default_badge_method = dto.default_badge_method ?? c.default_badge_method
-
+        
         // Cutoffs
         c.num_dollar_signs_cutoff_1 = dto.num_dollar_signs_cutoff_1 ?? c.num_dollar_signs_cutoff_1
         c.num_dollar_signs_cutoff_2 = dto.num_dollar_signs_cutoff_2 ?? c.num_dollar_signs_cutoff_2
         c.num_dollar_signs_cutoff_3 = dto.num_dollar_signs_cutoff_3 ?? c.num_dollar_signs_cutoff_3
         c.num_dollar_signs_cutoff_4 = dto.num_dollar_signs_cutoff_4 ?? c.num_dollar_signs_cutoff_4
         c.num_dollar_signs_cutoff_5 = dto.num_dollar_signs_cutoff_5 ?? c.num_dollar_signs_cutoff_5
-
+        
         // FX
         c.currency_exchange_multiplier_from_foreign_to_usd =
-            dto.currency_exchange_multiplier_from_foreign_to_usd ?? c.currency_exchange_multiplier_from_foreign_to_usd
-
+        dto.currency_exchange_multiplier_from_foreign_to_usd ?? c.currency_exchange_multiplier_from_foreign_to_usd
+        
         // Optional IDs
         c.featured_collection_id = dto.featured_collection_id ?? c.featured_collection_id
         c.primary_inventory_id = dto.primary_inventory_id ?? c.primary_inventory_id
@@ -758,16 +788,16 @@ extension Storage {
         c.default_curation_batch_id = dto.default_curation_batch_id ?? c.default_curation_batch_id
         c.default_curation_questions_batch_id = dto.default_curation_questions_batch_id ?? c.default_curation_questions_batch_id
         c.max_number_of_venues = dto.max_number_of_venues ?? c.max_number_of_venues
-
+        
         // Timestamps
         c.created_at = dto.created_at ?? c.created_at
         c.updated_at = dto.updated_at ?? c.updated_at
-
+        
         // Possible shipping types (replace list)
         if let pst = dto.possible_shipping_types {
             c.possible_shipping_types = pst
         }
-
+        
         // Primary image
         if let imgDTO = dto.primary_image {
             let media = try upsertMedia(from: imgDTO, in: ctx)
@@ -775,36 +805,191 @@ extension Storage {
                 c.primary_image = media
             }
         }
-
+        
         // Images
         if let imgDTOs = dto.images {
             c.images = try imgDTOs.map { try upsertMedia(from: $0, in: ctx) }
         }
-
+        
         // Join rows: channel_venues (preserve per-edge flags)
         if let joinDTOs = dto.channel_venues {
             c.channel_venues = try joinDTOs.map { j in
                 let cv = try fetchOrInsert(ChannelVenue.self, id: j.id, in: ctx) { ChannelVenue(id: j.id) }
-
+                
                 cv.is_primary = j.is_primary ?? cv.is_primary
                 cv.archived = j.archived ?? cv.archived
-
+                
                 if cv.channel?.id != c.id {
                     cv.channel = c
                 }
-
+                
                 if let vDTO = j.venue {
                     let v = try upsertVenue(from: vDTO, in: ctx)
                     if cv.venue?.id != v.id {
                         cv.venue = v
                     }
                 }
-
+                
                 return cv
             }
         }
-
+        
         return c
     }
-
+    
+    /// API is the source of truth:
+    /// - Upserts the entire market forest
+    /// - Deletes any Market (any depth) not present in dto forest
+    @discardableResult
+    nonisolated static func upsertMarketsSourceOfTruth(
+        from rootDTOs: [MarketDTO],
+        in ctx: ModelContext
+    ) throws -> [Market] {
+        
+        // 1) Collect all market IDs in the incoming forest
+        var keepMarketIDs = Set<Int>()
+        keepMarketIDs.reserveCapacity(rootDTOs.count * 2)
+        
+        func collect(_ dto: MarketDTO) {
+            keepMarketIDs.insert(dto.id)
+            for child in dto.submarkets { collect(child) }
+        }
+        for dto in rootDTOs { collect(dto) }
+        
+        // 2) Delete any local Markets not in keep set
+        try deleteMarketsNotInSet(keepMarketIDs, in: ctx)
+        
+        // 3) Upsert the forest (root parent = nil)
+        var roots: [Market] = []
+        roots.reserveCapacity(rootDTOs.count)
+        
+        for dto in rootDTOs {
+            let m = try upsertMarketTreeNodeSourceOfTruth(from: dto, parent: nil, in: ctx)
+            roots.append(m)
+        }
+        
+        return roots
+    }
+    
+    nonisolated private static func deleteMarketsNotInSet(
+        _ keep: Set<Int>,
+        in ctx: ModelContext
+    ) throws {
+        // Fetch all markets (you can optimize later with propertiesToFetch if needed)
+        let all = try ctx.fetch(FetchDescriptor<Market>())
+        
+        for m in all where !keep.contains(m.id) {
+            ctx.delete(m) // cascades to submarkets + traits because of deleteRule
+        }
+    }
+    
+    @discardableResult
+    nonisolated private static func upsertMarketTreeNodeSourceOfTruth(
+        from dto: MarketDTO,
+        parent: Market?,
+        in ctx: ModelContext
+    ) throws -> Market {
+        
+        // Fetch-or-insert by unique ID
+        let market = try fetchOrInsert(Market.self, id: dto.id, in: ctx) { Market(id: dto.id) }
+        
+        // Fields
+        market.name = dto.name ?? market.name
+        market.desc = dto.description ?? market.desc
+        market.image_url = dto.image_url ?? market.image_url
+        market.order = dto.order ?? market.order
+        market.country_code = dto.country_code ?? market.country_code
+        market.latitude = dto.latitude ?? market.latitude
+        market.longitude = dto.longitude ?? market.longitude
+        market.top_level = dto.top_level ?? market.top_level
+        market.created_at = dto.created_at ?? market.created_at
+        market.updated_at = dto.updated_at ?? market.updated_at
+        
+        // Parent
+        if market.parent?.id != parent?.id {
+            market.parent = parent
+        }
+        
+        // ✅ Traits: source of truth per market (upsert + delete missing)
+        try upsertMarketTraitsSourceOfTruth(from: dto.traits, for: market, in: ctx)
+        
+        // ✅ Children: recurse, then replace list (source of truth)
+        var newChildren: [Market] = []
+        newChildren.reserveCapacity(dto.submarkets.count)
+        
+        for childDTO in dto.submarkets {
+            let child = try upsertMarketTreeNodeSourceOfTruth(from: childDTO, parent: market, in: ctx)
+            newChildren.append(child)
+        }
+        
+        // Replace children list (keeps ordering from API)
+        if !sameIDs(market.submarkets, newChildren) {
+            market.submarkets = newChildren
+        }
+        
+        return market
+    }
+    
+    nonisolated private static func sameIDs(_ a: [Market], _ b: [Market]) -> Bool {
+        guard a.count == b.count else { return false }
+        for (x, y) in zip(a, b) where x.id != y.id { return false }
+        return true
+    }
+    
+    /// Source of truth:
+    /// - Upsert all traits in DTO
+    /// - Delete any local MarketTrait linked to this market that isn't in DTO
+    nonisolated private static func upsertMarketTraitsSourceOfTruth(
+        from traitDTOs: [MarketTraitDTO],
+        for market: Market,
+        in ctx: ModelContext
+    ) throws {
+        
+        let keepTraitIDs = Set(traitDTOs.map { $0.id })
+        
+        // 1) Delete missing traits for this market
+        // Safer than global delete because trait IDs are assumed unique, but linkage matters most.
+        if !market.traits.isEmpty {
+            for existing in market.traits where !keepTraitIDs.contains(existing.id) {
+                ctx.delete(existing)
+            }
+        }
+        
+        // 2) Upsert / build new ordered list
+        var newTraits: [MarketTrait] = []
+        newTraits.reserveCapacity(traitDTOs.count)
+        
+        for tDTO in traitDTOs {
+            let t = try fetchOrInsert(MarketTrait.self, id: tDTO.id, in: ctx) { MarketTrait(id: tDTO.id) }
+            
+            t.type = tDTO.type ?? t.type
+            t.name = tDTO.name ?? t.name
+            t.order = tDTO.order ?? t.order
+            t.icon_url = tDTO.icon_url ?? t.icon_url
+            t.created_at = tDTO.created_at ?? t.created_at
+            t.updated_at = tDTO.updated_at ?? t.updated_at
+            
+            // Maintain relationship + denormalized market_id
+            if t.market?.id != market.id {
+                t.market = market
+            }
+            if t.market_id != market.id {
+                t.market_id = market.id
+            }
+            
+            newTraits.append(t)
+        }
+        
+        // 3) Replace market.traits to match API ordering
+        // (This also ensures SwiftData relationship is correct even if a trait existed but wasn’t linked.)
+        if !sameTraitIDs(market.traits, newTraits) {
+            market.traits = newTraits
+        }
+    }
+    
+    nonisolated private static func sameTraitIDs(_ a: [MarketTrait], _ b: [MarketTrait]) -> Bool {
+        guard a.count == b.count else { return false }
+        for (x, y) in zip(a, b) where x.id != y.id { return false }
+        return true
+    }
 }

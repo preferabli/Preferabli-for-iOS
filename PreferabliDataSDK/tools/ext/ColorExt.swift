@@ -25,14 +25,15 @@ extension Color {
         self.init(red: r, green: g, blue: b)
     }
     
-    public init?(hex: String?) {
-            guard var hex = hex?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !hex.isEmpty else { return nil }
+    // Renamed to avoid overload ambiguity with init(hex: String)
+    public init?(optionalHex: String?) {
+        guard var hex = optionalHex?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !hex.isEmpty else { return nil }
 
-            if hex.hasPrefix("#") { hex.removeFirst() }
-            hex = hex.uppercased()
+        if hex.hasPrefix("#") { hex.removeFirst() }
+        hex = hex.uppercased()
 
-            self.init(hex: hex)
+        self.init(hex: hex)
     }
     
     func toHex(includeAlpha: Bool = false) -> String? {
@@ -206,4 +207,3 @@ extension UIColor {
         return String(format: "#%02X%02X%02X%02X", ri, gi, bi, ai)
     }
 }
-

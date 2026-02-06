@@ -24,8 +24,8 @@ public final class PreferabliUser : HasIntID, HasTimestamps, HasImage {
     public var rating_collection_id: Int?
     public var provided_feedback_at: Date?
     public var wishlist_collection_id: Int?
-    public var avatar_background_color: String?
-    public var avatar_text_color: String?
+    public var avatar_background_color_hex: String?
+    public var avatar_text_color_hex: String?
     
     @Relationship(deleteRule: .nullify) public var avatar: Media?
 
@@ -64,8 +64,8 @@ public final class PreferabliUser : HasIntID, HasTimestamps, HasImage {
     }
     
     public var isAvatarNotSet: Bool {
-        avatar_background_color == nil &&
-        avatar_text_color == nil &&
+        avatar_background_color_hex == nil &&
+        avatar_text_color_hex == nil &&
         avatar == nil
     }
 

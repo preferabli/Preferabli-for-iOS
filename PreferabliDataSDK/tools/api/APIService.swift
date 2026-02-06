@@ -142,8 +142,10 @@ extension APIService {
            (200..<300).contains(http.statusCode) {
 
             let logging = await MainActor.run { Preferabli.main.loggingEnabled }
-            if logging, let data = response.data, let utf8 = String(data: data, encoding: .utf8) {
-                print("✅ \(http.statusCode) \(endpoint)\nData: \(utf8)")
+            if logging, let data = response.data {
+                let s = prettyJSONString(from: data)
+                print("✅ \(http.statusCode) (bytes=\(data.count) chars=\(s.count))\n\nJSON:\n\n")
+                printJSONInChunks(s)
             }
             return response
         }
@@ -298,6 +300,27 @@ extension APIService {
         )
 
     }
+    
+    internal static func printJSONInChunks(_ json: String, chunkSize: Int = 8000) {
+        var idx = json.startIndex
+        while idx < json.endIndex {
+            let next = json.index(idx, offsetBy: chunkSize, limitedBy: json.endIndex) ?? json.endIndex
+            Swift.print(json[idx..<next], terminator: "") // <- no extra characters
+            idx = next
+        }
+        Swift.print("") // final newline so the console prompt doesn't glue onto the JSON
+    }
+    
+    internal static func prettyJSONString(from data: Data) -> String {
+        guard
+            let obj = try? JSONSerialization.jsonObject(with: data),
+            let pretty = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted]),
+            let s = String(data: pretty, encoding: .utf8)
+        else {
+            return String(decoding: data, as: UTF8.self)
+        }
+        return s
+    }
 
     internal static func continueOrThrowJSONException(data: Data) throws -> Any {
         do {
@@ -340,6 +363,8 @@ internal struct APIEndpoints {
     internal static let styleSuggestions = baseUrl + "suggest"
     internal static let avatars = baseUrl + "avatar-options"
     internal static let channels = baseUrl + "channels"
+    internal static let markets = baseUrl + "markets"
+    internal static let scripts = baseUrl + "front-end-scripts"
 
     
     internal static func integration(id: Int) -> String { baseUrl + "integrations/\(id)" }
@@ -353,6 +378,7 @@ internal struct APIEndpoints {
     internal static func customerProfile(id: Int, and customerId: Int) -> String { baseUrl + "channels/\(id)/customers/\(customerId)/profile?include_styles=false" }
     internal static func collection(id: Int) -> String { baseUrl + "collections/\(id)" }
     internal static func product(id: Int) -> String { baseUrl + "products/\(id)" }
+    internal static func venue(id: Int) -> String { baseUrl + "venues/\(id)" }
     internal static func user(id: Int) -> String { baseUrl + "users/\(id)" }
     internal static func tags(id: Int) -> String { baseUrl + "collections/\(id)/tags" }
     internal static func variants(product_id: Int) -> String { baseUrl + "products/\(product_id)/variants" }

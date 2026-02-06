@@ -52,4 +52,54 @@ public struct VenueDTO: Decodable, Sendable {
     public let active_delivery_methods: [DeliveryMethodDTO]?
     public let images: [MediaDTO]?
     public let hours: [VenueHourDTO]?
+    public let lookups: [MerchantProductLink]?
+}
+
+public extension VenueDTO {
+
+    /// Normalized delivery methods derived from `active_delivery_methods`.
+    var deliveryMethodTypes: Set<ShippingType> {
+        let methods = active_delivery_methods ?? []
+        return Set(methods.map { ShippingType.getShippingTypeBasedOffDatabaseName(value: $0.shipping_type) })
+    }
+
+    func has(_ type: ShippingType) -> Bool {
+        deliveryMethodTypes.contains(type)
+    }
+
+    var hasShipping: Bool { has(.SHIPPING) }
+    var hasLocalDelivery: Bool { has(.LOCAL_DELIVERY) }
+    var hasPickup: Bool { has(.PICKUP) }
+    var hasInPerson: Bool { has(.IN_PERSON) }
+
+    /// Convenience: raw database names, if you ever need them.
+    var shippingTypeDatabaseNames: Set<String> {
+        Set((active_delivery_methods ?? []).compactMap(\.shipping_type))
+    }
+
+    // MARK: - Notes (mirrors Venue helpers)
+
+    var shippingSpeedNote: String? {
+        active_delivery_methods?
+            .first(where: { ShippingType.getShippingTypeBasedOffDatabaseName(value: $0.shipping_type) == .SHIPPING })?
+            .shipping_speed_note
+    }
+
+    var shippingCostNote: String? {
+        active_delivery_methods?
+            .first(where: { ShippingType.getShippingTypeBasedOffDatabaseName(value: $0.shipping_type) == .SHIPPING })?
+            .shipping_cost_note
+    }
+    
+    public func getCityState() -> String {
+        if (city.isEmptyOrWhitespace && state.isEmptyOrWhitespace) {
+            return ""
+        } else if (city.isEmptyOrWhitespace) {
+            return state ?? ""
+        } else if (state.isEmptyOrWhitespace) {
+            return city ?? ""
+        } else {
+            return (city ?? "") + ", " + (state ?? "")
+        }
+    }
 }

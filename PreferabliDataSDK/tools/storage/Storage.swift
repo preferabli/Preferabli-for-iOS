@@ -40,6 +40,10 @@ public enum Storage {
     public static func replaceSharedContainer(_ newContainer: ModelContainer) {
         container = newContainer
     }
+    
+    public nonisolated static func generateRandomLongId() -> Int {
+        return -Int(arc4random() % 28147497)
+    }
 
     @MainActor
     private static func makeContainer() -> ModelContainer {
@@ -138,6 +142,19 @@ public enum Storage {
         return try body(ctx)
       }.value
     }
+    
+    nonisolated
+    public static func withBackgroundContextAsync<T: Sendable>(
+        priority: TaskPriority = .background,
+        _ body: @escaping @Sendable (ModelContext) async throws -> T
+    ) async throws -> T {
+        let container = try await MainActor.run { Storage.container }
+        return try await Task.detached(priority: priority) {
+            let ctx = ModelContext(container)
+            ctx.autosaveEnabled = false
+            return try await body(ctx)
+        }.value
+    }
 
     internal static func reset() async throws {
         try await withBackgroundContext { ctx in
@@ -214,6 +231,8 @@ private enum ModelRegistry {
         add(Location.self)
         add(Channel.self)
         add(ChannelVenue.self)
+        add(Market.self)
+        add(MarketTrait.self)
     }
 
     /// Publicly consumed lists—both derived from the single `register` body above.
@@ -239,6 +258,8 @@ public struct StorageFacade {
     public struct QueriesNamespace {
         /// Products whose `id` is in the given list.
         public func products(withIDs ids: [Int]) -> Predicate<Product> { ids.isEmpty ? #Predicate { _ in false } : #Predicate { p in ids.contains(p.id) } }
+        
+        public func venues(withIDs ids: [Int]) -> Predicate<Venue> { ids.isEmpty ? #Predicate { _ in false } : #Predicate { p in ids.contains(p.id) } }
         
         public func tagsQuery(for spec: CollectionSpec) -> (predicate: Predicate<Tag>, sort: [SortDescriptor<Tag>]) {
             let cid = Storage.getKeyStore().integer(forKey: spec.idKey)
@@ -357,106 +378,95 @@ extension Storage {
     /// Hard-deletes tombstoned Tags first, then tombstoned Variants.
     /// Executes on a background ModelContext separate from the UI.
     nonisolated public static func pruneTombstones(
-        batchSize: Int = 500,
+        batchSize: Int = 150,
         log: @Sendable @escaping (String) -> Void = { _ in }
     ) async {
         do {
-            try await Storage.withBackgroundContext(priority: .background) { ctx in
+            try await Storage.withBackgroundContextAsync(priority: .background) { ctx in
                 ctx.autosaveEnabled = false
                 ctx.author = "TombstonePruner"
 
-                try pruneTags(in: ctx, batchSize: batchSize, log: log)
+                try await pruneTags(in: ctx, batchSize: batchSize, log: log)
                 log("Pruned tombstoned Tags")
 
-                try pruneVariants(in: ctx, batchSize: batchSize, log: log)
+                try await pruneVariants(in: ctx, batchSize: batchSize, log: log)
                 log("Pruned tombstoned Variants")
+
+                return ()
             }
         } catch {
             log("Tombstone prune failed: \(error)")
         }
     }
 
+    nonisolated private static func pruneBatched<T: PersistentModel>(
+        _ type: T.Type,
+        in ctx: ModelContext,
+        batchSize: Int,
+        predicate: Predicate<T>,
+        sort: [SortDescriptor<T>],
+        label: String,
+        log: @Sendable @escaping (String) -> Void
+    ) async throws {
+        let limit = max(1, min(batchSize, 2_000))
+
+        while true {
+            try Task.checkCancellation()
+
+            let deletedCount: Int = try autoreleasepool {
+                var fd = FetchDescriptor<T>(predicate: predicate)
+                fd.fetchLimit = limit
+                fd.sortBy = sort
+
+                let doomed = try ctx.fetch(fd)
+                if doomed.isEmpty { return 0 }
+
+                for obj in doomed { ctx.delete(obj) }
+
+                try ctx.save()
+                return doomed.count
+            }
+
+            if deletedCount == 0 { return }
+
+            log("Pruned \(deletedCount) \(label) (batch)")
+
+            // ✅ True cooperative yield
+            await Task.yield()
+        }
+    }
+    
     nonisolated private static func pruneTags(
-            in ctx: ModelContext,
-            batchSize: Int,
-            log: @Sendable @escaping (String) -> Void
-        ) throws {
-            while true {
-                try autoreleasepool {
-                    // 1) Fetch only IDs (thin fetch)
-                    var fd = FetchDescriptor<Tag>(
-                        predicate: #Predicate<Tag> { $0.isTombstoned == true }
-                    )
-                    fd.fetchLimit = batchSize
-                    fd.propertiesToFetch = [\.id]
-                    fd.sortBy = [SortDescriptor(\Tag.id, order: .forward)]
+        in ctx: ModelContext,
+        batchSize: Int,
+        log: @Sendable @escaping (String) -> Void
+    ) async throws {
+        try await pruneBatched(
+            Tag.self,
+            in: ctx,
+            batchSize: batchSize,
+            predicate: #Predicate<Tag> { $0.isTombstoned == true },
+            sort: [SortDescriptor(\Tag.id, order: .forward)],
+            label: "Tags",
+            log: log
+        )
+    }
 
-                    let doomed = try ctx.fetch(fd)
-                    if doomed.isEmpty { return }
-
-                    let ids = doomed.map(\.id)
-
-                    // 2) Resolve each by id and delete
-                    //    (safer than deleting large batches of fully materialized objects)
-                    for id in ids {
-                        var byId = FetchDescriptor<Tag>(
-                            predicate: #Predicate<Tag> { $0.id == id }
-                        )
-                        byId.fetchLimit = 1
-                        byId.propertiesToFetch = [] // fetch full object for deletion
-
-                        if let tag = try ctx.fetch(byId).first {
-                            ctx.delete(tag)
-                        }
-                    }
-
-                    // 3) Save per batch
-                    try ctx.save()
-                    log("Pruned \(ids.count) Tags (batch)")
-                }
-            }
-        }
-
-        // Delete tombstoned Variants in batches (enhanced)
-        nonisolated private static func pruneVariants(
-            in ctx: ModelContext,
-            batchSize: Int,
-            log: @Sendable @escaping (String) -> Void
-        ) throws {
-            while true {
-                try autoreleasepool {
-                    // 1) Fetch only IDs (thin fetch)
-                    var fd = FetchDescriptor<Variant>(
-                        predicate: #Predicate<Variant> { $0.isTombstoned == true }
-                    )
-                    fd.fetchLimit = batchSize
-                    fd.propertiesToFetch = [\.id]
-                    fd.sortBy = [SortDescriptor(\Variant.id, order: .forward)]
-
-                    let doomed = try ctx.fetch(fd)
-                    if doomed.isEmpty { return }
-
-                    let ids = doomed.map(\.id)
-
-                    // 2) Resolve each by id and delete
-                    for id in ids {
-                        var byId = FetchDescriptor<Variant>(
-                            predicate: #Predicate<Variant> { $0.id == id }
-                        )
-                        byId.fetchLimit = 1
-                        byId.propertiesToFetch = [] // fetch full object for deletion
-
-                        if let variant = try ctx.fetch(byId).first {
-                            ctx.delete(variant)
-                        }
-                    }
-
-                    // 3) Save per batch
-                    try ctx.save()
-                    log("Pruned \(ids.count) Variants (batch)")
-                }
-            }
-        }
+    nonisolated private static func pruneVariants(
+        in ctx: ModelContext,
+        batchSize: Int,
+        log: @Sendable @escaping (String) -> Void
+    ) async throws {
+        try await pruneBatched(
+            Variant.self,
+            in: ctx,
+            batchSize: batchSize,
+            predicate: #Predicate<Variant> { $0.isTombstoned == true },
+            sort: [SortDescriptor(\Variant.id, order: .forward)],
+            label: "Variants",
+            log: log
+        )
+    }
 }
 
 extension Storage {
@@ -464,17 +474,20 @@ extension Storage {
     /// This is useful if underlying Product data (name, brand, etc.) has changed.
     /// Executes on a background ModelContext separate from the UI.
     nonisolated public static func reindexSearchableContent(
-        batchSize: Int = 250,
+        batchSize: Int = 150,
         log: @Sendable @escaping (String) -> Void = { _ in }
     ) async {
         do {
-            try await Storage.withBackgroundContext(priority: .background) { ctx in
+            try await Storage.withBackgroundContextAsync(priority: .background) { ctx in
                 ctx.autosaveEnabled = false
                 ctx.author = "SearchReindexer"
 
-                try reindexTags(in: ctx, batchSize: batchSize, log: log)
+                try await reindexTags(in: ctx, batchSize: batchSize, log: log)
                 log("Completed search re-indexing for all Tags.")
+                return ()
             }
+        } catch is CancellationError {
+            log("Search re-indexing cancelled.")
         } catch {
             log("Search re-indexing failed: \(error)")
         }
@@ -485,28 +498,30 @@ extension Storage {
         in ctx: ModelContext,
         batchSize: Int,
         log: @Sendable @escaping (String) -> Void
-    ) throws {
-
-        var offset = 0
+    ) async throws {
+        let limit = max(1, min(batchSize, 500))     // keep interactive-friendly
+        var lastID: Int = Int.min
         var totalProcessed = 0
 
         while true {
-            try autoreleasepool {
-                var fd = FetchDescriptor<Tag>()
-                fd.fetchOffset = offset
-                fd.fetchLimit  = batchSize
+            try Task.checkCancellation()
 
-                // Deterministic batches (helps reproducibility)
+            let processedThisBatch: Int = try autoreleasepool {
+                // Cursor paging avoids `fetchOffset` overhead.
+                var fd = FetchDescriptor<Tag>(
+                    predicate: #Predicate<Tag> { $0.id > lastID }
+                )
+                fd.fetchLimit = limit
                 fd.sortBy = [SortDescriptor(\Tag.id, order: .forward)]
 
-                // Prefetch relationships needed by updateSearchableContent()
+                // Prefetch what updateSearchableContent() needs
                 fd.relationshipKeyPathsForPrefetching = [
                     \Tag.variant,
                     \Tag.variant.product
                 ]
 
                 let tags = try ctx.fetch(fd)
-                if tags.isEmpty { return }
+                if tags.isEmpty { return 0 }
 
                 for tag in tags {
                     tag.updateSearchableContent()
@@ -514,10 +529,17 @@ extension Storage {
 
                 try ctx.save()
 
-                offset += tags.count
-                totalProcessed += tags.count
-                log("Re-indexed batch of \(tags.count) tags (total: \(totalProcessed))")
+                lastID = tags.last?.id ?? lastID
+                return tags.count
             }
+
+            if processedThisBatch == 0 { break }
+
+            totalProcessed += processedThisBatch
+            log("Re-indexed batch of \(processedThisBatch) tags (total: \(totalProcessed))")
+
+            // ✅ Cooperative scheduling so UI work can proceed
+            await Task.yield()
         }
     }
 }
