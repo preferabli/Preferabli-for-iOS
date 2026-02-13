@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftUI
+import SwiftData
 
 @MainActor
 final class UserSessionBootstrapper {
@@ -66,29 +67,24 @@ final class UserSessionBootstrapper {
 
             // Heavy work off-main
             do {
-                try await Task.detached(priority: .background) { [weak preferabli] in
+                await CollectionLoader.shared.ensureWarm(BuiltInCollection.wishlist)
+                await CollectionLoader.shared.ensureLoaded(BuiltInCollection.ratings, timeout: 10)
+
+                _ = try await preferabli.getProfile()
+
+                await preferabli.profileStatsCoordinator.ensureStatsReady(
+                    forceRefreshProfile: false,
+                    forceRefreshRatings: false,
+                    timeout: 10
+                )
+
+                // Kick cellar warmup concurrently (NOT detached; just a child task)
+                Task(priority: .background) { [weak preferabli] in
                     guard let preferabli else { return }
-
-                    // Keep your current warmups
-                    await CollectionLoader.shared.ensureWarm(BuiltInCollection.wishlist)
-                    await CollectionLoader.shared.ensureLoaded(BuiltInCollection.ratings, timeout: 10)
-
-                    // Make sure profile exists locally (ProfileHelper Fix C makes this reliable)
-                    _ = try await preferabli.getProfile()
-
-                    // ✅ The key fix:
-                    // Gate completion on the coordinator's "awaits recompute" method.
-                    // This only returns after recomputeFromLocal() runs (if needed) and dirty is cleared.
-                    await preferabli.profileStatsCoordinator.ensureStatsReady(
-                        forceRefreshProfile: false,
-                        forceRefreshRatings: false,
-                        timeout: 10
-                    )
-                }.value
+                    await CellarWarmup.warmCellars(preferabli: preferabli)
+                }
 
                 self.sessionBootstrappedOnce = true
-
-                // ✅ Only mark complete AFTER stats are ensured
                 PostLoginWarmupGate.markComplete()
 
             } catch {
@@ -148,3 +144,36 @@ public enum PostLoginWarmupGate {
     }
 }
 
+public enum CellarWarmup {
+    public static func warmCellars(preferabli: Preferabli) async {
+        do {
+            // 1) Sync user collections (source of truth)
+            _ = try await preferabli.getUserCollections(force_refresh: false)
+
+            // 2) Find cellar userCollections locally
+            let cellarCollectionIds: [Int] = try await Storage.withBackgroundContext { ctx in
+                var fd = FetchDescriptor<UserCollection>(
+                    predicate: StorageFacade.QueriesNamespace().cellars()
+                )
+                fd.propertiesToFetch = [\.id, \.collection_id]
+                let ucs = try ctx.fetch(fd)
+                return Array(Set(ucs.compactMap { $0.collection_id }))
+            }
+
+            // 3) Warm each associated Collection via orderings
+            for cid in cellarCollectionIds {
+                let spec = FixedIDCollectionSpec(
+                    collectionId: cid,
+                    namespace: "cellar#\(cid)",
+                    freshnessMinutes: 86400,
+                    pageLimit: 50,
+                    loadMode: .orderings
+                )
+                await CollectionLoader.shared.ensureWarm(spec)
+            }
+        } catch {
+            // Silent by design (warmup)
+            await MainActor.run { preferabli.handleError(error: error) } // optional
+        }
+    }
+}

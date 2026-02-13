@@ -816,6 +816,83 @@ public class Preferabli {
         }
     }
     
+    public func getUserCollections(force_refresh: Bool = false) async throws -> [Int] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "get_user_collections"])
+
+            let ks = Storage.getKeyStore()
+
+            // ✅ Gate: only call API once per 60 minutes unless force_refresh
+//            let needsRefresh: Bool = {
+//                if force_refresh { return true }
+//                let last = ks.object(forKey: "lastCalledUserCollections") as? Date
+//                return PreferabliTools.hasMinutesPassed(minutes: 60, startDate: last)
+//            }()
+            let needsRefresh = true
+
+            // ✅ Fast path: return local if not stale AND we’ve loaded before
+            if !needsRefresh, ks.bool(forKey: "hasLoadedUserCollections") {
+                let localIds: [Int] = try await Storage.withBackgroundContext { ctx in
+                    var fd = FetchDescriptor<UserCollection>(
+                        predicate: StorageFacade.QueriesNamespace().cellars()
+                    )
+                    fd.propertiesToFetch = [\.id]
+                    let ucs = try ctx.fetch(fd)
+                    return ucs.map { $0.id }
+                }
+                if !localIds.isEmpty { return localIds }
+                // If empty (edge case), fall through to refresh.
+            }
+
+            // ✅ Network: API is source of truth
+            let params: SParams = ["limit": 9999, "offset": 0]
+            let body: [UserCollectionDTO] = try await api.getAlamo()
+                .get(APIEndpoints.userCollections(id: PreferabliTools.getPreferabliUserId()), sparams: params)
+
+            let apiIds = Set(body.map { $0.id })
+
+            let ids: [Int] = try await Storage.withBackgroundContext { ctx in
+                // 1) Upsert all from API
+                var out: [Int] = []
+                out.reserveCapacity(body.count)
+
+                for dto in body {
+                    let uc = try Storage.upsertUserCollection(from: dto, in: ctx)
+                    out.append(uc.id)
+                }
+
+                // 2) ✅ Remove anything local that is missing from API (source of truth)
+                var fd = FetchDescriptor<UserCollection>(
+                    predicate: StorageFacade.QueriesNamespace().cellars()
+                )
+                fd.propertiesToFetch = [\.id]
+                let localAll = try ctx.fetch(fd)
+                for local in localAll where !apiIds.contains(local.id) {
+                    ctx.delete(local)
+                }
+
+                try ctx.save()
+                return out
+            }
+
+            ks.set(Date(), forKey: "lastCalledUserCollections")
+            ks.set(true, forKey: "hasLoadedUserCollections")
+            
+            let cellarIDs: [Int] = body
+                .filter { ($0.relationship_type ?? "") == "mycellar" }
+                .compactMap { $0.collection_id }
+
+            Storage.saveCellarCollectionIDs(cellarIDs)
+            
+            return ids
+
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
     public func getAvatars() async throws -> [Int] {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
@@ -1380,6 +1457,133 @@ public class Preferabli {
             }
         }
     
+    /// Create a brand new "mycellar" collection and attach it to the current user.
+    /// Mirrors the legacy UIKit flow:
+    /// 1) optional media upload
+    /// 2) POST collection
+    /// 3) POST user-collection relationship (relationship_type = "mycellar")
+    /// 4) upsert Collection + UserCollection locally
+    /// - Returns: the created Collection id
+    public func createCellar(
+        name: String,
+        image: Data? = nil
+    ) async throws -> Int {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            Analytics.track(["event": "create_cellar"])
+
+            var payload: SParams = [
+                "name": name,
+                "public": false,
+                "start_date": PreferabliTools.getAPIDateFormatter().string(from: Date()),
+                "end_date": PreferabliTools.getAPIDateFormatter().string(from: Date()),
+                "is_blind": false,
+                "display_price": true,
+                "display_time": false,
+                "display_quantity": true,
+                "display_bin": true,
+                "display_group_headings": true,
+                "published": true,
+                "order": 1,
+                "timezone": TimeZone.current.identifier,
+                "location_based_recs": true,
+                "traits": [10],
+                "default_group_name": "Cellar Group"
+            ]
+
+            // --- Optional image upload -> primary_image_id ---
+            if let image {
+                let mediaResponse: MediaDTO = try await api.getAlamo().upload(APIEndpoints.postMedia, data: image)
+                payload["primary_image_id"] = mediaResponse.id
+            }
+
+            // --- 1) Create the collection ---
+            let collectionDTO: CollectionDTO = try await api
+                .getAlamo()
+                .post(APIEndpoints.collections, sjson: payload)
+
+            let collectionId = collectionDTO.id
+
+            // --- 2) Create the user relationship (mycellar) ---
+            let relPayload: SParams = [
+                "collection_id": collectionId,
+                "relationship_type": "mycellar",
+                "is_admin": true,
+                "is_editor": true,
+                "is_viewer": true,
+                "user_id": PreferabliTools.getPreferabliUserId()
+            ]
+
+            // Your getUserCollections() uses APIEndpoints.userCollections(id: userId) for GET.
+            // We assume POST to the same endpoint is correct (like legacy APIEndpoints.userCollections()).
+            let userCollectionDTO: UserCollectionDTO = try await api
+                .getAlamo()
+                .post(APIEndpoints.userCollections(id: PreferabliTools.getPreferabliUserId()), sjson: relPayload)
+
+            // --- 3) Upsert locally ---
+            try Storage.withContext { ctx in
+                _ = try Storage.upsertCollection(from: collectionDTO, in: ctx)
+                _ = try Storage.upsertUserCollection(from: userCollectionDTO, in: ctx)
+                try ctx.save()
+            }
+
+
+            var ids = Storage.loadCellarCollectionIDSetCached()
+            if !ids.contains(collectionId) { ids.insert(collectionId) }
+            Storage.saveCellarCollectionIDs(Array(ids))
+
+
+            try await canWeContinue(needsToBeLoggedIn: true)
+            
+            return collectionId
+
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func editCellar(collectionId: Int,
+        name: String,
+        image: Data? = nil,
+        removeImage: Bool
+    ) async throws -> Int {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            Analytics.track(["event": "edit_cellar"])
+
+            var payload: SParams = [
+                "name": name
+            ]
+
+            // --- Optional image upload -> primary_image_id ---
+            if let image {
+                let mediaResponse: MediaDTO = try await api.getAlamo().upload(APIEndpoints.postMedia, data: image)
+                payload["primary_image_id"] = mediaResponse.id
+            } else if (removeImage) {
+                payload["primary_image_id"] = NSNull()
+            }
+
+            // --- 1) Create the collection ---
+            let collectionDTO: CollectionDTO = try await api
+                .getAlamo()
+                .put(APIEndpoints.collection(id: collectionId), sjson: payload)
+
+            try Storage.withContext { ctx in
+                _ = try Storage.upsertCollection(from: collectionDTO, in: ctx)
+                try ctx.save()
+            }
+
+            try await canWeContinue(needsToBeLoggedIn: true)
+            
+            return collectionId
+
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
     /// Get the Preference Profile of the customer. Customer must be logged in to run this call.
     /// - Parameters:
     ///   - force_refresh: pass true if you want to force a refresh from the API and wait for the results to return. Otherwise, the call will load locally if available and run a background refresh only if one has not been initiated in the past 5 minutes. Defaults to *false*.
@@ -1562,6 +1766,133 @@ public class Preferabli {
             try await canWeContinue(needsToBeLoggedIn: true)
             return productIds
             
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func addToCellar(
+        product_id: Int,
+        year: Int,
+        cellar_id: Int,
+        group_id: Int
+    ) async throws {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            Analytics.track(["event": "add_to_cellar"])
+
+            // 1) Create the Tag first (this is the “membership” in the cellar collection).
+            let tagId = try await createOrEditTagActual(
+                product_id: product_id,
+                year: year,
+                collection_id: cellar_id,
+                value: nil,
+                tag_type: .COLLECTION,
+                location: nil,
+                notes: nil,
+                price: nil,
+                quantity: nil,
+                format_ml: nil
+            )
+
+            // 2) Resolve version_id + compute next order for this group
+            //    (Ensure we have the cellar collection + versions/groups locally)
+            let resolved: (versionId: Int, nextOrder: Int) = try await {
+                // Helper: pick “current” version (highest order, fallback to newest timestamp)
+                func pickVersionId(_ versions: [CollectionVersion]) -> Int? {
+                    if versions.isEmpty { return nil }
+                    // Prefer explicit order
+                    let byOrder = versions.sorted { ($0.order ?? Int.min) < ($1.order ?? Int.min) }
+                    if let last = byOrder.last, last.id != 0 { return last.id }
+                    // Fallback: updated_at
+                    let byUpdated = versions.sorted { ($0.updated_at) < ($1.updated_at) }
+                    return byUpdated.last?.id
+                }
+
+                // Try local first
+                if let local = try Storage.withContext({ ctx -> (Int, Int)? in
+                    guard let collection = try Storage.fetchById(Collection.self, id: cellar_id, in: ctx) else { return nil }
+                    guard let versionId = pickVersionId(collection.versions) else { return nil }
+                    guard let group = try Storage.fetchById(CollectionGroup.self, id: group_id, in: ctx) else { return nil }
+                    // Ensure the group is actually in that version (defensive)
+                    if group.version.id != versionId { return nil }
+
+                    let maxOrder = group.orderings.map(\.order).max() ?? -1
+                    return (versionId, maxOrder + 1)
+                }) {
+                    return local
+                }
+
+                // Network fallback: fetch collection, upsert versions/groups, then recompute
+                let dto: CollectionDTO = try await api.getAlamo().get(APIEndpoints.collection(id: cellar_id))
+                _ = try Storage.withContext { ctx in
+                    _ = try Storage.upsertCollection(from: dto, in: ctx)
+                    try ctx.save()
+                }
+
+                guard let after = try Storage.withContext({ ctx -> (Int, Int)? in
+                    guard let collection = try Storage.fetchById(Collection.self, id: cellar_id, in: ctx) else { return nil }
+                    guard let versionId = pickVersionId(collection.versions) else { return nil }
+                    guard let group = try Storage.fetchById(CollectionGroup.self, id: group_id, in: ctx) else { return nil }
+                    if group.version.id != versionId { return nil }
+
+                    let maxOrder = group.orderings.map(\.order).max() ?? -1
+                    return (versionId, maxOrder + 1)
+                }) else {
+                    throw PreferabliException(
+                        type: .BadSwiftData,
+                        message: "Could not resolve collection version/group for cellar add.",
+                        code: 600
+                    )
+                }
+
+                return after
+            }()
+
+            // 3) Create the ordering on the server (links Tag <-> Group, sets order)
+            let orderingPayload: SParams = [
+                "tag_id": tagId,
+                "order": resolved.nextOrder
+            ]
+
+            // Expecting a single ordering back
+            let orderingDTO: CollectionOrderDTO = try await api.getAlamo().post(
+                APIEndpoints.orderings(collectionId: cellar_id, versionId: resolved.versionId, groupId: group_id),
+                sjson: orderingPayload
+            )
+
+            // 4) Upsert ordering locally and link relationships (Group <-> Order <-> Tag)
+            try Storage.withContext { ctx in
+                guard
+                    let group = try Storage.fetchById(CollectionGroup.self, id: group_id, in: ctx),
+                    let tag   = try Storage.fetchById(Tag.self, id: tagId, in: ctx),
+                    let collection = try Storage.fetchById(Collection.self, id: cellar_id, in: ctx)
+
+                else {
+                    throw PreferabliException(
+                        type: .BadSwiftData,
+                        message: "Could not finalize cellar add due to missing Group/Tag in local DB.",
+                        code: 600
+                    )
+                }
+
+                _ = try Storage.upsertCollectionOrder(from: orderingDTO, group: group, tag: tag, in: ctx)
+
+                // Keep product cached relationships consistent (cellar tag affects cachedCellar)
+                tag.variant.product.updateCachedRelationships()
+                
+                group.orderings_count = (group.orderings_count ?? 0) + 1
+                group.updated_at = Date()
+                
+                collection.product_count = (collection.product_count ?? 0) + 1
+                collection.updated_at = Date()
+
+                try ctx.save()
+            }
+
+            try await canWeContinue(needsToBeLoggedIn: true)
+
         } catch {
             handleError(error: error)
             throw error

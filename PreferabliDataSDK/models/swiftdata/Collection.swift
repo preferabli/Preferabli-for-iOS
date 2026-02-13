@@ -25,7 +25,8 @@ import SwiftData
 ///
 /// Collections are structured as follows: a collection has one or more ``CollectionVersion``s. Each version has one or more ``CollectionGroup``s. And each group contains one or more ``CollectionOrder``s, which link directly to a ``Tag`` and thus by reference a ``Product``.
 @Model
-public final class Collection: HasIntID, HasTimestamps {
+public final class Collection: HasIntID, HasTimestamps, HasImage {
+    
     @Attribute(.unique) public var id: Int
     public var created_at: Date = Foundation.Date.now
     public var updated_at: Date = Foundation.Date.now
@@ -35,7 +36,6 @@ public final class Collection: HasIntID, HasTimestamps {
     public var desc: String?
     public var end_date: Date?
     public var auto_wili: Bool?
-    public var has_image: Bool?
     public var is_pinned: Bool?
     public var display_time: Bool?
     public var is_browsable: Bool?
@@ -65,7 +65,8 @@ public final class Collection: HasIntID, HasTimestamps {
     @Relationship(deleteRule: .nullify, inverse: \Venue.collections) public var venue: Venue?
     @Relationship(deleteRule: .cascade, inverse: \CollectionVersion.collection) public var versions: [CollectionVersion] = []
     @Relationship(deleteRule: .nullify, inverse: \CollectionTrait.collection) public var traits: [CollectionTrait] = []
-    @Relationship(deleteRule: .nullify) public var user_collections: [UserCollection] = []
+    @Relationship(deleteRule: .cascade)
+    public var user_collections: [UserCollection] = []
     
     // MARK: - Init
     public init(id: Int) { self.id = id }
@@ -126,6 +127,10 @@ public final class Collection: HasIntID, HasTimestamps {
             return (d1.compare(d2) == comparison_result)
         }
     }
+    
+    public var has_image : Bool {
+        primary_image != nil
+    }
 
     /// Sort collections alphabetically.
     /// - Parameters:
@@ -152,6 +157,10 @@ public final class Collection: HasIntID, HasTimestamps {
             }
             return true
         }
+    }
+    
+    public func getPlaceholderImage() -> String? {
+        return nil
     }
 
     internal func filterCollection(search_term : String) -> Bool {

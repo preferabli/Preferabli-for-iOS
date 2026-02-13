@@ -60,9 +60,40 @@ public final class Product: HasIntID, HasTimestamps, HasImage {
     }
     
     internal func updateCachedRelationships() {
-        cachedMostRecentRating = Tag.sortTagsByDate(tags: variants.flatMap(\.tags)).first(where: { $0.tag_type == .RATING && $0.isTombstoned == false })
-        cachedWishlist = variants.flatMap(\.tags).first(where: { $0.tag_type == .WISHLIST && $0.isTombstoned == false })
+        // Flatten once (this is already what you do)
+        let allTags = variants.flatMap(\.tags)
+
+        // Rating (most recent)
+        cachedMostRecentRating = Tag.sortTagsByDate(tags: allTags)
+            .first(where: { $0.tag_type == .RATING && $0.isTombstoned == false })
+
+        // Wishlist (any, but prefer non-tombstoned; keep your semantics)
+        cachedWishlist = allTags
+            .first(where: { $0.tag_type == .WISHLIST && $0.isTombstoned == false })
+
+        // Most recent variant
         cachedMostRecentVariant = variants.sorted { $0.year > $1.year }.first
+
+        // ✅ Cellar (most recent "collection" tag that belongs to *my* cellars)
+        // Uses cached set (no fetch)
+        let cellarSet = Storage.loadCellarCollectionIDSetCached()
+        var best: Tag? = nil
+        var bestDate: Date = .distantPast
+
+        // iterate without sorting to avoid O(n log n)
+        for t in allTags {
+            guard t.isTombstoned == false else { continue }
+            guard t.tag_type == .COLLECTION else { continue }
+            guard cellarSet.contains(t.collection_id) else { continue }
+
+            let d = t.created_at
+            if d >= bestDate {
+                bestDate = d
+                best = t
+            }
+        }
+
+        cachedCellar = best
     }
 
     /// The ``RatingLevel`` of the most recent rating of a specific product for the current user.
@@ -93,21 +124,25 @@ public final class Product: HasIntID, HasTimestamps, HasImage {
         return purchaseTags
     }
 
-    /// All of the product tags of type ``TagType/CELLAR`` for the current user.
-    ///
-    /// > Note: In legacy code this referenced `CoreData_UserCollection` to filter by `relationship_type == "mycellar"`.
-    /// SwiftData equivalent should query user collections in a `ModelContext` and then filter tags by those collection ids.
-    /// See `cellar_tags(in:)` below for a context-aware variant.
     var cellar_tags: [Tag] {
-        var cellarTags = [Tag]()
-        for variant in variants {
-            for tag in variant.tags {
-                if (tag.tag_type == .COLLECTION) {
-                    cellarTags.append(tag)
+        let cellarSet = Storage.loadCellarCollectionIDSetCached()
+        var out: [Tag] = []
+        out.reserveCapacity(4)
+
+        for v in variants {
+            for t in v.tags {
+                if t.isTombstoned { continue }
+                if t.tag_type == .COLLECTION, cellarSet.contains(t.collection_id) {
+                    out.append(t)
                 }
             }
         }
-        return cellarTags
+        return out
+    }
+
+    public func isInCellar() -> Bool {
+        // fastest and accurate
+        return cachedCellar != nil && cachedCellar?.isTombstoned == false
     }
 
     /// The most recent product tags of type ``TagType/PURCHASE`` for the current user.
@@ -134,12 +169,6 @@ public final class Product: HasIntID, HasTimestamps, HasImage {
     /// - Returns: true if it was wishlisted.
     public func isOnWishlist() -> Bool {
         return cachedWishlist != nil
-    }
-
-    /// Identifies if the current user added a specific product to a cellar collection.
-    /// - Returns: true if the product is in the user's cellar.
-    public func isInCellar() -> Bool {
-        return cellar_tags.count != 0
     }
 
     /// All of the product tags of type ``TagType/RATING`` for the current user.

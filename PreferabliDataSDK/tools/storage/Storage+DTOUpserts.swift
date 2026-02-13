@@ -215,6 +215,11 @@ extension Storage {
             if newDate >= currentDate {
                 product.cachedWishlist = t
             }
+        } else if t.tag_type == .COLLECTION, Storage.isCellarCollectionID(t.collection_id) {
+            let currentDate = product.cachedCellar?.created_at ?? .distantPast
+            if newDate >= currentDate {
+                product.cachedCellar = t
+            }
         }
         
         return t
@@ -339,7 +344,6 @@ extension Storage {
         c.end_date = dto.end_date ?? c.end_date
         c.updated_at = dto.updated_at ?? c.updated_at
         c.auto_wili = dto.auto_wili ?? c.auto_wili
-        c.has_image = dto.has_image ?? c.has_image
         c.is_pinned = dto.is_pinned ?? c.is_pinned
         c.display_time = dto.display_time ?? c.display_time
         c.is_browsable = dto.is_browsable ?? c.is_browsable
@@ -368,6 +372,13 @@ extension Storage {
         if let img = dto.primary_image {
             c.primary_image = try upsertMedia(from: img, in: ctx)
         }
+        
+        if let img = dto.primary_image {
+            c.primary_image = try upsertMedia(from: img, in: ctx)
+        } else {
+            c.primary_image = nil
+        }
+        
         if let v = dto.venue {
             c.venue = try upsertVenue(from: v, in: ctx)
         }
@@ -557,17 +568,12 @@ extension Storage {
     
     @discardableResult
     nonisolated static func upsertUserCollection(from dto: UserCollectionDTO, in ctx: ModelContext) throws -> UserCollection {
-        let uc = try fetchOrInsert(UserCollection.self, id: dto.id, in: ctx) { UserCollection(id: dto.id) }
+        let collection = try upsertCollection(from: dto.collection, in: ctx)
+        let uc = try fetchOrInsert(UserCollection.self, id: dto.id, in: ctx) { UserCollection(id: dto.id, collection_id: dto.collection_id, collection: collection) }
         uc.relationship_type = dto.relationship_type ?? uc.relationship_type
-        uc.collection_id = dto.collection_id ?? uc.collection_id
         uc.created_at = dto.created_at ?? uc.created_at
         uc.updated_at = dto.updated_at ?? uc.updated_at
         
-        //        if let col = dto.collection {
-        //            uc.collection = try upsertCollection(from: col, in: ctx)
-        //        } else if let cid = dto.collection_id {
-        //            uc.collection = try resolveCollection(id: cid, in: ctx)
-        //        }
         return uc
     }
     
@@ -793,11 +799,6 @@ extension Storage {
         c.created_at = dto.created_at ?? c.created_at
         c.updated_at = dto.updated_at ?? c.updated_at
         
-        // Possible shipping types (replace list)
-        if let pst = dto.possible_shipping_types {
-            c.possible_shipping_types = pst
-        }
-        
         // Primary image
         if let imgDTO = dto.primary_image {
             let media = try upsertMedia(from: imgDTO, in: ctx)
@@ -991,5 +992,60 @@ extension Storage {
         guard a.count == b.count else { return false }
         for (x, y) in zip(a, b) where x.id != y.id { return false }
         return true
+    }
+}
+
+extension Storage {
+
+    public nonisolated static func saveCellarCollectionIDs(_ cellarIds: [Int]) {
+        let set = Set(cellarIds)
+        CellarIDCacheStore.shared.set(set)
+
+        Storage.getKeyStore().set(Array(set), forKey: cellarIDsKey)
+    }
+
+    public nonisolated static func loadCellarCollectionIDSetCached() -> Set<Int> {
+        if !CellarIDCacheStore.shared.isEmpty() {
+            return CellarIDCacheStore.shared.get()
+        }
+
+        let arr = Storage.getKeyStore().array(forKey: cellarIDsKey) as? [Int] ?? []
+        let set = Set(arr)
+        CellarIDCacheStore.shared.set(set)
+        return set
+    }
+
+    public nonisolated static func isCellarCollectionID(_ id: Int) -> Bool {
+        if CellarIDCacheStore.shared.contains(id) { return true }
+        return loadCellarCollectionIDSetCached().contains(id)
+    }
+}
+
+private let cellarIDsKey = "cellar_collection_ids_v1"
+
+private final class CellarIDCacheStore: @unchecked Sendable {
+    static let shared = CellarIDCacheStore()
+
+    private var set: Set<Int> = []
+    private let lock = NSLock()
+
+    func get() -> Set<Int> {
+        lock.lock(); defer { lock.unlock() }
+        return set
+    }
+
+    func set(_ new: Set<Int>) {
+        lock.lock(); defer { lock.unlock() }
+        set = new
+    }
+
+    func contains(_ id: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return set.contains(id)
+    }
+
+    func isEmpty() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return set.isEmpty
     }
 }

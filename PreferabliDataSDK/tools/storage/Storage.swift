@@ -261,7 +261,7 @@ public struct StorageFacade {
         
         public func venues(withIDs ids: [Int]) -> Predicate<Venue> { ids.isEmpty ? #Predicate { _ in false } : #Predicate { p in ids.contains(p.id) } }
         
-        public func tagsQuery(for spec: CollectionSpec) -> (predicate: Predicate<Tag>, sort: [SortDescriptor<Tag>]) {
+        public func tags(for spec: CollectionSpec) -> (predicate: Predicate<Tag>, sort: [SortDescriptor<Tag>]) {
             let cid = Storage.getKeyStore().integer(forKey: spec.idKey)
 
             // Build fully-typed predicates per-branch to avoid opaque-type issues
@@ -273,6 +273,12 @@ public struct StorageFacade {
             } else {
                 let pred = #Predicate<Tag> { $0.collection_id == cid }
                 return (pred, [SortDescriptor(\Tag.created_at, order: .reverse)])
+            }
+        }
+        
+        public func cellars() -> Predicate<UserCollection> {
+            #Predicate<UserCollection> { uc in
+                (uc.relationship_type ?? "") == "mycellar"
             }
         }
     }

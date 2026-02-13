@@ -8,18 +8,23 @@ public final class UserCollection: HasIntID, HasTimestamps {
     @Attribute(.unique) public var id: Int
     public var created_at: Date = Foundation.Date.now
     public var updated_at: Date = Foundation.Date.now
-    var collection_id: Int?
-    var relationship_type: String?
-    var is_pinned: Bool?
-    var is_admin: Bool?
-    var is_editor: Bool?
-    var is_viewer: Bool?
-    var archived_at: Date?
+    public var collection_id: Int
+    public var relationship_type: String?
+    public var is_pinned: Bool?
+    public var is_admin: Bool?
+    public var is_editor: Bool?
+    public var is_viewer: Bool?
+    public var archived_at: Date?
 
     // relationships
-    @Relationship(deleteRule: .nullify, inverse: \Collection.user_collections) var collection: Collection?
+    @Relationship(inverse: \Collection.user_collections)
+    public var collection: Collection
     
-    public init(id: Int) { self.id = id }
+    public init(id: Int, collection_id : Int, collection : Collection) {
+        self.id = id
+        self.collection_id = collection_id
+        self.collection = collection
+    }
 
     public static func predicate(forID id: Int) -> Predicate<UserCollection> {
         #Predicate<UserCollection> { $0.id == id }

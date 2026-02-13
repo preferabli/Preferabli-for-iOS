@@ -69,10 +69,6 @@ public final class Channel: HasIntID, HasTimestamps {
     public var default_curation_questions_batch_id: Int?
     public var max_number_of_venues: Int?
 
-    // MARK: - Arrays / simple lists
-    /// JSON: ["local_delivery","standard_shipping","in-person", ...]
-    public var possible_shipping_types: [String] = []
-
     // MARK: - Relationships
     /// JSON: primary_image { id, user_id, type, path }
     /// Use Media if you already map those image objects to Media.
@@ -137,7 +133,6 @@ public final class Channel: HasIntID, HasTimestamps {
         default_curation_batch_id: Int? = nil,
         default_curation_questions_batch_id: Int? = nil,
         max_number_of_venues: Int? = nil,
-        possible_shipping_types: [String] = [],
         primary_image: Media? = nil,
         images: [Media] = [],
         venues: [Venue] = [],
@@ -189,8 +184,6 @@ public final class Channel: HasIntID, HasTimestamps {
         self.default_curation_batch_id = default_curation_batch_id
         self.default_curation_questions_batch_id = default_curation_questions_batch_id
         self.max_number_of_venues = max_number_of_venues
-
-        self.possible_shipping_types = possible_shipping_types
 
         self.primary_image = primary_image
         self.images = images

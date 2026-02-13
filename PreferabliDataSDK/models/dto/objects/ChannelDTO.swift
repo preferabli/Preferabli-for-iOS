@@ -29,8 +29,6 @@ public struct ChannelDTO: Decodable, Sendable {
     public let venues: [VenueDTO]?
     public let primary_venues: [VenueDTO]?
 
-    public let possible_shipping_types: [String]?
-
     public let name: String?
     public let description: String?
     public let order: Int?

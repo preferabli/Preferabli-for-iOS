@@ -7,6 +7,68 @@
 
 import Foundation
 import Alamofire
+import os
+
+// MARK: - Logging
+
+private enum APILog {
+    static let request  = Logger(subsystem: "com.preferabli.app", category: "api.request")
+    static let response = Logger(subsystem: "com.preferabli.app", category: "api.response")
+}
+
+private let debugLogIDHeader = "X-Preferabli-Debug-Log-ID"
+
+private func safeEndpointHint(_ endpoint: String, maxLen: Int = 50) -> String {
+    let raw = (URL(string: endpoint)?.path.isEmpty == false) ? (URL(string: endpoint)?.path ?? endpoint) : endpoint
+    let replaced = raw
+        .replacingOccurrences(of: "https://", with: "")
+        .replacingOccurrences(of: "http://", with: "")
+        .replacingOccurrences(of: "/", with: "_")
+        .replacingOccurrences(of: "?", with: "_")
+        .replacingOccurrences(of: "&", with: "_")
+        .replacingOccurrences(of: "=", with: "_")
+        .replacingOccurrences(of: ":", with: "_")
+
+    let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+    var out = ""
+    out.reserveCapacity(min(replaced.count, maxLen))
+    for s in replaced.unicodeScalars {
+        out.append(allowed.contains(s) ? Character(s) : "_")
+        if out.count >= maxLen { break }
+    }
+    return out.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+}
+
+/// Writes full JSON to /tmp and logs one compact response message that includes:
+/// - correlation ID
+/// - status / endpoint / sizes
+/// - sandbox tmp path
+/// - (simulator only) a copy/paste Terminal command to open the file via simctl
+private func writeJSONToTempAndLog(
+    _ json: String,
+    endpoint: String,
+    status: Int,
+    bytes: Int,
+    logID: String
+) {
+    let hint = safeEndpointHint(endpoint)
+    let ts = Int(Date().timeIntervalSince1970)
+    let filename = "api-\(status)-\(hint.isEmpty ? "response" : hint)-\(logID)-\(ts).json"
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+
+    do {
+        try json.write(to: url, atomically: true, encoding: .utf8)
+
+        var msg = "[\(logID)]\n✅ \(status) \(endpoint)\n"
+        msg += "Full JSON: \(url.path)\n"
+
+        APILog.response.debug("\(msg, privacy: .public)")
+    } catch {
+        APILog.response.error("[\(logID, privacy: .public)] Failed to write JSON temp file: \(error.localizedDescription, privacy: .public)")
+    }
+}
+
+// MARK: - API Service
 
 /// Internal class used for interacting with our API.
 internal actor APIService {
@@ -93,26 +155,42 @@ private final class LoggingAdapter: RequestAdapter {
     let loggingEnabled: Bool
     init(loggingEnabled: Bool) { self.loggingEnabled = loggingEnabled }
 
-    func adapt(_ urlRequest: URLRequest,
-               for session: Alamofire.Session,
-               completion: @escaping @Sendable (Result<URLRequest, any Error>) -> Void) {
+    func adapt(
+        _ urlRequest: URLRequest,
+        for session: Alamofire.Session,
+        completion: @escaping @Sendable (Result<URLRequest, any Error>) -> Void
+    ) {
+        var req = urlRequest
+
         if loggingEnabled {
-            let method = urlRequest.httpMethod ?? "?"
-            let url    = urlRequest.url?.absoluteString ?? "?"
-            print("\(method) \(url)")
-            if let body = urlRequest.httpBody, !body.isEmpty {
-                print(String(decoding: body.prefix(2000), as: UTF8.self))
+            #if DEBUG
+            if req.value(forHTTPHeaderField: debugLogIDHeader) == nil {
+                req.setValue(UUID().uuidString, forHTTPHeaderField: debugLogIDHeader)
             }
+            #endif
+
+            let id = req.value(forHTTPHeaderField: debugLogIDHeader) ?? "-"
+            let method = req.httpMethod ?? "?"
+            let url    = req.url?.absoluteString ?? "?"
+
+            var msg = "[\(id)]\n➡️ \(method) \(url)"
+            if let body = req.httpBody, !body.isEmpty {
+                let snippet = String(decoding: body.prefix(2000), as: UTF8.self)
+                msg += "\nRequest body:\n\(snippet)"
+            }
+
+            APILog.request.debug("\(msg, privacy: .private)")
         }
-        completion(.success(urlRequest))
+
+        completion(.success(req))
     }
 }
-
 
 import Alamofire
 import Foundation
 
 extension APIService {
+
     /// Returns `response` on 2xx, else throws `PreferabliException`.
     /// Handles 401 by attempting a token refresh and retrying the original request.
     internal static func continueOrThrowPreferabliException(
@@ -143,9 +221,17 @@ extension APIService {
 
             let logging = await MainActor.run { Preferabli.main.loggingEnabled }
             if logging, let data = response.data {
+
                 let s = prettyJSONString(from: data)
-                print("✅ \(http.statusCode) (bytes=\(data.count) chars=\(s.count))\n\nJSON:\n\n")
-                printJSONInChunks(s)
+                let logID = response.request?.value(forHTTPHeaderField: debugLogIDHeader) ?? "-"
+
+                writeJSONToTempAndLog(
+                    s,
+                    endpoint: endpoint,
+                    status: http.statusCode,
+                    bytes: data.count,
+                    logID: logID
+                )
             }
             return response
         }
@@ -179,7 +265,6 @@ extension APIService {
                             }
                             sessionData = SessionData(map: dict)
                         } catch let e as PreferabliException {
-                            // Enrich the thrown JSON error with the refresh endpoint + raw
                             var msg = "[\(APIEndpoints.sessions)] \(e.getMessage())"
                             if let raw2 = sessionResponse.data, !raw2.isEmpty {
                                 let snippet = String(decoding: raw2.prefix(1000), as: UTF8.self)
@@ -222,7 +307,6 @@ extension APIService {
                         }
                     }
 
-                    // Refresh failed (include refresh endpoint + raw snippet if present)
                     var msg = "[\(endpoint)] Token refresh failed with status \(http.statusCode)."
                     if let raw2 = sessionResponse.data, !raw2.isEmpty {
                         let snippet = String(decoding: raw2.prefix(1000), as: UTF8.self)
@@ -231,7 +315,6 @@ extension APIService {
                     throw PreferabliException(type: .APIError, message: msg, code: http.statusCode)
 
                 } catch let e as PreferabliException {
-                    // If refresh or replay fails and already a PreferabliException, prepend original endpoint + attach original raw
                     var msg = "[\(endpoint)] \(e.getMessage())"
                     if let raw, !raw.isEmpty {
                         let snippet = String(decoding: raw.prefix(1000), as: UTF8.self)
@@ -239,12 +322,10 @@ extension APIService {
                     }
                     throw PreferabliException(type: e.type, message: msg, code: e.getCode())
                 } catch {
-                    // Any other error: surface as API error with original code + endpoint/raw
                     throw makeErr(.APIError, code: http.statusCode, message: "Token refresh/replay failed: \(error.localizedDescription)")
                 }
             }
 
-            // Non-401: try to parse API error body
             do {
                 let obj = try continueOrThrowJSONException(data: data)
                 guard let dict = obj as? [String: Any] else {
@@ -252,7 +333,6 @@ extension APIService {
                 }
                 let apiError = APIError(map: dict)
                 if apiError.message != nil {
-                    // Attach endpoint + raw snippet
                     var msg = "[\(endpoint)] \(PreferabliException(error: apiError).getMessage())"
                     let snippet = String(decoding: data.prefix(1000), as: UTF8.self)
                     msg += "\n── Raw (first 1000 bytes) ──\n\(snippet)\n────────"
@@ -261,14 +341,12 @@ extension APIService {
                     throw makeErr(.APIError, code: http.statusCode, message: "HTTP \(http.statusCode) without API error message.")
                 }
             } catch let e as PreferabliException {
-                // JSON parsing already formatted: just prepend endpoint if not present
                 let msg = "[\(endpoint)] \(e.getMessage())"
                 throw PreferabliException(type: e.type, message: msg, code: http.statusCode)
             }
         }
-        
+
         if let af = response.error {
-            // Alamofire explicit cancellation (most common)
             if af.isExplicitlyCancelledError {
                 throw PreferabliException(
                     type: .Cancelled,
@@ -277,7 +355,6 @@ extension APIService {
                 )
             }
 
-            // URLSession cancellation (sometimes shows up as underlying URLError.cancelled)
             if let urlErr = af.underlyingError as? URLError, urlErr.code == .cancelled {
                 throw PreferabliException(
                     type: .Cancelled,
@@ -287,7 +364,6 @@ extension APIService {
             }
         }
 
-        // No HTTP response or data
         let af = response.error
         let underlying = (af?.underlyingError as? URLError)
         let ucode = underlying?.code.rawValue ?? 0
@@ -298,19 +374,8 @@ extension APIService {
             message: "[\(endpoint)] No HTTP response or data. Underlying: \(udesc)",
             code: ucode
         )
+    }
 
-    }
-    
-    internal static func printJSONInChunks(_ json: String, chunkSize: Int = 8000) {
-        var idx = json.startIndex
-        while idx < json.endIndex {
-            let next = json.index(idx, offsetBy: chunkSize, limitedBy: json.endIndex) ?? json.endIndex
-            Swift.print(json[idx..<next], terminator: "") // <- no extra characters
-            idx = next
-        }
-        Swift.print("") // final newline so the console prompt doesn't glue onto the JSON
-    }
-    
     internal static func prettyJSONString(from data: Data) -> String {
         guard
             let obj = try? JSONSerialization.jsonObject(with: data),
@@ -326,7 +391,6 @@ extension APIService {
         do {
             return try JSONSerialization.jsonObject(with: data, options: [])
         } catch {
-            // report malformed JSON
             Analytics.track(["event": "error", "type": "JSON", "data": data.base64EncodedString()])
             let snippet = String(decoding: data.prefix(1000), as: UTF8.self)
             let msg = "JSON parse failed.\n── Raw (first 1000 bytes) ──\n\(snippet)\n────────"
@@ -334,7 +398,6 @@ extension APIService {
         }
     }
 }
-
 
 // MARK: - API Endpoints
 
@@ -352,6 +415,7 @@ internal struct APIEndpoints {
     internal static let lttt = baseUrl + "lttt"
     internal static let flttt = baseUrl + "flttt"
     internal static let foods = baseUrl + "foods"
+    internal static let collections = baseUrl + "collections"
     internal static let foodCategories = baseUrl + "food-categories"
     internal static let whereToBuy = baseUrl + "wheretobuy"
     internal static let magicLink = baseUrl + "sessions/magic-link"
@@ -366,7 +430,6 @@ internal struct APIEndpoints {
     internal static let markets = baseUrl + "markets"
     internal static let scripts = baseUrl + "front-end-scripts"
 
-    
     internal static func integration(id: Int) -> String { baseUrl + "integrations/\(id)" }
     internal static func lookupConversion(id: Int) -> String { baseUrl + "integrations/\(id)/lookups" }
     internal static func lttt(id: Int) -> String { baseUrl + "integration/\(id)/lttt" }
@@ -396,11 +459,12 @@ internal struct APIEndpoints {
     internal static func profile(id: Int) -> String { baseUrl + "users/\(id)/profile?include_styles=false" }
     internal static func userTags(id: Int) -> String { baseUrl + "users/\(id)/tags" }
     internal static func userTag(id: Int, tagId: Int) -> String { baseUrl + "users/\(id)/tags/\(tagId)" }
-    internal static func productProfileData(id : Int, year : Int = -1) -> String {
+
+    internal static func productProfileData(id: Int, year: Int = -1) -> String {
         return baseUrl + "variant-details?keys[]=acidity_percent&keys[]=sweetness_percent&keys[]=oak_percent&keys[]=body_percent&keys[]=peat_percent&keys[]=agave_percent&keys[]=smoke_percent&keys[]=hop_percent&keys[]=malt_percent&keys[]=flavor_percent&keys[]=carbonation_percent&keys[]=alcohol_percent&keys[]=firmness_percent&keys[]=savouriness_percent&keys[]=aromatic_percent&keys[]=flavor_profile_1_name&keys[]=flavor_profile_2_name&keys[]=flavor_profile_3_name&keys[]=flavor_profile_4_name&keys[]=flavor_profile_1_icon_png_4x_url&keys[]=flavor_profile_2_icon_png_4x_url&keys[]=flavor_profile_3_icon_png_4x_url&keys[]=flavor_profile_4_icon_png_4x_url&keys[]=food_category_1_name&keys[]=food_category_2_name&keys[]=food_category_3_name&keys[]=food_category_4_name&keys[]=food_category_1_icon_png_url&keys[]=food_category_2_icon_png_url&keys[]=food_category_3_icon_png_url&keys[]=food_category_4_icon_png_url&product_id=\(id)&year=\(year)"
     }
-    
-    internal static func productFoodData(id : Int, year : Int = -1) -> String {
+
+    internal static func productFoodData(id: Int, year: Int = -1) -> String {
         return baseUrl + "variant-details?keys[]=food_category_1_name&keys[]=food_category_2_name&keys[]=food_category_3_name&keys[]=food_category_4_name&keys[]=food_category_1_icon_png_url&keys[]=food_category_2_icon_png_url&keys[]=food_category_3_icon_png_url&keys[]=food_category_4_icon_png_url&product_id=\(id)&year=\(year)"
     }
 }
