@@ -64,11 +64,19 @@ final class UserSessionBootstrapper {
                     }
                 }
             }
+            
+            await CollectionLoader.shared.setOnDone(BuiltInCollection.ratings) { [weak preferabli] event in
+                guard let preferabli else { return }
+                guard case .done = event else { return }
+                await preferabli.profileHelper.recomputeHasTasteProfileGateIfPossible()
+            }
 
             // Heavy work off-main
             do {
                 await CollectionLoader.shared.ensureWarm(BuiltInCollection.wishlist)
                 await CollectionLoader.shared.ensureLoaded(BuiltInCollection.ratings, timeout: 10)
+                
+                await preferabli.profileHelper.recomputeHasTasteProfileGateIfPossible()
 
                 _ = try await preferabli.getProfile()
 

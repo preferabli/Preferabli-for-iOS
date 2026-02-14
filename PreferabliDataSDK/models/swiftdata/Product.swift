@@ -108,7 +108,7 @@ public final class Product: HasIntID, HasTimestamps, HasImage {
         guard let hash = product_hash else {
             return nil
         }
-        return "https://app.preferabli.com/products/" + hash
+        return "https://www.tastefuli.com/product/\(id)"
     }
 
     /// All of the product tags of type ``TagType/PURCHASE`` for the current user.

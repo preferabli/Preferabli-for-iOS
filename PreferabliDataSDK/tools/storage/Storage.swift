@@ -11,12 +11,53 @@ import Foundation
 /// Internal class used for interacting with our SwiftData storage.
 @MainActor
 public enum Storage {
+    // MARK: - Cancellation + Logout Epoch
+
+    private actor _LogoutRegistry {
+        private var epoch: UInt64 = 0
+        private var cancellers: [UUID: @Sendable () -> Void] = [:]
+
+        func currentEpoch() -> UInt64 { epoch }
+
+        func registerCanceller(_ cancel: @escaping @Sendable () -> Void) -> UUID {
+            let id = UUID()
+            cancellers[id] = cancel
+            return id
+        }
+
+        func unregister(_ id: UUID) {
+            cancellers[id] = nil
+        }
+
+        func beginLogout() {
+            epoch &+= 1
+            let all = cancellers.values
+            cancellers.removeAll(keepingCapacity: true)
+            for c in all { c() }
+        }
+    }
+
+    private static let _logoutRegistry = _LogoutRegistry()
+
+    /// Call this right before you start wiping/resetting.
+    /// Cancels Storage-launched detached work and bumps the epoch.
+    public static func beginLogoutCancellation() async {
+        await _logoutRegistry.beginLogout()
+        // mirror the flag for sync gates (withContext)
+        await MainActor.run { PreferabliTools._setLoggingOutFlag(true) }
+    }
+
+    /// Call this when logout is fully finished.
+    public static func endLogoutCancellation() async {
+        await MainActor.run { PreferabliTools._setLoggingOutFlag(false) }
+    }
+
     public static let storeURL: URL = {
         let dir = try! FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         return dir.appendingPathComponent("PreferabliSDK.sqlite")
     }()
-
-    internal static func makeSchema() -> Schema {
+    
+    public static func makeSchema() -> Schema {
         Schema(ModelRegistry.types)
     }
 
@@ -48,45 +89,32 @@ public enum Storage {
     @MainActor
     private static func makeContainer() -> ModelContainer {
         let schema = makeSchema()
-        let config = ModelConfiguration(schema: schema, url: storeURL)
-        
-        // First attempt: normal creation (will migrate if possible)
+
+        let url = Storage.storeURL                 // ✅ IMPORTANT
+        let config = ModelConfiguration(schema: schema, url: url)
+
         do {
-                return try ModelContainer(for: schema,
-                                          migrationPlan: nil,
-                                          configurations: [config])
+            return try ModelContainer(
+                for: schema,
+                migrationPlan: nil,
+                configurations: [config]
+            )
         } catch {
-            // Most common case we care about: schema mismatch / migration failure.
-            // At this point we *intentionally* drop all local data and recreate.
-            NSLog("[PreferabliDataSDK] Failed to create ModelContainer. " +
-                  "Will nuke store and retry. Error: \(error)")
-            
+            NSLog("[PreferabliDataSDK] Failed to create ModelContainer. Will nuke store and retry. Error: \(error)")
             do {
-                try nukePersistentStoreFiles()
+                try nukePersistentStoreFiles(at: url)   // ✅ use the same url
                 resetDatabaseKeystore()
-                
-                return try ModelContainer(for: schema,
-                                              migrationPlan: nil,
-                                              configurations: [config])
+
+                return try ModelContainer(
+                    for: schema,
+                    migrationPlan: nil,
+                    configurations: [config]
+                )
             } catch {
-                // If we still fail here, something is seriously wrong (e.g. no disk).
-                fatalError("[PreferabliDataSDK] Unable to create ModelContainer " +
-                           "even after nuking the store: \(error)")
+                fatalError("[PreferabliDataSDK] Unable to create ModelContainer even after nuking the store: \(error)")
             }
         }
     }
-    
-    @MainActor
-    internal static func wipePersistentStoreFilesAndRebuild() {
-        do {
-            try nukePersistentStoreFiles()
-        } catch {
-            NSLog("[PreferabliDataSDK] Failed to remove store files: \(error)")
-        }
-        resetDatabaseKeystore()
-        rebuildSharedContainer()
-    }
-
     
     /// Create a brand-new container instance (no caching).
     @MainActor
@@ -101,75 +129,134 @@ public enum Storage {
         container = makeContainer()
     }
     
-    private static func nukePersistentStoreFiles() throws {
-          let fm = FileManager.default
-          let basePath = storeURL.path
+    private static func nukePersistentStoreFiles(at url: URL) throws {
+        let fm = FileManager.default
+        let basePath = url.path
 
-          // SQLite uses `file`, `file-wal`, `file-shm`
-          let paths = [
-              basePath,              // PreferabliSDK.sqlite
-              basePath + "-wal",     // PreferabliSDK.sqlite-wal
-              basePath + "-shm"      // PreferabliSDK.sqlite-shm
-          ]
-
-          for path in paths {
-              if fm.fileExists(atPath: path) {
-                  try fm.removeItem(atPath: path)
-              }
-          }
-      }
-
-    @inline(__always)
-    public static func withContext<T>(_ body: @MainActor (ModelContext) throws -> T) rethrows -> T {
-        let ctx = container.mainContext
-        let old = ctx.autosaveEnabled
-        ctx.autosaveEnabled = false
-        defer { ctx.autosaveEnabled = old }
-
-        return try body(ctx)
+        let paths = [
+            basePath,
+            basePath + "-wal",
+            basePath + "-shm"
+        ]
+        for path in paths where fm.fileExists(atPath: path) {
+            try fm.removeItem(atPath: path)
+        }
     }
 
+    @inline(__always)
+    public static func withContext<T>(
+      _ body: @MainActor (ModelContext) throws -> T
+    ) throws -> T {
+      if PreferabliTools.isLoggingOutSync() {
+        throw CancellationError()
+      }
+
+      let ctx = container.mainContext
+      let old = ctx.autosaveEnabled
+      ctx.autosaveEnabled = false
+      defer { ctx.autosaveEnabled = old }
+
+      return try body(ctx)
+    }
+    
     // still updates UI since it is from the same container
     nonisolated
     public static func withBackgroundContext<T: Sendable>(
       priority: TaskPriority = .userInitiated,
       _ body: @escaping @Sendable (ModelContext) throws -> T
     ) async throws -> T {
-      let container = try await MainActor.run { Storage.container }
-      return try await Task.detached(priority: priority) {
-        let ctx = ModelContext(container)
-        ctx.autosaveEnabled = false
-        return try body(ctx)
-      }.value
+      try await withBackgroundContext(priority: priority, allowDuringLogout: false, body)
     }
-    
+
+    nonisolated
+    public static func withBackgroundContext<T: Sendable>(
+        priority: TaskPriority = .userInitiated,
+        allowDuringLogout: Bool = false,
+        _ body: @escaping @Sendable (ModelContext) throws -> T
+    ) async throws -> T {
+
+        if !allowDuringLogout, await PreferabliTools.isLoggingOut() {
+            throw CancellationError()
+        }
+
+        let startingEpoch = await _logoutRegistry.currentEpoch()
+        let container = await MainActor.run { Storage.container }
+
+        let task = Task.detached(priority: priority) { () throws -> T in
+            try Task.checkCancellation()
+
+            if !allowDuringLogout, await PreferabliTools.isLoggingOut() {
+                throw CancellationError()
+            }
+
+            let nowEpoch = await _logoutRegistry.currentEpoch()
+            if nowEpoch != startingEpoch { throw CancellationError() }
+
+            let ctx = ModelContext(container)
+            ctx.autosaveEnabled = false
+            return try body(ctx)
+        }
+
+        let token = await _logoutRegistry.registerCanceller { task.cancel() }
+        defer { Task { await _logoutRegistry.unregister(token) } }
+
+        return try await task.value
+    }
+
     nonisolated
     public static func withBackgroundContextAsync<T: Sendable>(
         priority: TaskPriority = .background,
+        allowDuringLogout: Bool = false,
         _ body: @escaping @Sendable (ModelContext) async throws -> T
     ) async throws -> T {
-        let container = try await MainActor.run { Storage.container }
-        return try await Task.detached(priority: priority) {
+
+        if !allowDuringLogout, await PreferabliTools.isLoggingOut() {
+            throw CancellationError()
+        }
+
+        let startingEpoch = await _logoutRegistry.currentEpoch()
+        let container = await MainActor.run { Storage.container }
+
+        let task = Task.detached(priority: priority) { () async throws -> T in
+            try Task.checkCancellation()
+
+            if !allowDuringLogout, await PreferabliTools.isLoggingOut() {
+                throw CancellationError()
+            }
+
+            let nowEpoch = await _logoutRegistry.currentEpoch()
+            if nowEpoch != startingEpoch { throw CancellationError() }
+
             let ctx = ModelContext(container)
             ctx.autosaveEnabled = false
-            return try await body(ctx)
-        }.value
+
+            let result = try await body(ctx)
+
+            try Task.checkCancellation()
+            let endEpoch = await _logoutRegistry.currentEpoch()
+            if endEpoch != startingEpoch { throw CancellationError() }
+
+            return result
+        }
+
+        let token = await _logoutRegistry.registerCanceller { task.cancel() }
+        defer { Task { await _logoutRegistry.unregister(token) } }
+
+        return try await task.value
     }
 
     internal static func reset() async throws {
-        try await withBackgroundContext { ctx in
-            for wipe in ModelRegistry.wipes { try wipe(ctx) }
-            try ctx.save()
+        try await withBackgroundContextAsync(priority: .userInitiated, allowDuringLogout: true) { ctx in
+            ctx.autosaveEnabled = false
+            ctx.author = "LogoutWipe"
+
+            for wipe in ModelRegistry.wipes {
+                try await wipe(ctx)
+            }
+            return ()
         }
     }
 
-    @inline(__always)
-    nonisolated internal static func deleteAll<T: PersistentModel>(_ type: T.Type, in ctx: ModelContext) throws {
-        let fd = FetchDescriptor<T>()
-        let all = try ctx.fetch(fd)
-        for obj in all { ctx.delete(obj) }
-    }
-    
     internal static func databaseUpgraded() async throws {
         try await Storage.reset()
         resetDatabaseKeystore()
@@ -193,46 +280,84 @@ public enum Storage {
     public nonisolated static func getKeyStore() -> UserDefaults {
         return UserDefaults.init(suiteName: "Preferabli")!
     }
+    
+    @inline(__always)
+    nonisolated internal static func deleteAllBatchedFreshContext<T: PersistentModel>(
+      _ type: T.Type,
+      container: ModelContainer,
+      batchSize: Int = 5000
+    ) throws {
+      let limit = max(1, min(batchSize, 10_000))
+
+      while true {
+        let ctx = ModelContext(container)
+        ctx.autosaveEnabled = false
+
+        var fd = FetchDescriptor<T>()
+        fd.fetchLimit = limit
+
+        let batch = try ctx.fetch(fd)
+        if batch.isEmpty { break }
+
+        for obj in batch { ctx.delete(obj) }
+        try ctx.save()
+        // ctx goes out of scope here -> drops invalidated faults
+      }
+    }
 }
 
 private enum ModelRegistry {
-    typealias Wipe = @Sendable (ModelContext) throws -> Void
-
+    typealias Wipe = @Sendable (ModelContext) async throws -> Void
+    
     /// Single source of truth: call `add(<Type>.self)` here ONCE.
     private static func register(addType: (any PersistentModel.Type) -> Void, addWipe: (@escaping Wipe) -> Void) {
         func add<T: PersistentModel>(_ t: T.Type) {
             addType(T.self)
-            addWipe { ctx in try Storage.deleteAll(T.self, in: ctx) }
+            addWipe { ctx in
+              // ignore `ctx` and delete using fresh contexts
+              let container = ctx.container
+              try Storage.deleteAllBatchedFreshContext(T.self, container: container)
+            }
         }
+        
+        // try to order these children -> parents
 
+        add(Location.self)
+        add(Media.self)
         add(Customer.self)
         add(PreferabliUser.self)
-        add(Profile.self)
-        add(ProfileStyle.self)
+        add(PreferenceData.self)
+
         add(Style.self)
-        add(Product.self)
-        add(ProductProfile.self)
-        add(Variant.self)
-        add(Tag.self)
-        add(Media.self)
+        add(ProfileStyle.self)
+        add(Profile.self)
+        
         add(Search.self)
-        add(Venue.self)
+        
         add(VenueHour.self)
-        add(Collection.self)
-        add(CollectionOrder.self)
-        add(CollectionVersion.self)
-        add(CollectionGroup.self)
+        add(Venue.self)
+        
+        add(UserCollection.self)
         add(CollectionTrait.self)
+        add(CollectionOrder.self)
+        add(CollectionGroup.self)
+        add(CollectionVersion.self)
+        add(Collection.self)
+        add(ChannelVenue.self)
+        add(Channel.self)
+        
         add(DeliveryMethod.self)
         add(Food.self)
         add(FoodCategory.self)
-        add(UserCollection.self)
         add(Reservation.self)
-        add(Location.self)
-        add(Channel.self)
-        add(ChannelVenue.self)
-        add(Market.self)
+        
+        add(ProductProfile.self)
+        add(Tag.self)
+        add(Variant.self)
+        add(Product.self)
+        
         add(MarketTrait.self)
+        add(Market.self)
     }
 
     /// Publicly consumed lists—both derived from the single `register` body above.

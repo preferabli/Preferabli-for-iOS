@@ -158,22 +158,27 @@ public class Preferabli {
     }
     
     internal func clearAllData() async throws {
-        // delete all from core data
-        await MainActor.run {
-            Storage.wipePersistentStoreFilesAndRebuild()
+        do {
+            // delete all from core data
+            try await Storage.reset()
+            
+            // clear HTTP cache
+            await api.clearUrlCache()
+            await api.refreshDefaults()
+            
+            let keyStore = Storage.getKeyStore()
+            let integration_id = keyStore.integer(forKey: "INTEGRATION_ID")
+            let client_interface = keyStore.string(forKey: "CLIENT_INTERFACE")
+            let storeFile = keyStore.string(forKey: "swiftdata_store_filename")
+            
+            keyStore.removePersistentDomain(forName: "Preferabli")
+            
+            keyStore.set(integration_id, forKey: "INTEGRATION_ID")
+            keyStore.set(client_interface, forKey: "CLIENT_INTERFACE")
+            keyStore.set(storeFile, forKey: "swiftdata_store_filename")
+        } catch {
+            print(error)
         }
-        
-        // clear HTTP cache
-        await api.clearUrlCache()
-        await api.refreshDefaults()
-        
-        let keyStore = Storage.getKeyStore()
-        let integration_id = keyStore.integer(forKey: "INTEGRATION_ID")
-        let client_interface = keyStore.string(forKey: "CLIENT_INTERFACE")
-
-        keyStore.removePersistentDomain(forName: "Preferabli")
-        keyStore.set(integration_id, forKey: "INTEGRATION_ID")
-        keyStore.set(client_interface, forKey: "CLIENT_INTERFACE")
     }
 
     public func bootstrapUserSessionIfNeeded(force: Bool = false) async {
@@ -205,7 +210,7 @@ public class Preferabli {
             
             let user: PreferabliUserDTO = try await api.getAlamo().post(APIEndpoints.users, sjson: createParams)
             
-            try userUpdated(dto: user)
+            try await userUpdated(dto: user)
         }
     }
     
@@ -264,7 +269,10 @@ public class Preferabli {
     }
     
     internal func canWeContinue(needsToBeLoggedIn : Bool) async throws {
-        let isLoggingOut = await PreferabliTools.isLoggedOutOrLoggingOut()
+        let isLoggingOut = await PreferabliTools.isLoggingOut()
+        
+        if isLoggingOut { throw CancellationError() }
+        
         if (!hasBeenInitialized) {
             throw PreferabliException.init(type: .InvalidClientInterface)
         } else if (!Storage.isKeyPresentInKeyStore(key: "access_token") && !startupThreadRunning) {
@@ -361,7 +369,7 @@ public class Preferabli {
                 dto = try await api.getAlamo().put(APIEndpoints.user(id: user_id), sjson: paramss2)
             }
             
-            try userUpdated(dto: dto)
+            try await userUpdated(dto: dto)
 
             loadUserData()
             
@@ -385,7 +393,7 @@ public class Preferabli {
                 
                 let dto : PreferabliUserDTO = try await api.getAlamo().put(APIEndpoints.user(id: Preferabli.USER_ID), sjson: params)
                 
-                try userUpdated(dto: dto)
+                try await userUpdated(dto: dto)
 
                 loadUserData()
             }
@@ -396,25 +404,25 @@ public class Preferabli {
         }
     }
     
-    /// Logout a customer or a user.
     public func logout() async throws {
-        do {
-            try await canWeContinue(needsToBeLoggedIn: true)
-            
-            Analytics.track( ["event" : "logout"])
-            
-            try await PreferabliTools.logout()
-            
+        try await canWeContinue(needsToBeLoggedIn: true)
+
+        try await PreferabliTools.withLogout {
+            // ✅ first thing
+            await Storage.beginLogoutCancellation()
+            defer { Task { await Storage.endLogoutCancellation() } }
+
+            // then cancel other inflight
+            await PreferabliTools.cancelAllInflight()
+
+            // then wipe
             try await clearAllData()
-            
-            sessionBootstrapper.reset(preferabli: self)
-            
-            try await createAnonymousSession(create_anonymous_user: isInternal())
-            
-        } catch {
-            handleError(error: error)
-            throw error
+            await sessionBootstrapper.reset(preferabli: self)
         }
+    }
+
+    public func bootstrapAnonymousIfNeeded() async throws {
+        try await createAnonymousSession(create_anonymous_user: isInternal())
     }
     
     public func updateAvatar(
@@ -453,7 +461,7 @@ public class Preferabli {
                 .getAlamo()
                 .put(APIEndpoints.user(id: PreferabliTools.getPreferabliUserId()), sjson: params)
             
-            try userUpdated(dto: user)
+            try await userUpdated(dto: user)
 
             try await canWeContinue(needsToBeLoggedIn: true)
 
@@ -1115,7 +1123,7 @@ public class Preferabli {
         }
     }
     
-    public func getProductShareQRCode(shareLink : String, width : Int, tint : Color, background : Color = .white) async throws -> Data
+    public func getShareQRCode(shareLink : String, width : Int, tint : Color, background : Color = .white) async throws -> Data
     {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
@@ -1578,6 +1586,69 @@ public class Preferabli {
             
             return collectionId
 
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func deleteCellar(userCollectionId: Int
+    ) async throws {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            Analytics.track(["event": "delete_cellar"])
+
+            _ = try await api
+                .getAlamo()
+                .delete(APIEndpoints.userCollection(id: PreferabliTools.getPreferabliUserId(), userCollectionId: userCollectionId))
+
+            try Storage.withContext { ctx in
+                guard let userCollection = try Storage.fetchById(UserCollection.self, id: userCollectionId, in: ctx) else {
+                    return
+                }
+                
+                ctx.delete(userCollection)
+                
+                try ctx.save()
+            }
+
+            try await canWeContinue(needsToBeLoggedIn: true)
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func deleteOrdering(collectionId: Int,
+        versionId: Int,
+        groupId: Int,
+        orderingId: Int
+    ) async throws {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            Analytics.track(["event": "delete_ordering"])
+
+            _ = try await api
+                .getAlamo()
+                .delete(APIEndpoints.ordering(collectionId: collectionId, versionId: versionId, groupId: groupId, orderingId: orderingId))
+
+            try Storage.withContext { ctx in
+                guard let ordering = try Storage.fetchById(CollectionOrder.self, id: orderingId, in: ctx) else {
+                    return
+                }
+                ctx.delete(ordering)
+                
+                if let collection = try Storage.fetchById(Collection.self, id: collectionId, in: ctx) {
+                    collection.product_count = max(0, (collection.product_count ?? 0) - 1)
+                    collection.updated_at = Date()
+                }
+                
+                try ctx.save()
+            }
+
+            try await canWeContinue(needsToBeLoggedIn: true)
+            
         } catch {
             handleError(error: error)
             throw error
@@ -2107,7 +2178,7 @@ public class Preferabli {
             if (tag_type == .RATING) {
                 await profileStatsCoordinator.invalidateAndRecomputeIfReady()
 
-                Task.detached(priority: .background) { [weak self] in
+                PreferabliTools.detachedCancellableTask { [weak self] in
                     try await self?.profileHelper.getProfile(force_refresh: false)
                 }
             }

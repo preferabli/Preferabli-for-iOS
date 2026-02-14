@@ -17,69 +17,149 @@ import Photos
 import Mixpanel
 
 /// Contains lots of helper methods for private use within Preferabli's projects.
-internal class PreferabliTools {
-    
-    private static let operationQueue = OperationQueue()
-    private static let apiOperationQueue = OperationQueue()
-    
-    private actor LogoutCoordinator {
+public class PreferabliTools {
+
+    // Async gate (serializes logouts)
+    private actor LogoutGate {
         private var inProgress = false
-        
-        /// Try to start a logout. Returns `false` if one is already running.
+
         func begin() -> Bool {
             guard !inProgress else { return false }
             inProgress = true
             return true
         }
+
         func end() { inProgress = false }
         func isRunning() -> Bool { inProgress }
     }
-    private static let logoutCoord = LogoutCoordinator()
-    
-    // MARK: - Public API
-    
-    /// Serializes logouts and avoids blocking threads. If a logout is already
-    /// running, this is a no-op (matching your original early-return).
-    internal static func logout() async throws {
-        // prevent re-entrance
-        guard await logoutCoord.begin() else { return }
-        defer { Task { await logoutCoord.end() } }
-        
-        // Cancel your outstanding work
-        operationQueue.cancelAllOperations()
-        apiOperationQueue.cancelAllOperations()
+
+    private static let gate = LogoutGate()
+
+    // Sync mirror for MainActor-only callsites (e.g., Storage.withContext)
+    @MainActor private static var _logoutFlag: Bool = false
+
+    @MainActor internal static func _setLoggingOutFlag(_ v: Bool) {
+        _logoutFlag = v
     }
-    
-    /// Async because it reads actor state.
-    internal static func isLoggedOutOrLoggingOut() async -> Bool {
-        let running = await logoutCoord.isRunning()
-        return running || (!Preferabli.isPreferabliUserLoggedIn() && !Preferabli.isCustomerLoggedIn())
+
+    /// MainActor-safe *sync* check (only call from MainActor code)
+    @MainActor internal static func isLoggingOutSync() -> Bool {
+        _logoutFlag
     }
-    
-    internal class func startNewAsyncWorkThread(priority: Operation.QueuePriority = .high,_ work: @escaping @Sendable () async -> Void) {
-        let op = BlockOperation {
-            // Use a Task so we can call async code inside the Operation
-            Task { await work() }
+
+    // MARK: Public logout API
+
+    /// Begins logout if one is not already in progress.
+    internal static func beginLogout() async -> Bool {
+        let ok = await gate.begin()
+        if ok {
+            await MainActor.run { _setLoggingOutFlag(true) }
         }
-        startNewWorkThread(priority: priority, operation: op)
+        return ok
+    }
+
+    internal static func endLogout() async {
+        await gate.end()
+        await MainActor.run { _setLoggingOutFlag(false) }
+    }
+
+    internal static func isLoggingOut() async -> Bool {
+        await gate.isRunning()
+    }
+
+    /// Helper wrapper to serialize logouts.
+    internal static func withLogout<T: Sendable>(
+        _ body: @Sendable () async throws -> T
+    ) async throws -> T {
+        guard await beginLogout() else { throw CancellationError() }
+        defer { Task { await endLogout() } }
+        return try await body()
+    }
+
+    // MARK: Inflight cancellation registry
+
+    private actor CancelRegistry {
+        private var cancellers: [UUID: @Sendable () -> Void] = [:]
+
+        func register(_ cancel: @escaping @Sendable () -> Void) -> UUID {
+            let id = UUID()
+            cancellers[id] = cancel
+            return id
+        }
+
+        func unregister(_ id: UUID) {
+            cancellers[id] = nil
+        }
+
+        func cancelAll() {
+            let all = cancellers.values
+            cancellers.removeAll(keepingCapacity: true)
+            for c in all { c() }
+        }
+    }
+
+    private static let registry = CancelRegistry()
+
+    internal static func cancelAllInflight() async {
+        await registry.cancelAll()
+    }
+
+    internal static func registerForLogoutCancellation(
+        _ cancel: @escaping @Sendable () -> Void
+    ) async -> UUID {
+        await registry.register(cancel)
+    }
+
+    internal static func unregisterLogoutCancellation(_ token: UUID) async {
+        await registry.unregister(token)
+    }
+
+    /// Convenience: spawn a cancellable task (Task<Void, Never>) that gets cancelled on logout.
+    @discardableResult
+    public static func detachedCancellableTask(
+        priority: TaskPriority? = nil,
+        operation: @escaping @Sendable () async -> Void
+    ) -> Task<Void, Never> {
+
+        let task = Task.detached(priority: priority) {
+            await operation()
+        }
+
+        Task {
+            let token = await registry.register { task.cancel() }
+            _ = await task.result
+            await registry.unregister(token)
+        }
+
+        return task
     }
     
-    internal class func startNewWorkThread(priority: Operation.QueuePriority = .high, _ body: @escaping @Sendable () -> Void) {
-        let operation = BlockOperation(block: body)
-        operation.queuePriority = priority
-        startNewWorkThread(priority: priority, operation: operation)
-    }
-    
-    internal class func startNewWorkThread(priority : Operation.QueuePriority = .high, operation : Operation) {
-        operation.queuePriority = priority
-        operationQueue.maxConcurrentOperationCount = 30
-        operationQueue.addOperation(operation)
-    }
-    
-    internal class func startNewAPIWorkThread(priority : Operation.QueuePriority, operation : Operation) {
-        operation.queuePriority = priority
-        apiOperationQueue.maxConcurrentOperationCount = 10
-        apiOperationQueue.addOperation(operation)
+    // PreferabliTools.swift
+
+    @discardableResult
+    public static func detachedCancellableTask(
+        priority: TaskPriority? = nil,
+        operation: @escaping @Sendable () async throws -> Void,
+        onError: (@Sendable (Error) -> Void)? = nil
+    ) -> Task<Void, Never> {
+
+        let task = Task.detached(priority: priority) {
+            do {
+                try await operation()
+            } catch is CancellationError {
+                // ignore
+            } catch {
+                onError?(error)
+            }
+        }
+
+        Task {
+            let token = await registry.register { task.cancel() }
+            _ = await task.result
+            await registry.unregister(token)
+        }
+
+        return task
     }
     
     internal class func saveCollectionEtag(response : AFDataResponse<Data?>, collectionId : Int) {

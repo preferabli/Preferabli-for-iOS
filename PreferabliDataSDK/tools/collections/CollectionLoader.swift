@@ -323,7 +323,7 @@ public actor CollectionLoader {
         runs[key]!.isRunning = true
         broadcast(.started, key: key)
 
-        runs[key]!.task = Task.detached { [weak self] in
+        runs[key]!.task = PreferabliTools.detachedCancellableTask { [weak self] in
             do {
                 try await self?.run(key: key, spec: spec, forceRefresh: forceRefresh)
             } catch let e as PreferabliException {
@@ -337,6 +337,11 @@ public actor CollectionLoader {
 
     private func run(key: String, spec: CollectionSpec, forceRefresh: Bool) async throws {
         try await Preferabli.main.canWeContinue(needsToBeLoggedIn: false)
+
+        // ✅ NEW: When force-refreshing, also refresh the Collection metadata itself.
+        if forceRefresh, let cid = spec.resolveCollectionId(), cid > 0 {
+            try await refreshCollectionMetadata(collectionId: cid)
+        }
 
         switch spec.loadMode {
         case .tags:
@@ -622,6 +627,19 @@ public actor CollectionLoader {
         }
         if exists { return }
 
+        let dto: CollectionDTO = try await Preferabli.main.api
+            .getAlamo()
+            .get(APIEndpoints.collection(id: collectionId))
+
+        try await Storage.withBackgroundContext { ctx in
+            _ = try Storage.upsertCollection(from: dto, in: ctx)
+            try ctx.save()
+        }
+    }
+
+    // ✅ NEW: Force-refresh path for collection metadata.
+    // Always hits APIEndpoints.collection and upserts, even if the Collection already exists locally.
+    private func refreshCollectionMetadata(collectionId: Int) async throws {
         let dto: CollectionDTO = try await Preferabli.main.api
             .getAlamo()
             .get(APIEndpoints.collection(id: collectionId))

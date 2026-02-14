@@ -8,22 +8,42 @@
 import Foundation
 import SwiftData
 
+// MARK: - Cancellation helpers
+extension Storage {
+    /// Upserts are always invoked inside `withBackgroundContext`, `withBackgroundContextAsync`, or `withContext`.
+    /// Still, we must cooperate with Task cancellation because logout may be deleting the graph concurrently.
+    @inline(__always)
+    nonisolated static func checkCancelled() throws {
+        try Task.checkCancellation()
+    }
+
+    /// Use right before *relationship setters* / collection replacements, which are the hottest crash points
+    /// when instances have been invalidated by a wipe.
+    @inline(__always)
+    nonisolated static func checkCancelledBeforeRelationshipWrite() throws {
+        try Task.checkCancellation()
+    }
+}
 
 extension Storage {
-    
+
     // MARK: Product
-    
+
     @discardableResult
     nonisolated static func upsertProduct(from dto: ProductDTO, tempProductId: Int? = nil, in ctx: ModelContext) throws -> Product {
-        
-        let product : Product
+
+        try checkCancelled()
+
+        let product: Product
         if let pid = tempProductId, let temp = try Storage.fetchById(Product.self, id: pid, in: ctx) {
             product = temp
             product.id = dto.id
         } else {
             product = try fetchOrInsert(Product.self, id: dto.id, in: ctx) { Product(id: dto.id) }
         }
-        
+
+        try checkCancelled()
+
         product.name = dto.name
         product.created_at = dto.created_at ?? product.created_at
         product.updated_at = dto.updated_at ?? product.updated_at
@@ -41,54 +61,70 @@ extension Storage {
         product.brand_id = dto.brand_id
         product.product_hash = dto.hash
         product.country_code = dto.country_code
-        
+
         // Primary image
         if let imgDTO = dto.primary_image {
+            try checkCancelled()
             let media = try upsertMedia(from: imgDTO, in: ctx)
-            if product.primary_image !== media {            // <-- add this line
+
+            try checkCancelledBeforeRelationshipWrite()
+            if product.primary_image !== media {
                 product.primary_image = media
             }
         }
-        
+
         // Variants
-        var mostRecentYear = product.cachedMostRecentVariant?.year ??  -2
+        var mostRecentYear = product.cachedMostRecentVariant?.year ?? -2
         if let vDTOs = dto.variants {
             for vDTO in vDTOs {
+                try checkCancelled()
                 let variant = try upsertVariant(from: vDTO, product: product, in: ctx)
-                if (variant.year > mostRecentYear) {
+                if variant.year > mostRecentYear {
                     mostRecentYear = variant.year
+
+                    try checkCancelledBeforeRelationshipWrite()
                     product.cachedMostRecentVariant = variant
                 }
             }
         }
-        
-        if let latest_variant_num_dollar_signs = dto.latest_variant_num_dollar_signs, latest_variant_num_dollar_signs != 0 {
+
+        if let latest = dto.latest_variant_num_dollar_signs, latest != 0 {
             if product.variants.isEmpty {
+                try checkCancelled()
+
                 let variant = Variant(id: generateRandomLongId(), year: Variant.CURRENT_VARIANT_YEAR, product: product)
+                variant.num_dollar_signs = latest
+
+                try checkCancelledBeforeRelationshipWrite()
                 product.cachedMostRecentVariant = variant
-                variant.num_dollar_signs = dto.latest_variant_num_dollar_signs!
                 ctx.insert(variant)
             }
         }
-        
+
         return product
     }
-    
+
     // MARK: ProductProfile
-    
+
     @discardableResult
-    nonisolated static func upsertProductProfile(from dto: ProductProfileDTO,
-                                                 for product: Product,
-                                                 in ctx: ModelContext) throws -> ProductProfile {
+    nonisolated static func upsertProductProfile(
+        from dto: ProductProfileDTO,
+        for product: Product,
+        in ctx: ModelContext
+    ) throws -> ProductProfile {
+
+        try checkCancelled()
+
         let profile = try fetchOrInsert(ProductProfile.self, id: product.id, in: ctx) { ProductProfile(product: product) }
-        
+
+        try checkCancelledBeforeRelationshipWrite()
         profile.product = product
-        
         if product.profile !== profile {
             product.profile = profile
         }
-        
-        // 3) Assign fields (your existing mapping)
+
+        try checkCancelled()
+
         profile.refreshed_at = Date()
         profile.trait1Name  = dto.trait1Name
         profile.trait2Name  = dto.trait2Name
@@ -114,36 +150,50 @@ extension Storage {
         profile.food_category_2_icon_png_url = dto.food_category_2_icon_png_url
         profile.food_category_3_icon_png_url = dto.food_category_3_icon_png_url
         profile.food_category_4_icon_png_url = dto.food_category_4_icon_png_url
-        
+
         return profile
     }
-    
+
     @discardableResult
-    nonisolated static func upsertPreferenceData(from dto: PreferenceDataDTO,
-                                                 for product: Product,
-                                                 in ctx: ModelContext) throws -> PreferenceData {
+    nonisolated static func upsertPreferenceData(
+        from dto: PreferenceDataDTO,
+        for product: Product,
+        in ctx: ModelContext
+    ) throws -> PreferenceData {
+
+        try checkCancelled()
+
         var preference_data = product.preference_data
-        if (preference_data == nil) {
-            preference_data = PreferenceData(product: product)
-            ctx.insert(preference_data!)
+        if preference_data == nil {
+            let created = PreferenceData(product: product)
+
+            try checkCancelledBeforeRelationshipWrite()
+            product.preference_data = created
+
+            ctx.insert(created)
+            preference_data = created
         }
-        
+
         let data = preference_data!
-        
+
+        try checkCancelled()
+
         data.refreshed_at = Date()
         data.title  = dto.title
         data.confidence_code = dto.confidence_code
         data.details = dto.details
         data.formatted_predict_rating = dto.formatted_predict_rating
-        
+
         return data
     }
-    
-    
+
     // MARK: Variant
-    
+
     @discardableResult
     nonisolated static func upsertVariant(from dto: VariantDTO, product: Product, in ctx: ModelContext) throws -> Variant {
+
+        try checkCancelled()
+
         let v: Variant
         if let temp = product.getVariantWithYear(year: dto.year) {
             v = temp
@@ -152,37 +202,50 @@ extension Storage {
                 Variant(id: dto.id, year: dto.year, product: product)
             }
         }
-        
+
+        try checkCancelled()
+
         // ✅ Re-assert required fields
         v.id = dto.id
         v.year = dto.year
+
+        try checkCancelledBeforeRelationshipWrite()
         if v.product.id != product.id { v.product = product }
-        
+
         v.created_at = dto.created_at ?? v.created_at
         v.updated_at = dto.updated_at ?? v.updated_at
         v.num_dollar_signs = dto.num_dollar_signs ?? v.num_dollar_signs
         v.price = dto.price ?? v.price
         v.recommendable = dto.recommendable ?? v.recommendable
-        
+
         if let imgDTO = dto.primary_image {
+            try checkCancelled()
             let media = try upsertMedia(from: imgDTO, in: ctx)
+
+            try checkCancelledBeforeRelationshipWrite()
             if v.primary_image !== media { v.primary_image = media }
         }
-        
+
         return v
     }
-    
+
     // MARK: Tag
-    
+
     @discardableResult
     nonisolated static func upsertTag(from dto: TagDTO, variant: Variant, tempTagId: Int? = nil, in ctx: ModelContext) throws -> Tag {
-        let t : Tag
+
+        try checkCancelled()
+
+        let t: Tag
         if let tid = tempTagId, let temp = try Storage.fetchById(Tag.self, id: tid, in: ctx) {
             t = temp
             t.id = dto.id
         } else {
             t = try fetchOrInsert(Tag.self, id: dto.id, in: ctx) { Tag(id: dto.id, collection_id: dto.collection_id, variant: variant) }
         }
+
+        try checkCancelled()
+
         t.collection_id = dto.collection_id ?? t.collection_id
         t.comment = dto.comment ?? t.comment
         t.created_at = dto.created_at ?? t.created_at
@@ -201,10 +264,13 @@ extension Storage {
         t.format_ml = dto.format_ml ?? t.format_ml
         t.price = dto.price ?? t.price
         t.customer_id = dto.customer_id ?? t.customer_id
-        
+
         let product = variant.product
         let newDate = t.created_at ?? .now
-        
+
+        // These are just pointer assignments but still relationship-ish cached refs.
+        try checkCancelledBeforeRelationshipWrite()
+
         if t.isRating() {
             let currentDate = product.cachedMostRecentRating?.created_at ?? .distantPast
             if newDate >= currentDate {
@@ -221,14 +287,17 @@ extension Storage {
                 product.cachedCellar = t
             }
         }
-        
+
         return t
     }
-    
+
     // MARK: Media
-    
+
     @discardableResult
     nonisolated static func upsertMedia(from dto: MediaDTO, in ctx: ModelContext) throws -> Media {
+
+        try checkCancelled()
+
         let m = try fetchOrInsert(Media.self, id: dto.id, in: ctx) { Media(id: dto.id) }
         m.id = dto.id
         m.path = dto.path ?? m.path
@@ -237,40 +306,49 @@ extension Storage {
         m.type = dto.type ?? m.type
         return m
     }
-    
+
     @discardableResult
     nonisolated static func upsertExperience(from dto: ExperienceDTO, venue: Venue, in ctx: ModelContext) throws -> Experience {
-        
+
+        try checkCancelled()
+
         let e = try fetchOrInsert(Experience.self, id: dto.id, in: ctx) {
             Experience(id: dto.id, venue: venue)
         }
-        
-        // Timestamps
+
         e.created_at = dto.created_at ?? e.created_at
         e.updated_at = dto.updated_at ?? e.updated_at
-        
-        // Fields
         e.name = dto.name ?? e.name
         e.desc = dto.description ?? e.desc
         e.primary_inventory_id = dto.primary_inventory_id ?? e.primary_inventory_id
-        
         e.reservations_provider = dto.reservations_provider ?? e.reservations_provider
         e.booking_link = dto.booking_link ?? e.booking_link
         e.discount_code = dto.discount_code ?? e.discount_code
-        
-        // Images (replace list if present)
+
         if let imgs = dto.images {
-            e.images = try imgs.map { try upsertMedia(from: $0, in: ctx) }
+            try checkCancelled()
+
+            let newImages = try imgs.map { img -> Media in
+                try checkCancelled()
+                return try upsertMedia(from: img, in: ctx)
+            }
+
+            try checkCancelledBeforeRelationshipWrite()
+            e.images = newImages
         }
-        
+
         return e
     }
-    
+
     // MARK: Venue
-    
+
     @discardableResult
     nonisolated static func upsertVenue(from dto: VenueDTO, in ctx: ModelContext) throws -> Venue {
+
+        try checkCancelled()
+
         let v = try fetchOrInsert(Venue.self, id: dto.id, in: ctx) { Venue(id: dto.id) }
+
         v.address_l1 = dto.address_l1 ?? v.address_l1
         v.address_l2 = dto.address_l2 ?? v.address_l2
         v.city = dto.city ?? v.city
@@ -292,25 +370,69 @@ extension Storage {
         v.url_youtube = dto.url_youtube ?? v.url_youtube
         v.zip_code = dto.zip_code ?? v.zip_code
         v.notes = dto.notes ?? v.notes
-        
+
+        // Relationship lists: build locals first, then assign once with a cancellation check right before set.
         if let imgs = dto.images {
-            v.images = try imgs.map { try upsertMedia(from: $0, in: ctx) }
+            var newImages: [Media] = []
+            newImages.reserveCapacity(imgs.count)
+
+            for img in imgs {
+                try checkCancelled()
+                newImages.append(try upsertMedia(from: img, in: ctx))
+            }
+
+            try checkCancelledBeforeRelationshipWrite()
+            v.images = newImages
         }
+
         if let hrs = dto.hours {
-            v.hours = try hrs.map { try upsertVenueHour(from: $0, in: ctx) }
+            var newHours: [VenueHour] = []
+            newHours.reserveCapacity(hrs.count)
+
+            for h in hrs {
+                try checkCancelled()
+                newHours.append(try upsertVenueHour(from: h, in: ctx))
+            }
+
+            // 🔥 this is where your crash was happening — guard it.
+            try checkCancelledBeforeRelationshipWrite()
+            v.hours = newHours
         }
+
         if let dms = dto.active_delivery_methods {
-            v.active_delivery_methods = try dms.map { try upsertDeliveryMethod(from: $0, in: ctx) }
+            var newDms: [DeliveryMethod] = []
+            newDms.reserveCapacity(dms.count)
+
+            for dm in dms {
+                try checkCancelled()
+                newDms.append(try upsertDeliveryMethod(from: dm, in: ctx))
+            }
+
+            try checkCancelledBeforeRelationshipWrite()
+            v.active_delivery_methods = newDms
         }
+
         if let cols = dto.collections {
-            v.collections = try cols.map { try upsertCollection(from: $0, in: ctx) }
+            var newCols: [Collection] = []
+            newCols.reserveCapacity(cols.count)
+
+            for col in cols {
+                try checkCancelled()
+                newCols.append(try upsertCollection(from: col, in: ctx))
+            }
+
+            try checkCancelledBeforeRelationshipWrite()
+            v.collections = newCols
         }
-        
+
         return v
     }
-    
+
     @discardableResult
     nonisolated static func upsertVenueHour(from dto: VenueHourDTO, in ctx: ModelContext) throws -> VenueHour {
+
+        try checkCancelled()
+
         let h = try fetchOrInsert(VenueHour.self, id: dto.id, in: ctx) { VenueHour(id: dto.id) }
         h.weekday = dto.weekday ?? h.weekday
         h.open_time = dto.open_time ?? h.open_time
@@ -318,9 +440,12 @@ extension Storage {
         h.is_closed = dto.is_closed ?? h.is_closed
         return h
     }
-    
+
     @discardableResult
     nonisolated static func upsertDeliveryMethod(from dto: DeliveryMethodDTO, in ctx: ModelContext) throws -> DeliveryMethod {
+
+        try checkCancelled()
+
         let d = try fetchOrInsert(DeliveryMethod.self, id: dto.id, in: ctx) { DeliveryMethod(id: dto.id) }
         d.shipping_type = dto.shipping_type ?? d.shipping_type
         d.state_abbreviation = dto.state_abbreviation ?? d.state_abbreviation
@@ -330,13 +455,16 @@ extension Storage {
         d.shipping_speed_note = dto.shipping_speed_note ?? d.shipping_speed_note
         return d
     }
-    
+
     // MARK: Collection tree
-    
+
     @discardableResult
     nonisolated static func upsertCollection(from dto: CollectionDTO, in ctx: ModelContext) throws -> Collection {
+
+        try checkCancelled()
+
         let c = try fetchOrInsert(Collection.self, id: dto.id, in: ctx) { Collection(id: dto.id) }
-        
+
         c.channel_id = dto.channel_id ?? c.channel_id
         c.sort_channel_id = dto.sort_channel_id ?? c.sort_channel_id
         c.code = dto.code ?? c.code
@@ -368,87 +496,111 @@ extension Storage {
         c.venue_id = dto.venue_id ?? c.venue_id
         c.sort_channel_name = dto.sort_channel_name ?? c.sort_channel_name
         c.location_based_recs = dto.location_based_recs ?? c.location_based_recs
-        
+
+        // Primary image (fix duplicated block + handle nil)
         if let img = dto.primary_image {
-            c.primary_image = try upsertMedia(from: img, in: ctx)
-        }
-        
-        if let img = dto.primary_image {
-            c.primary_image = try upsertMedia(from: img, in: ctx)
+            try checkCancelled()
+            let media = try upsertMedia(from: img, in: ctx)
+
+            try checkCancelledBeforeRelationshipWrite()
+            if c.primary_image !== media { c.primary_image = media }
         } else {
+            try checkCancelledBeforeRelationshipWrite()
             c.primary_image = nil
         }
-        
-        if let v = dto.venue {
-            c.venue = try upsertVenue(from: v, in: ctx)
+
+        if let vDTO = dto.venue {
+            try checkCancelled()
+            let venue = try upsertVenue(from: vDTO, in: ctx)
+
+            try checkCancelledBeforeRelationshipWrite()
+            if c.venue?.id != venue.id { c.venue = venue }
         }
+
         if let vers = dto.versions {
-            c.versions = try vers.map { try upsertCollectionVersion(from: $0, collection: c, in: ctx) }
+            var newVers: [CollectionVersion] = []
+            newVers.reserveCapacity(vers.count)
+
+            for ver in vers {
+                try checkCancelled()
+                newVers.append(try upsertCollectionVersion(from: ver, collection: c, in: ctx))
+            }
+
+            try checkCancelledBeforeRelationshipWrite()
+            c.versions = newVers
         }
-        //        if let traits = dto.traits {
-        //            c.traits = try traits.map { try upsertCollectionTrait(from: $0, in: ctx) }
-        //        }
-        
+
         return c
     }
-    
+
     // MARK: - CollectionVersion / CollectionGroup / CollectionOrder
-    
+
     @discardableResult
     nonisolated static func upsertCollectionVersion(
         from dto: CollectionVersionDTO,
         collection: Collection,
         in ctx: ModelContext
     ) throws -> CollectionVersion {
+
+        try checkCancelled()
+
         let v = try fetchOrInsert(CollectionVersion.self, id: dto.id, in: ctx) {
             CollectionVersion(id: dto.id, collection: collection)
         }
-        
-        // Basic fields
+
         v.created_at = dto.created_at ?? v.created_at
         v.updated_at = dto.updated_at ?? v.updated_at
         v.name       = dto.name       ?? v.name
         v.order      = dto.order      ?? v.order
-        
-        // Ensure parent is correct
+
+        try checkCancelledBeforeRelationshipWrite()
         if v.collection.id != collection.id {
             v.collection = collection
         }
-        
-        // Groups (if present on the DTO)
+
         if let groupDTOs = dto.groups {
-            v.groups = try groupDTOs.map { try upsertCollectionGroup(from: $0, version: v, in: ctx) }
+            var newGroups: [CollectionGroup] = []
+            newGroups.reserveCapacity(groupDTOs.count)
+
+            for g in groupDTOs {
+                try checkCancelled()
+                newGroups.append(try upsertCollectionGroup(from: g, version: v, in: ctx))
+            }
+
+            try checkCancelledBeforeRelationshipWrite()
+            v.groups = newGroups
         }
-        
+
         return v
     }
-    
+
     @discardableResult
     nonisolated static func upsertCollectionGroup(
         from dto: CollectionGroupDTO,
         version: CollectionVersion,
         in ctx: ModelContext
     ) throws -> CollectionGroup {
+
+        try checkCancelled()
+
         let g = try fetchOrInsert(CollectionGroup.self, id: dto.id, in: ctx) {
             CollectionGroup(id: dto.id, version: version)
         }
-        
+
         g.created_at      = dto.created_at      ?? g.created_at
         g.updated_at      = dto.updated_at      ?? g.updated_at
         g.name            = dto.name            ?? g.name
         g.order           = dto.order           ?? g.order
         g.orderings_count = dto.orderings_count ?? g.orderings_count
-        
+
+        try checkCancelledBeforeRelationshipWrite()
         if g.version.id != version.id {
             g.version = version
         }
-        
-        // NOTE: we don't upsert orders here directly because we need Tags first.
-        // The loader can handle that in a second pass once tags/products are in place.
-        
+
         return g
     }
-    
+
     @discardableResult
     nonisolated static func upsertCollectionOrder(
         from dto: CollectionOrderDTO,
@@ -456,65 +608,56 @@ extension Storage {
         tag: Tag,
         in ctx: ModelContext
     ) throws -> CollectionOrder {
+
+        try checkCancelled()
+
         let o = try fetchOrInsert(CollectionOrder.self, id: dto.id, in: ctx) {
-            // Adjust this initializer to match your actual model init
             CollectionOrder(
                 id: dto.id,
-                tag_id: tag.id, order: dto.order ?? 0,
+                tag_id: tag.id,
+                order: dto.order ?? 0,
                 group: group,
                 tag: tag
             )
         }
-        
-        // Timestamps
+
         o.created_at = dto.created_at ?? o.created_at
         o.updated_at = dto.updated_at ?? o.updated_at
-        
-        // Order
         o.order = dto.order
-        
-        // Keep relationships in sync
-        if o.group.id != group.id {
-            o.group = group
-        }
-        if o.tag.id != tag.id {
-            o.tag = tag
-        }
+
+        try checkCancelledBeforeRelationshipWrite()
+        if o.group.id != group.id { o.group = group }
+        if o.tag.id != tag.id { o.tag = tag }
         o.tag_id = tag.id
-        
+
         return o
     }
-    
-    
+
     @discardableResult
     nonisolated static func upsertCollectionTrait(from dto: CollectionTraitDTO, in ctx: ModelContext) throws -> CollectionTrait {
+
+        try checkCancelled()
+
         let t = try fetchOrInsert(CollectionTrait.self, id: dto.id, in: ctx) { CollectionTrait(id: dto.id) }
         t.name = dto.name ?? t.name
         t.order = dto.order ?? t.order
         t.restrict_to_ring_it = dto.restrict_to_ring_it ?? t.restrict_to_ring_it
-        
-        //        if let cref = dto.collection?.id {
-        //            t.collection = try resolveCollection(id: cref, in: ctx)
-        //        }
         return t
     }
-    
+
     // MARK: Profile & ProfileStyle
-    
+
     @discardableResult
     nonisolated static func upsertProfile(from dto: ProfileDTO, in ctx: ModelContext) throws -> Profile {
-        let p = try fetchOrInsert(Profile.self, id: dto.id, in: ctx) {
-            Profile(id: dto.id)
-        }
-        
-        // Core identity / ownership fields
+
+        try checkCancelled()
+
+        let p = try fetchOrInsert(Profile.self, id: dto.id, in: ctx) { Profile(id: dto.id) }
+
         p.user_id = dto.user_id
         p.customer_id = dto.customer_id
-        
-        // Overall score
+
         p.score = dto.score
-        
-        // Per-category scores (all optionals, 1:1 mapping from DTO)
         p.score_red       = dto.score_red
         p.score_white     = dto.score_white
         p.score_rose      = dto.score_rose
@@ -524,28 +667,32 @@ extension Storage {
         p.score_tequila   = dto.score_tequila
         p.score_vodka     = dto.score_vodka
         p.score_gin       = dto.score_gin
-        p.score_rum       = dto.score_rum      // assuming this is your rum score field
+        p.score_rum       = dto.score_rum
         p.score_sake      = dto.score_sake
         p.score_cocktail  = dto.score_cocktail
-        p.score_beer      = dto.score_beer     // remember: RTD is combined with beer at analytics layer
+        p.score_beer      = dto.score_beer
         p.score_cheese    = dto.score_cheese
-        
-        // Timestamps (keep existing values if DTO doesn’t send them)
+
         p.created_at = dto.created_at ?? p.created_at
         p.updated_at = dto.updated_at ?? p.updated_at
-        
-        // Preference styles
+
         for pStyle in dto.preference_styles {
-            try upsertProfileStyle(from: pStyle, profile: p, in: ctx)
+            try checkCancelled()
+            _ = try upsertProfileStyle(from: pStyle, profile: p, in: ctx)
         }
-        
+
         return p
     }
-    
-    
+
     @discardableResult
-    nonisolated static func upsertProfileStyle(from dto: ProfileStyleDTO, profile : Profile, in ctx: ModelContext) throws -> ProfileStyle {
-        let ps = try fetchOrInsert(ProfileStyle.self, id: dto.id, in: ctx) { ProfileStyle(id: dto.id, style_id: dto.style_id) }
+    nonisolated static func upsertProfileStyle(from dto: ProfileStyleDTO, profile: Profile, in ctx: ModelContext) throws -> ProfileStyle {
+
+        try checkCancelled()
+
+        let ps = try fetchOrInsert(ProfileStyle.self, id: dto.id, in: ctx) {
+            ProfileStyle(id: dto.id, style_id: dto.style_id)
+        }
+
         ps.conflict = dto.conflict ?? ps.conflict
         ps.order_profile = dto.order_profile ?? ps.order_profile
         ps.order_recommend = dto.order_recommend ?? ps.order_recommend
@@ -557,30 +704,50 @@ extension Storage {
         ps.keywords = dto.keywords ?? ps.keywords
         ps.created_at = dto.created_at ?? ps.created_at
         ps.updated_at = dto.updated_at ?? ps.updated_at
+
+        try checkCancelledBeforeRelationshipWrite()
         ps.profile = profile
-        
-        if let s = dto.style { ps.style = try upsertStyle(from: s, in: ctx) }
-        
+
+        if let s = dto.style {
+            try checkCancelled()
+            let style = try upsertStyle(from: s, in: ctx)
+
+            try checkCancelledBeforeRelationshipWrite()
+            ps.style = style
+        }
+
         return ps
     }
-    
+
     // MARK: UserCollection
-    
+
     @discardableResult
     nonisolated static func upsertUserCollection(from dto: UserCollectionDTO, in ctx: ModelContext) throws -> UserCollection {
+
+        try checkCancelled()
+
         let collection = try upsertCollection(from: dto.collection, in: ctx)
-        let uc = try fetchOrInsert(UserCollection.self, id: dto.id, in: ctx) { UserCollection(id: dto.id, collection_id: dto.collection_id, collection: collection) }
+        let uc = try fetchOrInsert(UserCollection.self, id: dto.id, in: ctx) {
+            UserCollection(id: dto.id, collection_id: dto.collection_id, collection: collection)
+        }
+
         uc.relationship_type = dto.relationship_type ?? uc.relationship_type
         uc.created_at = dto.created_at ?? uc.created_at
         uc.updated_at = dto.updated_at ?? uc.updated_at
-        
+
+        try checkCancelledBeforeRelationshipWrite()
+        if uc.collection.id != collection.id { uc.collection = collection }
+
         return uc
     }
-    
+
     // MARK: Food
-    
+
     @discardableResult
     nonisolated static func upsertFood(from dto: FoodDTO, in ctx: ModelContext) throws -> Food {
+
+        try checkCancelled()
+
         let f = try fetchOrInsert(Food.self, id: dto.id, in: ctx) { Food(id: dto.id) }
         f.name = dto.name ?? f.name
         f.keywords = dto.keywords ?? f.keywords
@@ -588,40 +755,49 @@ extension Storage {
         f.updated_at = dto.updated_at ?? f.updated_at
         return f
     }
-    
+
     // MARK: - Customer
-    
+
     @discardableResult
     nonisolated static func upsertCustomer(from dto: CustomerDTO, in ctx: ModelContext) throws -> Customer {
+
+        try checkCancelled()
+
         let c = try fetchOrInsert(Customer.self, id: dto.id, in: ctx) { Customer(id: dto.id) }
         c.created_at = dto.created_at ?? c.created_at
         c.updated_at = dto.updated_at ?? c.updated_at
         c.avatar_url = dto.avatar_url ?? c.avatar_url
-        c.merchant_user_email_address   = dto.merchant_user_email_address ?? c.merchant_user_email_address
-        c.merchant_user_id              = dto.merchant_user_id ?? c.merchant_user_id
-        c.merchant_user_name            = dto.merchant_user_name ?? c.merchant_user_name
-        c.merchant_user_display_name    = dto.merchant_user_display_name ?? c.merchant_user_display_name
-        c.role                          = dto.role ?? c.role
+        c.merchant_user_email_address = dto.merchant_user_email_address ?? c.merchant_user_email_address
+        c.merchant_user_id = dto.merchant_user_id ?? c.merchant_user_id
+        c.merchant_user_name = dto.merchant_user_name ?? c.merchant_user_name
+        c.merchant_user_display_name = dto.merchant_user_display_name ?? c.merchant_user_display_name
+        c.role = dto.role ?? c.role
         return c
     }
-    
+
     // MARK: - Location
-    
+
     @discardableResult
     nonisolated static func upsertLocation(from dto: LocationDTO, in ctx: ModelContext) throws -> Location {
+
+        try checkCancelled()
+
         let l = try fetchOrInsert(Location.self, id: dto.id, in: ctx) { Location(id: dto.id) }
         l.created_at = dto.created_at ?? l.created_at
         l.updated_at = dto.updated_at ?? l.updated_at
-        if let lat = dto.latitude    { l.latitude = lat }
-        if let lon = dto.longitude   { l.longitude = lon }
-        if let zip = dto.zip_code    { l.zip_code = zip }
+        if let lat = dto.latitude { l.latitude = lat }
+        if let lon = dto.longitude { l.longitude = lon }
+        if let zip = dto.zip_code { l.zip_code = zip }
         return l
     }
-    
+
     // MARK: - Reservation
-    
+
     @discardableResult
     nonisolated static func upsertReservation(from dto: ReservationDTO, in ctx: ModelContext) throws -> Reservation {
+
+        try checkCancelled()
+
         let r = try fetchOrInsert(Reservation.self, id: dto.id, in: ctx) { Reservation(id: dto.id) }
         r.created_at     = dto.created_at ?? r.created_at
         r.updated_at     = dto.updated_at ?? r.updated_at
@@ -632,12 +808,16 @@ extension Storage {
         r.imageURLString = dto.imageURLString ?? r.imageURLString
         return r
     }
-    
+
     // MARK: - Style
-    
+
     @discardableResult
     nonisolated static func upsertStyle(from dto: StyleDTO, profile_style: ProfileStyle? = nil, in ctx: ModelContext) throws -> Style {
+
+        try checkCancelled()
+
         let s = try fetchOrInsert(Style.self, id: dto.id, in: ctx) { Style(id: dto.id, type: dto.type) }
+
         s.created_at        = dto.created_at ?? s.created_at
         s.updated_at        = dto.updated_at ?? s.updated_at
         s.desc              = dto.description
@@ -645,48 +825,61 @@ extension Storage {
         s.type              = dto.type
         s.primary_image_url = dto.primary_image_url
         s.product_category  = dto.product_category
-        profile_style?.style = s
-        
-        s.locations.removeAll()
-        
-        for locationDTO in dto.locations {
-            let location = try upsertLocation(from: locationDTO, in: ctx)
-            s.locations.append(location)
+
+        // Relationship pointer write
+        if let ps = profile_style {
+            try checkCancelledBeforeRelationshipWrite()
+            ps.style = s
         }
-        
-        
+
+        // Source-of-truth replacement: build then assign
+        var newLocations: [Location] = []
+        newLocations.reserveCapacity(dto.locations.count)
+
+        for locationDTO in dto.locations {
+            try checkCancelled()
+            newLocations.append(try upsertLocation(from: locationDTO, in: ctx))
+        }
+
+        try checkCancelledBeforeRelationshipWrite()
+        s.locations = newLocations
+
         return s
     }
-    
+
     // MARK: - FoodCategory
-    
+
     @discardableResult
     static func upsertFoodCategory(from dto: FoodCategoryDTO, in ctx: ModelContext) throws -> FoodCategory {
+
+        try checkCancelled()
+
         let fc = try fetchOrInsert(FoodCategory.self, id: dto.id, in: ctx) { FoodCategory(id: dto.id) }
         fc.created_at = dto.created_at ?? fc.created_at
         fc.updated_at = dto.updated_at ?? fc.updated_at
-        fc.name       = dto.name ?? fc.name
-        fc.icon_url   = dto.icon_url ?? fc.icon_url
+        fc.name = dto.name ?? fc.name
+        fc.icon_url = dto.icon_url ?? fc.icon_url
         return fc
     }
-    
+
     /// Fetch (or create) a Search row by its `text`. Your model has no `id`.
     private static func fetchSearchByText(_ text: String, in ctx: ModelContext) throws -> Search? {
-        var fd = FetchDescriptor<Search>(
-            predicate: #Predicate<Search> { $0.text == text }
-        )
+        var fd = FetchDescriptor<Search>(predicate: #Predicate<Search> { $0.text == text })
         fd.fetchLimit = 1
         return try ctx.fetch(fd).first
     }
-    
+
     @discardableResult
     static func upsertSearch(from dto: SearchDTO, in ctx: ModelContext) throws -> Search {
+
+        try checkCancelled()
+
         if let existing = try fetchSearchByText(dto.text, in: ctx) {
-            if let cnt = dto.count         { existing.count = cnt }
-            if let d   = dto.last_searched { existing.last_searched = d }
+            if let cnt = dto.count { existing.count = cnt }
+            if let d = dto.last_searched { existing.last_searched = d }
             return existing
         }
-        // Create new
+
         let new = Search(
             count: dto.count ?? 0,
             last_searched: dto.last_searched ?? Date(),
@@ -695,61 +888,66 @@ extension Storage {
         ctx.insert(new)
         return new
     }
-    
+
     // MARK: - PreferabliUser
-    
-    // MARK: - Upsert
-    
+
     @discardableResult
     nonisolated static func upsertPreferabliUser(from dto: PreferabliUserDTO, in ctx: ModelContext) throws -> PreferabliUser {
+
+        try checkCancelled()
+
         let u = try fetchOrInsert(PreferabliUser.self, id: dto.id, in: ctx) { PreferabliUser(id: dto.id) }
-        
-        // Timestamps
-        u.created_at            = dto.created_at ?? u.created_at
-        u.updated_at            = dto.updated_at ?? u.updated_at
-        
-        u.country               = dto.country ?? u.country
-        u.display_name          = dto.display_name ?? u.display_name
-        u.email                 = dto.email ?? u.email
-        u.is_team_preferabli    = dto.is_team_preferabli ?? u.is_team_preferabli
-        u.fname                 = dto.fname ?? u.fname
-        u.lname                 = dto.lname ?? u.lname
-        u.claim_code            = dto.claim_code ?? u.claim_code
-        u.has_merchant_access   = dto.has_merchant_access ?? u.has_merchant_access
-        u.has_kiosks            = dto.has_kiosks ?? u.has_kiosks
-        u.zip_code              = dto.zip_code ?? u.zip_code
-        u.intercom_hmac         = dto.intercom_hmac ?? u.intercom_hmac
-        u.rating_collection_id  = dto.rating_collection_id ?? u.rating_collection_id
-        u.provided_feedback_at  = dto.provided_feedback_at ?? u.provided_feedback_at
+
+        u.created_at = dto.created_at ?? u.created_at
+        u.updated_at = dto.updated_at ?? u.updated_at
+
+        u.country = dto.country ?? u.country
+        u.display_name = dto.display_name ?? u.display_name
+        u.email = dto.email ?? u.email
+        u.is_team_preferabli = dto.is_team_preferabli ?? u.is_team_preferabli
+        u.fname = dto.fname ?? u.fname
+        u.lname = dto.lname ?? u.lname
+        u.claim_code = dto.claim_code ?? u.claim_code
+        u.has_merchant_access = dto.has_merchant_access ?? u.has_merchant_access
+        u.has_kiosks = dto.has_kiosks ?? u.has_kiosks
+        u.zip_code = dto.zip_code ?? u.zip_code
+        u.intercom_hmac = dto.intercom_hmac ?? u.intercom_hmac
+        u.rating_collection_id = dto.rating_collection_id ?? u.rating_collection_id
+        u.provided_feedback_at = dto.provided_feedback_at ?? u.provided_feedback_at
         u.wishlist_collection_id = dto.wishlist_collection_id ?? u.wishlist_collection_id
-        u.avatar_background_color_hex                 = dto.avatar_background_color_hex ?? u.avatar_background_color_hex
-        u.avatar_text_color_hex                 = dto.avatar_text_color_hex ?? u.avatar_text_color_hex
-        
+        u.avatar_background_color_hex = dto.avatar_background_color_hex ?? u.avatar_background_color_hex
+        u.avatar_text_color_hex = dto.avatar_text_color_hex ?? u.avatar_text_color_hex
+
         if let avatarDTO = dto.avatar {
+            try checkCancelled()
             let media = try upsertMedia(from: avatarDTO, in: ctx)
+
+            try checkCancelledBeforeRelationshipWrite()
             u.avatar = media
         } else {
+            try checkCancelledBeforeRelationshipWrite()
             u.avatar = nil
         }
-        
+
         return u
     }
-    
+
     // MARK: - Channel
-    
+
     @discardableResult
     nonisolated static func upsertChannel(from dto: ChannelDTO, in ctx: ModelContext) throws -> Channel {
+
+        try checkCancelled()
+
         let c = try fetchOrInsert(Channel.self, id: dto.id, in: ctx) { Channel(id: dto.id) }
-        
-        // Core fields
+
         c.account_id = dto.account_id ?? c.account_id
         c.name = dto.name ?? c.name
         c.description_text = dto.description ?? c.description_text
         c.order = dto.order ?? c.order
         c.archived = dto.archived ?? c.archived
         c.published = dto.published ?? c.published
-        
-        // Display defaults
+
         c.default_display_vintages = dto.default_display_vintages ?? c.default_display_vintages
         c.default_display_variants = dto.default_display_variants ?? c.default_display_variants
         c.default_display_variant_details = dto.display_variant_details ?? c.default_display_variant_details
@@ -757,143 +955,164 @@ extension Storage {
         c.default_display_quantity = dto.default_display_quantity ?? c.default_display_quantity
         c.default_display_bin = dto.default_display_bin ?? c.default_display_bin
         c.default_downweight_previous_recs_duration = dto.default_downweight_previous_recs_duration ?? c.default_downweight_previous_recs_duration
-        
-        // Download flags
+
         c.has_download_pdf = dto.has_download_pdf ?? c.has_download_pdf
         c.has_download_csv = dto.has_download_csv ?? c.has_download_csv
         c.has_download_xlsx = dto.has_download_xlsx ?? c.has_download_xlsx
-        
-        // Channel classification
+
         c.is_retailer = dto.is_retailer ?? c.is_retailer
         c.is_producer = dto.is_producer ?? c.is_producer
         c.is_restaurant = dto.is_restaurant ?? c.is_restaurant
         c.is_hospitality = dto.is_hospitality ?? c.is_hospitality
         c.is_event = dto.is_event ?? c.is_event
         c.is_verified = dto.is_verified ?? c.is_verified
-        
-        // Defaults
+
         c.default_timezone = dto.default_timezone ?? c.default_timezone
         c.default_currency = dto.default_currency ?? c.default_currency
         c.default_badge_method = dto.default_badge_method ?? c.default_badge_method
-        
-        // Cutoffs
+
         c.num_dollar_signs_cutoff_1 = dto.num_dollar_signs_cutoff_1 ?? c.num_dollar_signs_cutoff_1
         c.num_dollar_signs_cutoff_2 = dto.num_dollar_signs_cutoff_2 ?? c.num_dollar_signs_cutoff_2
         c.num_dollar_signs_cutoff_3 = dto.num_dollar_signs_cutoff_3 ?? c.num_dollar_signs_cutoff_3
         c.num_dollar_signs_cutoff_4 = dto.num_dollar_signs_cutoff_4 ?? c.num_dollar_signs_cutoff_4
         c.num_dollar_signs_cutoff_5 = dto.num_dollar_signs_cutoff_5 ?? c.num_dollar_signs_cutoff_5
-        
-        // FX
+
         c.currency_exchange_multiplier_from_foreign_to_usd =
         dto.currency_exchange_multiplier_from_foreign_to_usd ?? c.currency_exchange_multiplier_from_foreign_to_usd
-        
-        // Optional IDs
+
         c.featured_collection_id = dto.featured_collection_id ?? c.featured_collection_id
         c.primary_inventory_id = dto.primary_inventory_id ?? c.primary_inventory_id
         c.primary_questionnaire_id = dto.primary_questionnaire_id ?? c.primary_questionnaire_id
         c.default_curation_batch_id = dto.default_curation_batch_id ?? c.default_curation_batch_id
         c.default_curation_questions_batch_id = dto.default_curation_questions_batch_id ?? c.default_curation_questions_batch_id
         c.max_number_of_venues = dto.max_number_of_venues ?? c.max_number_of_venues
-        
-        // Timestamps
+
         c.created_at = dto.created_at ?? c.created_at
         c.updated_at = dto.updated_at ?? c.updated_at
-        
-        // Primary image
+
         if let imgDTO = dto.primary_image {
+            try checkCancelled()
             let media = try upsertMedia(from: imgDTO, in: ctx)
-            if c.primary_image !== media {
-                c.primary_image = media
-            }
+
+            try checkCancelledBeforeRelationshipWrite()
+            if c.primary_image !== media { c.primary_image = media }
         }
-        
-        // Images
+
         if let imgDTOs = dto.images {
-            c.images = try imgDTOs.map { try upsertMedia(from: $0, in: ctx) }
+            var newImages: [Media] = []
+            newImages.reserveCapacity(imgDTOs.count)
+
+            for img in imgDTOs {
+                try checkCancelled()
+                newImages.append(try upsertMedia(from: img, in: ctx))
+            }
+
+            try checkCancelledBeforeRelationshipWrite()
+            c.images = newImages
         }
-        
+
         // Join rows: channel_venues (preserve per-edge flags)
         if let joinDTOs = dto.channel_venues {
-            c.channel_venues = try joinDTOs.map { j in
+            var newJoins: [ChannelVenue] = []
+            newJoins.reserveCapacity(joinDTOs.count)
+
+            for j in joinDTOs {
+                try checkCancelled()
+
                 let cv = try fetchOrInsert(ChannelVenue.self, id: j.id, in: ctx) { ChannelVenue(id: j.id) }
-                
+
                 cv.is_primary = j.is_primary ?? cv.is_primary
                 cv.archived = j.archived ?? cv.archived
-                
-                if cv.channel?.id != c.id {
-                    cv.channel = c
-                }
-                
+
+                try checkCancelledBeforeRelationshipWrite()
+                if cv.channel?.id != c.id { cv.channel = c }
+
                 if let vDTO = j.venue {
+                    try checkCancelled()
                     let v = try upsertVenue(from: vDTO, in: ctx)
-                    if cv.venue?.id != v.id {
-                        cv.venue = v
-                    }
+
+                    try checkCancelledBeforeRelationshipWrite()
+                    if cv.venue?.id != v.id { cv.venue = v }
                 }
-                
-                return cv
+
+                newJoins.append(cv)
             }
+
+            try checkCancelledBeforeRelationshipWrite()
+            c.channel_venues = newJoins
         }
-        
+
         return c
     }
-    
-    /// API is the source of truth:
-    /// - Upserts the entire market forest
-    /// - Deletes any Market (any depth) not present in dto forest
+
     @discardableResult
     nonisolated static func upsertMarketsSourceOfTruth(
         from rootDTOs: [MarketDTO],
         in ctx: ModelContext
     ) throws -> [Market] {
-        
+
+        try checkCancelled()
+
         // 1) Collect all market IDs in the incoming forest
         var keepMarketIDs = Set<Int>()
         keepMarketIDs.reserveCapacity(rootDTOs.count * 2)
-        
-        func collect(_ dto: MarketDTO) {
+
+        func collect(_ dto: MarketDTO) throws {
+            try checkCancelled()
             keepMarketIDs.insert(dto.id)
-            for child in dto.submarkets { collect(child) }
+            for child in dto.submarkets { try collect(child) }
         }
-        for dto in rootDTOs { collect(dto) }
-        
+
+        for dto in rootDTOs { try collect(dto) }
+
         // 2) Delete any local Markets not in keep set
         try deleteMarketsNotInSet(keepMarketIDs, in: ctx)
-        
+
         // 3) Upsert the forest (root parent = nil)
         var roots: [Market] = []
         roots.reserveCapacity(rootDTOs.count)
-        
+
         for dto in rootDTOs {
+            try checkCancelled()
             let m = try upsertMarketTreeNodeSourceOfTruth(from: dto, parent: nil, in: ctx)
             roots.append(m)
         }
-        
+
         return roots
     }
-    
+
     nonisolated private static func deleteMarketsNotInSet(
         _ keep: Set<Int>,
         in ctx: ModelContext
     ) throws {
-        // Fetch all markets (you can optimize later with propertiesToFetch if needed)
+
+        try checkCancelled()
+
         let all = try ctx.fetch(FetchDescriptor<Market>())
-        
-        for m in all where !keep.contains(m.id) {
-            ctx.delete(m) // cascades to submarkets + traits because of deleteRule
+
+        for m in all {
+            try checkCancelled()
+            if !keep.contains(m.id) {
+                // Deleting while a logout wipe is happening is also a hot point.
+                try checkCancelledBeforeRelationshipWrite()
+                ctx.delete(m) // cascades to submarkets + traits because of deleteRule
+            }
         }
     }
-    
+
     @discardableResult
     nonisolated private static func upsertMarketTreeNodeSourceOfTruth(
         from dto: MarketDTO,
         parent: Market?,
         in ctx: ModelContext
     ) throws -> Market {
-        
-        // Fetch-or-insert by unique ID
+
+        try checkCancelled()
+
         let market = try fetchOrInsert(Market.self, id: dto.id, in: ctx) { Market(id: dto.id) }
-        
+
+        try checkCancelled()
+
         // Fields
         market.name = dto.name ?? market.name
         market.desc = dto.description ?? market.desc
@@ -905,38 +1124,36 @@ extension Storage {
         market.top_level = dto.top_level ?? market.top_level
         market.created_at = dto.created_at ?? market.created_at
         market.updated_at = dto.updated_at ?? market.updated_at
-        
-        // Parent
+
+        // Parent (relationship pointer write)
+        try checkCancelledBeforeRelationshipWrite()
         if market.parent?.id != parent?.id {
             market.parent = parent
         }
-        
-        // ✅ Traits: source of truth per market (upsert + delete missing)
+
+        // Traits: source of truth per market
+        try checkCancelled()
         try upsertMarketTraitsSourceOfTruth(from: dto.traits, for: market, in: ctx)
-        
-        // ✅ Children: recurse, then replace list (source of truth)
+
+        // Children: recurse, build local list first
         var newChildren: [Market] = []
         newChildren.reserveCapacity(dto.submarkets.count)
-        
+
         for childDTO in dto.submarkets {
+            try checkCancelled()
             let child = try upsertMarketTreeNodeSourceOfTruth(from: childDTO, parent: market, in: ctx)
             newChildren.append(child)
         }
-        
-        // Replace children list (keeps ordering from API)
+
+        // Replace children list (relationship list write)
         if !sameIDs(market.submarkets, newChildren) {
+            try checkCancelledBeforeRelationshipWrite()
             market.submarkets = newChildren
         }
-        
+
         return market
     }
-    
-    nonisolated private static func sameIDs(_ a: [Market], _ b: [Market]) -> Bool {
-        guard a.count == b.count else { return false }
-        for (x, y) in zip(a, b) where x.id != y.id { return false }
-        return true
-    }
-    
+
     /// Source of truth:
     /// - Upsert all traits in DTO
     /// - Delete any local MarketTrait linked to this market that isn't in DTO
@@ -945,54 +1162,69 @@ extension Storage {
         for market: Market,
         in ctx: ModelContext
     ) throws {
-        
+
+        try checkCancelled()
+
         let keepTraitIDs = Set(traitDTOs.map { $0.id })
-        
+
         // 1) Delete missing traits for this market
-        // Safer than global delete because trait IDs are assumed unique, but linkage matters most.
         if !market.traits.isEmpty {
-            for existing in market.traits where !keepTraitIDs.contains(existing.id) {
-                ctx.delete(existing)
+            for existing in market.traits {
+                try checkCancelled()
+                if !keepTraitIDs.contains(existing.id) {
+                    try checkCancelledBeforeRelationshipWrite()
+                    ctx.delete(existing)
+                }
             }
         }
-        
+
         // 2) Upsert / build new ordered list
         var newTraits: [MarketTrait] = []
         newTraits.reserveCapacity(traitDTOs.count)
-        
+
         for tDTO in traitDTOs {
+            try checkCancelled()
+
             let t = try fetchOrInsert(MarketTrait.self, id: tDTO.id, in: ctx) { MarketTrait(id: tDTO.id) }
-            
+
             t.type = tDTO.type ?? t.type
             t.name = tDTO.name ?? t.name
             t.order = tDTO.order ?? t.order
             t.icon_url = tDTO.icon_url ?? t.icon_url
             t.created_at = tDTO.created_at ?? t.created_at
             t.updated_at = tDTO.updated_at ?? t.updated_at
-            
+
             // Maintain relationship + denormalized market_id
+            try checkCancelledBeforeRelationshipWrite()
             if t.market?.id != market.id {
                 t.market = market
             }
             if t.market_id != market.id {
                 t.market_id = market.id
             }
-            
+
             newTraits.append(t)
         }
-        
+
         // 3) Replace market.traits to match API ordering
-        // (This also ensures SwiftData relationship is correct even if a trait existed but wasn’t linked.)
         if !sameTraitIDs(market.traits, newTraits) {
+            try checkCancelledBeforeRelationshipWrite()
             market.traits = newTraits
         }
     }
-    
     nonisolated private static func sameTraitIDs(_ a: [MarketTrait], _ b: [MarketTrait]) -> Bool {
         guard a.count == b.count else { return false }
         for (x, y) in zip(a, b) where x.id != y.id { return false }
         return true
     }
+    
+    
+    nonisolated private static func sameIDs(_ a: [Market], _ b: [Market]) -> Bool {
+        guard a.count == b.count else { return false }
+        for (x, y) in zip(a, b) where x.id != y.id { return false }
+        return true
+    }
+    
 }
 
 extension Storage {
