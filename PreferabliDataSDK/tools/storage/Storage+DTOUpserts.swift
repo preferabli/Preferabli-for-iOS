@@ -343,12 +343,13 @@ extension Storage {
     // MARK: Venue
 
     @discardableResult
-    nonisolated static func upsertVenue(from dto: VenueDTO, in ctx: ModelContext) throws -> Venue {
+    nonisolated static func upsertVenue(from dto: VenueDTO, market: Market? = nil, in ctx: ModelContext) throws -> Venue {
 
         try checkCancelled()
 
         let v = try fetchOrInsert(Venue.self, id: dto.id, in: ctx) { Venue(id: dto.id) }
 
+        // MARK: - Fields
         v.address_l1 = dto.address_l1 ?? v.address_l1
         v.address_l2 = dto.address_l2 ?? v.address_l2
         v.city = dto.city ?? v.city
@@ -370,8 +371,136 @@ extension Storage {
         v.url_youtube = dto.url_youtube ?? v.url_youtube
         v.zip_code = dto.zip_code ?? v.zip_code
         v.notes = dto.notes ?? v.notes
+        v.is_partner = dto.is_partner ?? v.is_partner
 
-        // Relationship lists: build locals first, then assign once with a cancellation check right before set.
+        // MARK: - Market edge (Venue <-> Market) is source-of-truth handled at the CALL LEVEL.
+        // Here we only ensure association when a market is provided.
+        if let m = market {
+            try checkCancelledBeforeRelationshipWrite()
+            if !v.markets.contains(where: { $0.id == m.id }) {
+                v.markets.append(m)
+            }
+        }
+
+        // MARK: - Media pointers
+        if let video = dto.video {
+            try checkCancelled()
+            let media = try upsertMedia(from: video, in: ctx)
+
+            try checkCancelledBeforeRelationshipWrite()
+            if v.video !== media { v.video = media }
+        } else {
+            try checkCancelledBeforeRelationshipWrite()
+            v.video = nil
+        }
+
+        if let logo = dto.logo {
+            try checkCancelled()
+            let media = try upsertMedia(from: logo, in: ctx)
+
+            try checkCancelledBeforeRelationshipWrite()
+            if v.logo !== media { v.logo = media }
+        } else {
+            try checkCancelledBeforeRelationshipWrite()
+            v.logo = nil
+        }
+
+        if let primary = dto.primary_image {
+            try checkCancelled()
+            let media = try upsertMedia(from: primary, in: ctx)
+
+            try checkCancelledBeforeRelationshipWrite()
+            if v.primary_image !== media { v.primary_image = media }
+        } else {
+            try checkCancelledBeforeRelationshipWrite()
+            v.primary_image = nil
+        }
+
+        // MARK: - Venue <-> MarketTrait (per-venue order) via VenueMarketTrait join rows
+        // Source-of-truth for this venue within the provided market scope:
+        // - nil: endpoint didn't include market_traits -> leave as-is
+        // - [] : explicitly none -> clear join rows for this venue+market scope
+        if let venueTraitDTOs = dto.market_traits {
+
+            let resolved: [(order: Int?, trait: MarketTraitDTO)] = venueTraitDTOs.compactMap { row in
+                guard let t = row.trait else { return nil }
+                return (row.order, t)
+            }
+
+            let keepTraitIDs = Set(resolved.map { $0.trait.id })
+            let scopeMarketID = market?.id
+
+            // 1) Delete missing join rows for this venue+market scope
+            if !v.venue_market_traits.isEmpty {
+                for link in v.venue_market_traits {
+                    try checkCancelled()
+
+                    // Scope filtering
+                    if let mid = scopeMarketID {
+                        guard link.market_id == mid else { continue }
+                    } else {
+                        guard link.market_id == nil else { continue }
+                    }
+
+                    if !keepTraitIDs.contains(link.trait_id) {
+                        try checkCancelledBeforeRelationshipWrite()
+                        ctx.delete(link)
+                    }
+                }
+            }
+
+            // 2) Upsert joins + build new ordered list for this scope
+            var newScopedLinks: [VenueMarketTrait] = []
+            newScopedLinks.reserveCapacity(resolved.count)
+
+            for (order, traitDTO) in resolved {
+                try checkCancelled()
+
+                // Hydrate the trait
+                let trait = try fetchOrInsert(MarketTrait.self, id: traitDTO.id, in: ctx) { MarketTrait(id: traitDTO.id) }
+                trait.type = traitDTO.type ?? trait.type
+                trait.name = traitDTO.name ?? trait.name
+                trait.icon_url = traitDTO.icon_url ?? trait.icon_url
+                trait.created_at = traitDTO.created_at ?? trait.created_at
+                trait.updated_at = traitDTO.updated_at ?? trait.updated_at
+
+                let key = VenueMarketTrait.makeKey(venueID: v.id, marketID: scopeMarketID, traitID: trait.id)
+
+                let link: VenueMarketTrait
+                if let existing = try Storage.fetchByKey(VenueMarketTrait.self, key: key, in: ctx) {
+                    link = existing
+                } else {
+                    let created = VenueMarketTrait(key: key, venue: v, trait: trait, market_id: scopeMarketID)
+                    ctx.insert(created)
+                    link = created
+                }
+
+                // Keep denorm + order consistent
+                link.order = order
+                link.venue_id = v.id
+                link.trait_id = trait.id
+                link.market_id = scopeMarketID
+
+                // Relationship pointers (non-optional in model)
+                try checkCancelledBeforeRelationshipWrite()
+                if link.venue.id != v.id { link.venue = v }
+                if link.trait.id != trait.id { link.trait = trait }
+
+                newScopedLinks.append(link)
+            }
+
+            // 3) Replace v.venue_market_traits for this scope only (preserve other scopes)
+            try checkCancelledBeforeRelationshipWrite()
+            if let mid = scopeMarketID {
+                let preserved = v.venue_market_traits.filter { $0.market_id != mid }
+                v.venue_market_traits = preserved + newScopedLinks
+            } else {
+                let preserved = v.venue_market_traits.filter { $0.market_id != nil }
+                v.venue_market_traits = preserved + newScopedLinks
+            }
+        }
+
+        // MARK: - Relationship lists (source-of-truth as provided by venue DTO)
         if let imgs = dto.images {
             var newImages: [Media] = []
             newImages.reserveCapacity(imgs.count)
@@ -394,7 +523,6 @@ extension Storage {
                 newHours.append(try upsertVenueHour(from: h, in: ctx))
             }
 
-            // 🔥 this is where your crash was happening — guard it.
             try checkCancelledBeforeRelationshipWrite()
             v.hours = newHours
         }
@@ -426,6 +554,26 @@ extension Storage {
         }
 
         return v
+    }
+    
+    nonisolated static func disassociateVenuesNotInSet(
+        keepVenueIDs: Set<Int>,
+        from market: Market,
+        in ctx: ModelContext
+    ) throws {
+        try checkCancelled()
+
+        let allVenues = try ctx.fetch(FetchDescriptor<Venue>())
+
+        for v in allVenues {
+            try checkCancelled()
+
+            let isInMarket = v.markets.contains(where: { $0.id == market.id })
+            if isInMarket && !keepVenueIDs.contains(v.id) {
+                try checkCancelledBeforeRelationshipWrite()
+                v.markets.removeAll(where: { $0.id == market.id })
+            }
+        }
     }
 
     @discardableResult
@@ -1060,7 +1208,9 @@ extension Storage {
         func collect(_ dto: MarketDTO) throws {
             try checkCancelled()
             keepMarketIDs.insert(dto.id)
-            for child in dto.submarkets { try collect(child) }
+            if let submarkets = dto.submarkets {
+                for child in submarkets { try collect(child) }
+            }
         }
 
         for dto in rootDTOs { try collect(dto) }
@@ -1124,28 +1274,29 @@ extension Storage {
         market.top_level = dto.top_level ?? market.top_level
         market.created_at = dto.created_at ?? market.created_at
         market.updated_at = dto.updated_at ?? market.updated_at
+        market.default_span_delta = dto.default_span_delta ?? market.default_span_delta
 
-        // Parent (relationship pointer write)
+        // Parent
         try checkCancelledBeforeRelationshipWrite()
         if market.parent?.id != parent?.id {
             market.parent = parent
         }
 
-        // Traits: source of truth per market
-        try checkCancelled()
-        try upsertMarketTraitsSourceOfTruth(from: dto.traits, for: market, in: ctx)
+        // Traits: source-of-truth per market
+        let assocDTOs = dto.market_trait_associations ?? []
+        try upsertMarketTraitsSourceOfTruth(from: assocDTOs, for: market, in: ctx)
 
-        // Children: recurse, build local list first
+        // Children
+        let childDTOs = dto.submarkets ?? []
         var newChildren: [Market] = []
-        newChildren.reserveCapacity(dto.submarkets.count)
+        newChildren.reserveCapacity(childDTOs.count)
 
-        for childDTO in dto.submarkets {
+        for childDTO in childDTOs {
             try checkCancelled()
             let child = try upsertMarketTreeNodeSourceOfTruth(from: childDTO, parent: market, in: ctx)
             newChildren.append(child)
         }
 
-        // Replace children list (relationship list write)
         if !sameIDs(market.submarkets, newChildren) {
             try checkCancelledBeforeRelationshipWrite()
             market.submarkets = newChildren
@@ -1153,66 +1304,262 @@ extension Storage {
 
         return market
     }
+    
+    @discardableResult
+    nonisolated private static func upsertMarketTraitAssociationForVenue(
+        from dto: MarketTraitDTO,
+        venue: Venue,
+        market: Market?,
+        in ctx: ModelContext
+    ) throws -> MarketTrait {
+
+        try checkCancelled()
+
+        // 1) Hydrate trait
+        let t = try fetchOrInsert(MarketTrait.self, id: dto.id, in: ctx) { MarketTrait(id: dto.id) }
+        t.type = dto.type ?? t.type
+        t.name = dto.name ?? t.name
+        t.icon_url = dto.icon_url ?? t.icon_url
+        t.created_at = dto.created_at ?? t.created_at
+        t.updated_at = dto.updated_at ?? t.updated_at
+
+        // 2) Ensure join row exists (order is not provided by this DTO; keep existing)
+        let scopeMarketID = market?.id
+        let key = VenueMarketTrait.makeKey(venueID: venue.id, marketID: scopeMarketID, traitID: t.id)
+
+        let link: VenueMarketTrait
+        if let existing = try Storage.fetchByKey(VenueMarketTrait.self, key: key, in: ctx) {
+            link = existing
+        } else {
+            let created = VenueMarketTrait(key: key, venue: venue, trait: t, market_id: scopeMarketID)
+            ctx.insert(created)
+            link = created
+        }
+
+        // Re-assert denorms (helps after wipes / partial graph)
+        link.venue_id = venue.id
+        link.trait_id = t.id
+        link.market_id = scopeMarketID
+
+        try checkCancelledBeforeRelationshipWrite()
+        if link.venue.id != venue.id { link.venue = venue }
+        if link.trait.id != t.id { link.trait = t }
+
+        // Ensure venue list contains it (avoid duplicates)
+        try checkCancelledBeforeRelationshipWrite()
+        if !venue.venue_market_traits.contains(where: { $0.key == link.key }) {
+            venue.venue_market_traits.append(link)
+        }
+
+        return t
+    }
 
     /// Source of truth:
-    /// - Upsert all traits in DTO
-    /// - Delete any local MarketTrait linked to this market that isn't in DTO
+    /// - Upsert all MarketTraitAssociation rows in DTO
+    /// - Delete any local MarketTraitAssociation linked to this market that isn't in DTO
     nonisolated private static func upsertMarketTraitsSourceOfTruth(
-        from traitDTOs: [MarketTraitDTO],
+        from assocDTOs: [MarketTraitAssociationDTO],
         for market: Market,
         in ctx: ModelContext
     ) throws {
 
         try checkCancelled()
 
-        let keepTraitIDs = Set(traitDTOs.map { $0.id })
+        let keepAssociationIDs = Set(assocDTOs.map { $0.id })
 
-        // 1) Delete missing traits for this market
+        // 1) Delete missing associations for this market
         if !market.traits.isEmpty {
             for existing in market.traits {
                 try checkCancelled()
-                if !keepTraitIDs.contains(existing.id) {
+                if !keepAssociationIDs.contains(existing.id) {
                     try checkCancelledBeforeRelationshipWrite()
                     ctx.delete(existing)
                 }
             }
         }
 
-        // 2) Upsert / build new ordered list
-        var newTraits: [MarketTrait] = []
-        newTraits.reserveCapacity(traitDTOs.count)
+        // 2) Upsert / build new ordered list (preserve API order)
+        var newAssocs: [MarketTraitAssociation] = []
+        newAssocs.reserveCapacity(assocDTOs.count)
 
-        for tDTO in traitDTOs {
+        for aDTO in assocDTOs {
             try checkCancelled()
 
-            let t = try fetchOrInsert(MarketTrait.self, id: tDTO.id, in: ctx) { MarketTrait(id: tDTO.id) }
+            guard let traitDTO = aDTO.market_trait else { continue }
 
-            t.type = tDTO.type ?? t.type
-            t.name = tDTO.name ?? t.name
-            t.order = tDTO.order ?? t.order
-            t.icon_url = tDTO.icon_url ?? t.icon_url
-            t.created_at = tDTO.created_at ?? t.created_at
-            t.updated_at = tDTO.updated_at ?? t.updated_at
+            // Hydrate trait using *traitDTO.id* (NOT association id)
+            let mt = try fetchOrInsert(MarketTrait.self, id: traitDTO.id, in: ctx) { MarketTrait(id: traitDTO.id) }
+            mt.type = traitDTO.type ?? mt.type
+            mt.name = traitDTO.name ?? mt.name
+            mt.icon_url = traitDTO.icon_url ?? mt.icon_url
+            mt.created_at = traitDTO.created_at ?? mt.created_at
+            mt.updated_at = traitDTO.updated_at ?? mt.updated_at
 
-            // Maintain relationship + denormalized market_id
+            // Association row uses *aDTO.id*
+            let mta = try fetchOrInsert(MarketTraitAssociation.self, id: aDTO.id, in: ctx) {
+                MarketTraitAssociation(id: aDTO.id, market: market, market_trait: mt)
+            }
+
+            mta.order = aDTO.order ?? mta.order
+            mta.created_at = aDTO.created_at ?? mta.created_at
+            mta.updated_at = aDTO.updated_at ?? mta.updated_at
+
             try checkCancelledBeforeRelationshipWrite()
-            if t.market?.id != market.id {
-                t.market = market
-            }
-            if t.market_id != market.id {
-                t.market_id = market.id
-            }
+            if mta.market.id != market.id { mta.market = market }
+            if mta.market_trait.id != mt.id { mta.market_trait = mt }
 
-            newTraits.append(t)
+            newAssocs.append(mta)
         }
 
-        // 3) Replace market.traits to match API ordering
-        if !sameTraitIDs(market.traits, newTraits) {
+        if !sameTraitIDs(market.traits, newAssocs) {
             try checkCancelledBeforeRelationshipWrite()
-            market.traits = newTraits
+            market.traits = newAssocs
         }
     }
-    nonisolated private static func sameTraitIDs(_ a: [MarketTrait], _ b: [MarketTrait]) -> Bool {
+
+        @discardableResult
+        nonisolated static func upsertCTABucket(
+            from dto: CTABucketDTO,
+            section: String,
+            market_id: Int?,
+            in ctx: ModelContext
+        ) throws -> CTABucket {
+
+            try checkCancelled()
+
+            let b = try fetchOrInsert(CTABucket.self, id: dto.id, in: ctx) {
+                CTABucket(id: dto.id, section: section)
+            }
+
+            try checkCancelled()
+
+            // Required fields
+            b.id = dto.id
+            b.section = section
+            b.market_id = market_id
+
+            // Fields
+            b.badge_icon = dto.badge_icon
+            b.badge_color_primary = dto.badge_color_primary
+            b.badge_color_secondary = dto.badge_color_secondary
+            b.order = dto.order
+            b.color_secondary = dto.color_secondary
+            b.color_primary = dto.color_primary
+            b.deeplink_url = dto.deeplink_url
+            b.badge_title = dto.badge_title
+            b.title = dto.title
+            b.desc = dto.description
+
+            b.created_at = dto.created_at ?? b.created_at
+            b.updated_at = dto.updated_at ?? b.updated_at
+
+            // Primary image
+            if let imgDTO = dto.primary_image {
+                try checkCancelled()
+                let media = try upsertMedia(from: imgDTO, in: ctx)
+
+                try checkCancelledBeforeRelationshipWrite()
+                if b.primary_image !== media { b.primary_image = media }
+            } else {
+                try checkCancelledBeforeRelationshipWrite()
+                b.primary_image = nil
+            }
+
+            return b
+        }
+
+        /// Source-of-truth upsert for CTABuckets with scoped deletes.
+        ///
+        /// - If `scopeMarketId` and `scopeSection` are nil => delete *all* CTAs not in API response.
+        /// - If either is set => delete only CTAs matching that scope that are not in API response.
+        ///
+        /// Returns the IDs that exist after the operation (the keep set).
+        @discardableResult
+        nonisolated static func upsertCTABucketsSourceOfTruth(
+            from responseDTOs: [CTABucketResponseDTO],
+            scopeMarketId: Int?,
+            scopeSection: String?,
+            in ctx: ModelContext
+        ) throws -> [Int] {
+
+            try checkCancelled()
+
+            // 1) Flatten + resolve section/market_id per group
+            struct Row {
+                let dto: CTABucketDTO
+                let section: String
+                let market_id: Int?
+            }
+
+            var rows: [Row] = []
+            rows.reserveCapacity(responseDTOs.reduce(0) { $0 + $1.items.count })
+
+            for group in responseDTOs {
+                try checkCancelled()
+
+                // Prefer server-provided group values, fall back to scope params, then a safe default
+                let resolvedSection = group.section ?? scopeSection ?? "default"
+                let resolvedMarketId = group.market_id ?? scopeMarketId
+
+                for item in group.items {
+                    rows.append(Row(dto: item, section: resolvedSection, market_id: resolvedMarketId))
+                }
+            }
+
+            let keepIDs = Set(rows.map { $0.dto.id })
+
+            // 2) Delete anything in-scope that isn't in keepIDs
+            try deleteCTABucketsNotInSet(
+                keepIDs,
+                scopeMarketId: scopeMarketId,
+                scopeSection: scopeSection,
+                in: ctx
+            )
+
+            // 3) Upsert all rows
+            for row in rows {
+                try checkCancelled()
+                _ = try upsertCTABucket(from: row.dto, section: row.section, market_id: row.market_id, in: ctx)
+            }
+
+            return Array(keepIDs)
+        }
+
+        nonisolated private static func deleteCTABucketsNotInSet(
+            _ keep: Set<Int>,
+            scopeMarketId: Int?,
+            scopeSection: String?,
+            in ctx: ModelContext
+        ) throws {
+
+            try checkCancelled()
+
+            // Build fetch descriptor based on scope
+            let fd: FetchDescriptor<CTABucket>
+
+            switch (scopeMarketId, scopeSection) {
+            case (nil, nil):
+                fd = FetchDescriptor<CTABucket>() // global
+            case let (m?, nil):
+                fd = FetchDescriptor(predicate: #Predicate<CTABucket> { $0.market_id == m })
+            case let (nil, s?):
+                fd = FetchDescriptor(predicate: #Predicate<CTABucket> { $0.section == s })
+            case let (m?, s?):
+                fd = FetchDescriptor(predicate: #Predicate<CTABucket> { $0.market_id == m && $0.section == s })
+            }
+
+            let existing = try ctx.fetch(fd)
+
+            for b in existing {
+                try checkCancelled()
+                if !keep.contains(b.id) {
+                    try checkCancelledBeforeRelationshipWrite()
+                    ctx.delete(b)
+                }
+            }
+        }
+
+    nonisolated private static func sameTraitIDs(_ a: [MarketTraitAssociation], _ b: [MarketTraitAssociation]) -> Bool {
         guard a.count == b.count else { return false }
         for (x, y) in zip(a, b) where x.id != y.id { return false }
         return true

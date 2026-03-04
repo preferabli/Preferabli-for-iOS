@@ -1206,6 +1206,60 @@ public class Preferabli {
         }
     }
     
+    public func favoriteVenue(venueId : Int) async throws
+    {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            
+            Analytics.track(["event": "favorite_venue"])
+            
+            _ = try await api.getAlamo().postNoBody(APIEndpoints.favoriteVenue(id: PreferabliTools.getPreferabliUserId(), venueId: venueId))
+
+            try await Storage.withBackgroundContext { ctx in
+                guard let user = try Storage.fetchById(PreferabliUser.self, id: PreferabliTools.getPreferabliUserId(), in: ctx) else {
+                    return
+                }
+                
+                var favorites = user.favorite_venue_ids ?? []
+                favorites.append(venueId)
+                user.favorite_venue_ids = favorites
+                
+                try ctx.save()
+            }
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func unfavoriteVenue(venueId : Int) async throws
+    {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            
+            Analytics.track(["event": "unfavorite_venue"])
+            
+                _ = try await api.getAlamo().delete(APIEndpoints.favoriteVenue(id: PreferabliTools.getPreferabliUserId(), venueId: venueId))
+
+            try await Storage.withBackgroundContext { ctx in
+                guard let user = try Storage.fetchById(PreferabliUser.self, id: PreferabliTools.getPreferabliUserId(), in: ctx) else {
+                    return
+                }
+                
+                var favorites = user.favorite_venue_ids ?? []
+                favorites.removeAll { $0 == venueId }
+                user.favorite_venue_ids = favorites
+                
+                try ctx.save()
+            }
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
     public func getChannels(force_refresh : Bool = false) async throws -> [Int]
     {
         do {
@@ -1236,6 +1290,117 @@ public class Preferabli {
         }
     }
     
+    public func getVenues(market_id: Int) async throws -> [Int] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+
+            Analytics.track(["event": "get_venues"])
+
+            let params: SParams = ["limit": 10000, "offset": 0]
+            let body: [VenueDTO] = try await api.getAlamo().get(APIEndpoints.venues(id: market_id), sparams: params)
+
+            let venueIds: [Int] = try await Storage.withBackgroundContext { ctx in
+                var venueIds: [Int] = []
+                venueIds.reserveCapacity(body.count)
+
+                guard let market = try Storage.fetchById(Market.self, id: market_id, in: ctx) else {
+                    return []
+                }
+
+                // 1) Keep set from API
+                let keepIDs = Set(body.map(\.id))
+
+                // 2) Upsert returned venues + ensure they're linked to this market
+                for venueDTO in body {
+                    let venue = try Storage.upsertVenue(from: venueDTO, market: market, in: ctx)
+                    venueIds.append(venue.id)
+                }
+
+                // 3) Source-of-truth for Market<->Venue: remove market from venues not in response
+                try Storage.disassociateVenuesNotInSet(keepVenueIDs: keepIDs, from: market, in: ctx)
+
+                try ctx.save()
+                return venueIds
+            }
+
+            return venueIds
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func getCTABuckets(
+        force_refresh: Bool = false,
+        market_id: Int? = nil,
+        section: String? = nil
+    ) async throws -> [Int] {
+        let api = self.api
+        let loggingEnabled = self.loggingEnabled // (unused for now, but left intact)
+
+        return try await BucketsLoader.shared.run { [weak self] in
+            guard let self else { return [] }
+
+            do {
+                try await self.canWeContinue(needsToBeLoggedIn: false)
+                Analytics.track(["event": "get_cta_buckets"])
+
+                let isGeneralCall = (market_id == nil && section == nil)
+
+                // Only short-circuit for the *general* (unscoped) load
+                if isGeneralCall,
+                   !force_refresh,
+                   Storage.getKeyStore().bool(forKey: "hasLoadedBuckets") {
+
+                    let localIds: [Int] = try await Storage.withBackgroundContext { ctx in
+                        let buckets = try ctx.fetch(FetchDescriptor<CTABucket>())
+                        return buckets.map { $0.id }
+                    }
+
+                    if !localIds.isEmpty { return localIds }
+                }
+
+                var params: SParams = ["domain": "tastefuli-v3"]
+
+                if let market_id {
+                    params["market_ids[]"] = market_id
+                }
+
+                if let section {
+                    params["section"] = section
+                }
+
+                let body: [CTABucketResponseDTO] = try await api
+                    .getAlamo()
+                    .get(APIEndpoints.ctaBuckets, sparams: params)
+
+                let dtoIds: [Int] = try await Storage.withBackgroundContext { ctx in
+                    let ids = try Storage.upsertCTABucketsSourceOfTruth(
+                        from: body,
+                        scopeMarketId: market_id,
+                        scopeSection: section,
+                        in: ctx
+                    )
+                    try ctx.save()
+                    return ids
+                }
+
+                if isGeneralCall {
+                    Storage.getKeyStore().set(true, forKey: "hasLoadedBuckets")
+                }
+
+                return dtoIds
+
+            } catch {
+                await MainActor.run {
+                    self.handleError(error: error)
+                }
+                throw error
+            }
+        }
+    }
+    
     public func getMarkets(force_refresh: Bool = false) async throws -> [Int] {
         let api = self.api
         let loggingEnabled = self.loggingEnabled // if needed later
@@ -1261,7 +1426,9 @@ public class Preferabli {
                     var out: [Int] = []
                     func walk(_ m: MarketDTO) {
                         out.append(m.id)
-                        for c in m.submarkets { walk(c) }
+                        if let submarkets = m.submarkets {
+                            for c in submarkets { walk(c) }
+                        }
                     }
                     for m in body { walk(m) }
                     return out
@@ -1344,7 +1511,7 @@ public class Preferabli {
             }
             
             if needsRefresh {
-                let body: VenueDTO = try await api.getAlamo().get(APIEndpoints.product(id: venue_id))
+                let body: VenueDTO = try await api.getAlamo().get(APIEndpoints.venue(id: venue_id))
                 
                 try Storage.withContext { ctx in
                     try Storage.upsertVenue(from: body, in: ctx)
@@ -1766,6 +1933,14 @@ public class Preferabli {
                 .post(APIEndpoints.getRec, sjson: payload)
             
             let results = recResponse.results
+            
+            if (collection_id != Preferabli.PRIMARY_INVENTORY_ID && recResponse.message?.containsIgnoreCase("collection constraint") ?? false) {
+                throw PreferabliException(
+                    type: .APIError,
+                    message: "No products that fit this rec in this inventory.",
+                    code: 610
+                )
+            }
             
             // 2) Collect variant ids + prediction metadata (all local, immutable)
             let variantIds: [Int] = results.map { $0.variant_id }
@@ -2255,10 +2430,9 @@ public class Preferabli {
             try await canWeContinue(needsToBeLoggedIn: true)
             
             Analytics.track( ["event" : "get_preferabli_score"])
-            
-            var needsRefresh = false
-            
-            try Storage.withContext { ctx in
+                        
+            let needsRefresh = try await Storage.withBackgroundContext { ctx in
+                var needsRefresh = false
                 guard let product = try Storage.fetchById(Product.self, id: product_id, in: ctx) else {
                     throw PreferabliException.init(type: .BadSwiftData, message: "Product not found.", code: 404)
                 }
@@ -2272,6 +2446,8 @@ public class Preferabli {
                     let preference_data = product.preference_data
                     needsRefresh = (force_refresh || PreferabliTools.hasMinutesPassed(minutes: 10, startDate: preference_data?.refreshed_at))
                 }
+                
+                return needsRefresh
             }
             
             if needsRefresh {
@@ -2286,7 +2462,7 @@ public class Preferabli {
                     preferenceResponse = try await api.getAlamo().get(APIEndpoints.preferenceData, sparams: params)
                 }
                 
-                try Storage.withContext { ctx in
+                try await Storage.withBackgroundContext { ctx in
                     guard let product = try Storage.fetchById(Product.self, id: product_id, in: ctx) else {
                         throw PreferabliException.init(type: .BadSwiftData, message: "Product not found.", code: 404)
                     }

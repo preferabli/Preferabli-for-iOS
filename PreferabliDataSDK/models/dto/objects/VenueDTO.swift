@@ -53,7 +53,18 @@ public struct VenueDTO: Decodable, Sendable {
     public let images: [MediaDTO]?
     public let hours: [VenueHourDTO]?
     public let lookups: [MerchantProductLink]?
+    public let market_traits: [VenueMarketTraitDTO]?
+    public let video: MediaDTO?
+    public let logo: MediaDTO?
+    public let primary_image: MediaDTO?
+    public let is_partner: Bool?
 }
+
+public struct VenueMarketTraitDTO: Decodable, Sendable {
+    public let order: Int?
+    public let trait: MarketTraitDTO?
+}
+
 
 public extension VenueDTO {
 

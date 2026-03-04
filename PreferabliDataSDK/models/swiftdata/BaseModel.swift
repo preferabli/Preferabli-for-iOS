@@ -40,7 +40,7 @@ public protocol HasImage {
 
 public struct HasImageStruct : HasImage {
     let imageUrl : String?
-    init(imageUrl: String?) {
+    public init(imageUrl: String?) {
         self.imageUrl = imageUrl
     }
     

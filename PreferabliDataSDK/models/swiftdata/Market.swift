@@ -17,6 +17,7 @@ public final class Market: Identifiable, HasIntID, HasTimestamps, HasImage {
     public var order: Int?
     public var country_code: String?
     public var top_level: Bool?
+    public var default_span_delta: Double?
 
     // ✅ Tree
     public var parent: Market?
@@ -24,10 +25,10 @@ public final class Market: Identifiable, HasIntID, HasTimestamps, HasImage {
     @Relationship(deleteRule: .cascade, inverse: \Market.parent)
     public var submarkets: [Market] = []
 
-    // ✅ MarketTraits (join-ish table, but we store full trait payload here)
-    @Relationship(deleteRule: .cascade, inverse: \MarketTrait.market)
-    public var traits: [MarketTrait] = []
+    @Relationship(deleteRule: .cascade, inverse: \MarketTraitAssociation.market)
+    public var traits: [MarketTraitAssociation] = []
     
+    @Relationship(deleteRule: .nullify)
     public var venues: [Venue] = []
 
     public init(id: Int) { self.id = id }

@@ -26,31 +26,11 @@ public final class PreferabliUser : HasIntID, HasTimestamps, HasImage {
     public var wishlist_collection_id: Int?
     public var avatar_background_color_hex: String?
     public var avatar_text_color_hex: String?
+    public var favorite_venue_ids: [Int]?
     
     @Relationship(deleteRule: .nullify) public var avatar: Media?
 
     public init(id: Int) { self.id = id }
-
-    init(id: Int, birthyear: Int? = nil, country: String? = nil, display_name: String? = nil, email: String? = nil, is_team_preferabli: Bool = false, fname: String? = nil, lname: String? = nil, location: String? = nil, claim_code: String? = nil, has_merchant_access: Bool = false, has_kiosks: Bool = false, zip_code: String? = nil, intercom_hmac: String? = nil, rating_collection_id: Int? = nil, provided_feedback_at: Date? = nil, wishlist_collection_id: Int? = nil, avatar: Media? = nil, created_at: Date? = nil, updated_at: Date? = nil) {
-        self.country = country
-        self.display_name = display_name
-        self.email = email
-        self.is_team_preferabli = is_team_preferabli
-        self.fname = fname
-        self.id = id
-        self.lname = lname
-        self.location = location
-        self.claim_code = claim_code
-        self.has_merchant_access = has_merchant_access
-        self.has_kiosks = has_kiosks
-        self.zip_code = zip_code
-        self.intercom_hmac = intercom_hmac
-        self.rating_collection_id = rating_collection_id
-        self.provided_feedback_at = provided_feedback_at
-        self.wishlist_collection_id = wishlist_collection_id
-        self.avatar = avatar
-        PreferabliTools.setUserProperties(user: self)
-    }
     
     /// Get the user's avatar.
     /// - Parameters:

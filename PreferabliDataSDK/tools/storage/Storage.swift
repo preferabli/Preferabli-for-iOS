@@ -57,7 +57,11 @@ public enum Storage {
         return dir.appendingPathComponent("PreferabliSDK.sqlite")
     }()
     
-    public static func makeSchema() -> Schema {
+    public nonisolated static func makeSchema() -> Schema {
+        Schema(ModelRegistry.types)
+    }
+    
+    public nonisolated static func makeSchemaForAllModels() -> Schema {
         Schema(ModelRegistry.types)
     }
 
@@ -333,8 +337,11 @@ private enum ModelRegistry {
         add(Profile.self)
         
         add(Search.self)
+        add(PushNotificationReceipt.self)
         
         add(VenueHour.self)
+        add(MarketTrait.self)
+        add(VenueMarketTrait.self)
         add(Venue.self)
         
         add(UserCollection.self)
@@ -356,8 +363,10 @@ private enum ModelRegistry {
         add(Variant.self)
         add(Product.self)
         
-        add(MarketTrait.self)
+        add(MarketTraitAssociation.self)
         add(Market.self)
+        
+        add(CTABucket.self)
     }
 
     /// Publicly consumed lists—both derived from the single `register` body above.
@@ -450,6 +459,25 @@ extension Storage {
         obj.id = id
         ctx.insert(obj)
         return obj
+    }
+    
+    nonisolated static func fetchByKey<T: PersistentModel>(
+        _ type: T.Type,
+        key: String,
+        in ctx: ModelContext
+    ) throws -> T? where T: AnyObject {
+        // This is intentionally specialized below for VenueMarketTrait.
+        fatalError("Use specialized fetchByKey implementations.")
+    }
+
+    nonisolated static func fetchByKey(
+        _ type: VenueMarketTrait.Type,
+        key: String,
+        in ctx: ModelContext
+    ) throws -> VenueMarketTrait? {
+        var fd = FetchDescriptor<VenueMarketTrait>(predicate: VenueMarketTrait.predicate(forKey: key))
+        fd.fetchLimit = 1
+        return try ctx.fetch(fd).first
     }
 }
 

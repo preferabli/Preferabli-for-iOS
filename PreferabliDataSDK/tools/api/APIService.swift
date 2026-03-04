@@ -429,7 +429,9 @@ internal struct APIEndpoints {
     internal static let channels = baseUrl + "channels"
     internal static let markets = baseUrl + "markets"
     internal static let scripts = baseUrl + "front-end-scripts"
+    internal static let ctaBuckets = baseUrl + "cta-buckets"
 
+    internal static func venues(id: Int) -> String { baseUrl + "markets/\(id)/venues" }
     internal static func integration(id: Int) -> String { baseUrl + "integrations/\(id)" }
     internal static func lookupConversion(id: Int) -> String { baseUrl + "integrations/\(id)/lookups" }
     internal static func lttt(id: Int) -> String { baseUrl + "integration/\(id)/lttt" }
@@ -443,6 +445,7 @@ internal struct APIEndpoints {
     internal static func product(id: Int) -> String { baseUrl + "products/\(id)" }
     internal static func venue(id: Int) -> String { baseUrl + "venues/\(id)" }
     internal static func user(id: Int) -> String { baseUrl + "users/\(id)" }
+    internal static func favoriteVenue(id: Int, venueId : Int) -> String { baseUrl + "users/\(id)/favorite-venues/\(venueId)" }
     internal static func tags(id: Int) -> String { baseUrl + "collections/\(id)/tags" }
     internal static func variants(product_id: Int) -> String { baseUrl + "products/\(product_id)/variants" }
     internal static func style(id: Int) -> String { baseUrl + "styles/\(id)" }

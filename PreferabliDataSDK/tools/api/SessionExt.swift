@@ -155,13 +155,6 @@ extension Session {
         await requestData(url: url, method: .delete, parameters: nil, encoding: URLEncoding.default, headers: nil)
     }
 
-    /// POST with URL-encoded/JSON parameters via AF's ParameterEncoding.
-    /// NOTE: if the server expects JSON, prefer `post(_:json:)` or `post(_:sjson:)`.
-    @discardableResult
-    internal func post(_ url: URLConvertible, params: Parameters?) async -> AFDataResponse<Data?> {
-        await requestData(url: url, method: .post, parameters: params, encoding: URLEncoding.default, headers: nil)
-    }
-
     /// POST an Encodable JSON body (preferred).
     @discardableResult
     internal func post<T: Encodable & Sendable>(_ url: URLConvertible, json body: T) async throws -> AFDataResponse<Data?> {
@@ -404,6 +397,21 @@ extension Session {
         let obj = try toJSONAnyDict(sjson)
         let data = try JSONSerialization.data(withJSONObject: obj, options: [])
         return await requestJSON(urlString: try url.asURL().absoluteString, method: .post, json: data)
+    }
+    
+    @discardableResult
+    private func postNoBodyRaw(_ url: URLConvertible) async -> AFDataResponse<Data?> {
+        await performDataRequest {
+            request(url, method: .post)
+        }
+    }
+    
+    @discardableResult
+    internal func postNoBody(_ url: URLConvertible) async throws {
+        if Task.isCancelled { throw CancellationError() }
+
+        let raw = await postNoBodyRaw(url)
+        _ = try await APIService.continueOrThrowPreferabliException(response: raw)
     }
 
     /// PUT with SParams → JSON body

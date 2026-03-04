@@ -97,7 +97,7 @@ public final class Product: HasIntID, HasTimestamps, HasImage {
     }
 
     /// The ``RatingLevel`` of the most recent rating of a specific product for the current user.
-    var rating_level : RatingLevel? {
+    public var rating_level : RatingLevel? {
         if let mostRecentRating = cachedMostRecentRating {
             return RatingLevel.getRatingLevelBasedOffTagValue(value: mostRecentRating.value)
         }

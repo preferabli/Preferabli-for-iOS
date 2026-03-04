@@ -273,6 +273,15 @@ public class PreferabliTools {
         Storage.getKeyStore().set(user.claim_code, forKey: "claim_code")
         Storage.getKeyStore().set(user.provided_feedback_at, forKey: "feedbackDate")
         Storage.getKeyStore().set(user.intercom_hmac, forKey: "intercom_hmac")
+        
+        NotificationCenter.default.post(
+            name: .preferabliIdentityDidChange,
+            object: nil,
+            userInfo: [
+                "userId": user.id,
+                "email": user.email as Any
+            ]
+        )
     }
     
     internal class func getSymbolForCurrencyCode(currencyCode: String?) -> String {

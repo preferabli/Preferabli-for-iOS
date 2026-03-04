@@ -48,18 +48,12 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
     public var url_youtube: String?
     public var zip_code: String?
     public var notes: String?
-    
-    // new stuff not on api yet
-    public var logo: Media?
-    public var video: Media?
-    var primary_image : Media? {
-        if (channel != nil) {
-            return channel?.primary_image
-        }
-        return images.first
-    }
+    public var is_partner: Bool?
 
     // MARK: - Relationships
+    @Relationship(deleteRule: .nullify) public var primary_image: Media?
+    @Relationship(deleteRule: .nullify) public var logo: Media?
+    @Relationship(deleteRule: .nullify) public var video: Media?
     @Relationship(deleteRule: .nullify) public var collections: [Collection] = []
     @Relationship(deleteRule: .cascade, inverse: \DeliveryMethod.venue) public var active_delivery_methods: [DeliveryMethod] = []
     @Relationship(deleteRule: .cascade) public var images: [Media] = []
@@ -68,8 +62,8 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
     public var channel_venues: [ChannelVenue] = []
     @Relationship(deleteRule: .cascade, inverse: \Experience.venue)
     public var experiences: [Experience] = []
-    @Relationship(deleteRule: .nullify, inverse: \MarketTrait.venue)
-    public var traits: [MarketTrait] = []
+    @Relationship(deleteRule: .cascade, inverse: \VenueMarketTrait.venue)
+    public var venue_market_traits: [VenueMarketTrait] = []
     @Relationship(deleteRule: .nullify, inverse: \Market.venues)
     public var markets: [Market] = []
 
@@ -211,8 +205,37 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
         return ""
     }
     
+    public func primaryVenueCategoryTrait(in market: Market? = nil) -> MarketTrait? {
+        let scopeMarketId = market?.id
+
+        let candidates = venue_market_traits.compactMap { link -> (order: Int, trait: MarketTrait)? in
+            // Scope: if market provided, match it; else accept any market
+            if let mid = scopeMarketId, link.market_id != mid { return nil }
+
+            guard link.trait.type ?? "" == "venue_category"
+            else { return nil }
+
+            // Treat nil order as "very large" so it sorts last
+            let ord = link.order ?? Int.max
+            return (ord, link.trait)
+        }
+
+        return candidates.min(by: { $0.order < $1.order })?.trait
+    }
+    
     public func getImage(width : Int, height : Int, quality : Int = 80) -> URL? {
-        return PreferabliTools.getImageUrl(image: primary_image?.path, width: width, height: height, quality: quality)
+        let imagePath : String?
+        if (primary_image == nil) {
+            if (images != nil && !images.isEmpty) {
+                imagePath = images.first?.path
+            } else {
+                imagePath = channel?.primary_image?.path
+            }
+        } else {
+            imagePath = primary_image?.path
+        }
+        
+        return PreferabliTools.getImageUrl(image: imagePath, width: width, height: height, quality: quality)
     }
     
     public func getPlaceholderImage() -> String? {
