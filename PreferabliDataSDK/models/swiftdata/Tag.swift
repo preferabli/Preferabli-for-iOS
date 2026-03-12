@@ -234,7 +234,7 @@ public enum TagType: Sendable {
     case WISHLIST
     case SKIPPED
     
-    static internal func getTagTypeBasedOffDatabaseName(value : String?) -> TagType? {
+    static public func getTagTypeBasedOffDatabaseName(value : String?) -> TagType? {
         if let value {
             switch value {
             case "rating":    return .RATING

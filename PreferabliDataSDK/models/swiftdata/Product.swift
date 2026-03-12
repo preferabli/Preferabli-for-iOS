@@ -198,7 +198,8 @@ public final class Product: HasIntID, HasTimestamps, HasImage {
     /// Returns grape if one exists
     public var grapeSanitized: String? {
         guard let g = grape,
-              !g.localizedCaseInsensitiveContains("identifying")
+              !g.localizedCaseInsensitiveContains("identifying"),
+              !g.localizedCaseInsensitiveContains("dont know")
         else { return nil }
         return g
     }

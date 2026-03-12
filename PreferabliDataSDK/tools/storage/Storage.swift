@@ -366,6 +366,9 @@ private enum ModelRegistry {
         add(MarketTraitAssociation.self)
         add(Market.self)
         
+        add(Recipe.self)
+        add(RecipeGroup.self)
+        
         add(CTABucket.self)
     }
 

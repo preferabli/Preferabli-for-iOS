@@ -11,6 +11,15 @@ public final class CollectionOrder: HasIntID, HasTimestamps {
     public var tag_id: Int
     public var order: Int
     
+    // added these for scalar graph traversal for much speedier collection loading
+    public var collectionID: Int   // ✅ NEW
+    public var groupID: Int        // ✅ optional but useful
+    public var productID: Int      // ✅ huge win for ingest
+    public var tagCreatedAt: Date?
+    public var tagTypeRaw: String?
+    public var year: Int?
+    public var searchableRaw: String?
+    
     // relationships
     @Relationship(deleteRule: .nullify) public var group: CollectionGroup
     @Relationship(deleteRule: .nullify, inverse: \Tag.orderings) public var tag: Tag
@@ -21,8 +30,11 @@ public final class CollectionOrder: HasIntID, HasTimestamps {
         self.order = order
         self.group = group
         self.tag = tag
+        self.collectionID = group.version.collection.id
+        self.groupID = group.id
+        self.productID = tag.variant.product.id
     }
-
+    
     public static func predicate(forID id: Int) -> Predicate<CollectionOrder> {
         #Predicate<CollectionOrder> { $0.id == id }
     }

@@ -772,6 +772,15 @@ extension Storage {
         o.created_at = dto.created_at ?? o.created_at
         o.updated_at = dto.updated_at ?? o.updated_at
         o.order = dto.order
+        
+        // inside Storage.upsertCollectionOrder(from:group:tag:in:)
+        o.collectionID = group.version.collection.id
+        o.groupID      = group.id
+        o.productID    = tag.variant.product.id
+        o.tagCreatedAt = tag.created_at
+        o.tagTypeRaw   = tag.tag_type?.getDatabaseName()
+        o.year         = (tag.variant.year > 0) ? tag.variant.year : nil
+        o.searchableRaw = tag.searchableContent   // compute once, store once
 
         try checkCancelledBeforeRelationshipWrite()
         if o.group.id != group.id { o.group = group }
@@ -1416,6 +1425,69 @@ extension Storage {
             market.traits = newAssocs
         }
     }
+
+        @discardableResult
+        nonisolated static func upsertRecipeGroup(from dto: RecipeGroupDTO, in ctx: ModelContext) throws -> RecipeGroup {
+
+            try checkCancelled()
+
+            let g = try fetchOrInsert(RecipeGroup.self, id: dto.id, in: ctx) { RecipeGroup(id: dto.id) }
+
+            g.created_at = dto.created_at ?? g.created_at
+            g.updated_at = dto.updated_at ?? g.updated_at
+            g.order = dto.order ?? g.order
+            g.internal_notes = dto.internal_notes ?? g.internal_notes
+            g.name = dto.name ?? g.name
+            g.type = dto.type ?? g.type
+            g.icon_svg_url = dto.icon_svg_url ?? g.icon_svg_url
+            
+            // Primary image
+            if let imgDTO = dto.primary_image {
+                try checkCancelled()
+                let media = try upsertMedia(from: imgDTO, in: ctx)
+
+                try checkCancelledBeforeRelationshipWrite()
+                if g.primary_image !== media { g.primary_image = media }
+            } else {
+                try checkCancelledBeforeRelationshipWrite()
+                g.primary_image = nil
+            }
+
+            return g
+        }
+
+        // MARK: - Recipe
+
+        @discardableResult
+        nonisolated static func upsertRecipe(from dto: RecipeDTO, in ctx: ModelContext) throws -> Recipe {
+
+            try checkCancelled()
+
+            let r = try fetchOrInsert(Recipe.self, id: dto.id, in: ctx) { Recipe(id: dto.id) }
+
+            r.created_at = dto.created_at ?? r.created_at
+            r.updated_at = dto.updated_at ?? r.updated_at
+            r.merchant_recipe_id = dto.merchant_recipe_id ?? r.merchant_recipe_id
+            r.url = dto.url ?? r.url
+            r.primary_image_url = dto.primary_image_url ?? r.primary_image_url
+            r.desc = dto.description ?? r.desc
+            r.name = dto.name ?? r.name
+
+            if let groupDTOs = dto.recipe_groups {
+                var newGroups: [RecipeGroup] = []
+                newGroups.reserveCapacity(groupDTOs.count)
+
+                for gDTO in groupDTOs {
+                    try checkCancelled()
+                    newGroups.append(try upsertRecipeGroup(from: gDTO, in: ctx))
+                }
+
+                try checkCancelledBeforeRelationshipWrite()
+                r.recipe_groups = newGroups
+            }
+
+            return r
+        }
 
         @discardableResult
         nonisolated static func upsertCTABucket(

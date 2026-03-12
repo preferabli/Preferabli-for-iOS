@@ -1123,6 +1123,47 @@ public class Preferabli {
         }
     }
     
+    public func productsForFood(recipeId : Int) async throws -> [Int]
+    {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            
+            Analytics.track(["event": "flttt"])
+                        
+            var params: SParams = [
+                "recipe_id": recipeId,
+                "collection_id": Preferabli.PRIMARY_INVENTORY_ID
+            ]
+            
+            if Preferabli.isPreferabliUserLoggedIn() {
+                params["user_id"] = PreferabliTools.getPreferabliUserId()
+            } else if Preferabli.isCustomerLoggedIn() {
+                params["channel_customer_id"] = PreferabliTools.getCustomerId()
+            }
+            
+            let body: FLTTTResponseDTO = try await api.getAlamo().get(APIEndpoints.flttt, sparams: params)
+
+            let productIDs = try Storage.withContext { ctx in
+                var productIDs = [Int]()
+                
+                for item in body.products {
+                    let product = try Storage.upsertProduct(from: item, in: ctx)
+                    productIDs.append(product.id)
+                }
+                
+                try ctx.save()
+                
+                return productIDs
+            }
+            
+            return productIDs
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
     public func getShareQRCode(shareLink : String, width : Int, tint : Color, background : Color = .white) async throws -> Data
     {
         do {
@@ -1450,6 +1491,77 @@ public class Preferabli {
             }
         }
     }
+    
+    public func getRecipes(force_refresh: Bool = false) async throws -> [Int] {
+            do {
+                try await canWeContinue(needsToBeLoggedIn: false)
+                Analytics.track(["event": "get_recipes"])
+
+                if !force_refresh, Storage.getKeyStore().bool(forKey: "hasLoadedRecipes") {
+                    let localIds: [Int] = try await Storage.withBackgroundContext { ctx in
+                        let recipes = try ctx.fetch(FetchDescriptor<Recipe>())
+                        return recipes.map { $0.id }
+                    }
+                    if !localIds.isEmpty { return localIds }
+                }
+
+                let body: [RecipeDTO] = try await api.getAlamo().get(APIEndpoints.recipes)
+
+                let recipeIds : [Int] = try await Storage.withBackgroundContext { ctx in
+                    var recipeIds : [Int] = []
+                    for recipe in body {
+                        let recipeActual = try Storage.upsertRecipe(from: recipe, in: ctx)
+                        recipeIds.append(recipeActual.id)
+                    }
+                    try ctx.save()
+                    
+                    return recipeIds
+                }
+
+                Storage.getKeyStore().set(true, forKey: "hasLoadedRecipes")
+                return recipeIds
+
+            } catch {
+                handleError(error: error)
+                throw error
+            }
+    }
+    
+    public func getRecipeGroups(force_refresh: Bool = false) async throws -> [Int] {
+            do {
+                try await canWeContinue(needsToBeLoggedIn: false)
+                Analytics.track(["event": "get_recipe_groups"])
+
+                if !force_refresh, Storage.getKeyStore().bool(forKey: "hasLoadedRecipeGroups") {
+                    let localIds: [Int] = try await Storage.withBackgroundContext { ctx in
+                        let recipes = try ctx.fetch(FetchDescriptor<Recipe>())
+                        return recipes.map { $0.id }
+                    }
+                    if !localIds.isEmpty { return localIds }
+                }
+
+                let body: [RecipeGroupDTO] = try await api.getAlamo().get(APIEndpoints.recipeGroups)
+
+                let recipeGroupIds : [Int] = try await Storage.withBackgroundContext { ctx in
+                    var recipeGroupIds : [Int] = []
+                    for recipeGroup in body {
+                        let recipeActual = try Storage.upsertRecipeGroup(from: recipeGroup, in: ctx)
+                        recipeGroupIds.append(recipeActual.id)
+                    }
+                    try ctx.save()
+                    
+                    return recipeGroupIds
+                }
+
+                Storage.getKeyStore().set(true, forKey: "hasLoadedRecipeGroups")
+                return recipeGroupIds
+
+            } catch {
+                handleError(error: error)
+                throw error
+            }
+    }
+    
     
     /// Get product details like a taste profile and food pairings.
     /// - Parameters:
@@ -2431,7 +2543,7 @@ public class Preferabli {
             
             Analytics.track( ["event" : "get_preferabli_score"])
                         
-            let needsRefresh = try await Storage.withBackgroundContext { ctx in
+            let needsRefresh = try await Storage.withContext { ctx in
                 var needsRefresh = false
                 guard let product = try Storage.fetchById(Product.self, id: product_id, in: ctx) else {
                     throw PreferabliException.init(type: .BadSwiftData, message: "Product not found.", code: 404)
@@ -2462,7 +2574,7 @@ public class Preferabli {
                     preferenceResponse = try await api.getAlamo().get(APIEndpoints.preferenceData, sparams: params)
                 }
                 
-                try await Storage.withBackgroundContext { ctx in
+                try await Storage.withContext { ctx in
                     guard let product = try Storage.fetchById(Product.self, id: product_id, in: ctx) else {
                         throw PreferabliException.init(type: .BadSwiftData, message: "Product not found.", code: 404)
                     }
