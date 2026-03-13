@@ -432,6 +432,7 @@ internal struct APIEndpoints {
     internal static let ctaBuckets = baseUrl + "cta-buckets"
     internal static let recipes = baseUrl + "integrations/1/recipes?limit=9999"
     internal static let recipeGroups = baseUrl + "integrations/1/recipe-groups?limit=9999"
+    internal static let recipesForProducts = baseUrl + "integrations/1/recipes-for-products?limit=20"
 
     internal static func venues(id: Int) -> String { baseUrl + "markets/\(id)/venues" }
     internal static func integration(id: Int) -> String { baseUrl + "integrations/\(id)" }

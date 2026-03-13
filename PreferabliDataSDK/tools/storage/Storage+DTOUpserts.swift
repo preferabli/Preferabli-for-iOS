@@ -1007,7 +1007,7 @@ extension Storage {
     // MARK: - FoodCategory
 
     @discardableResult
-    static func upsertFoodCategory(from dto: FoodCategoryDTO, in ctx: ModelContext) throws -> FoodCategory {
+    nonisolated static func upsertFoodCategory(from dto: FoodCategoryDTO, in ctx: ModelContext) throws -> FoodCategory {
 
         try checkCancelled()
 
@@ -1016,6 +1016,8 @@ extension Storage {
         fc.updated_at = dto.updated_at ?? fc.updated_at
         fc.name = dto.name ?? fc.name
         fc.icon_url = dto.icon_url ?? fc.icon_url
+        fc.icon_svg_url = dto.icon_svg_url ?? fc.icon_svg_url
+        
         return fc
     }
 
@@ -1463,7 +1465,9 @@ extension Storage {
 
             try checkCancelled()
 
-            let r = try fetchOrInsert(Recipe.self, id: dto.id, in: ctx) { Recipe(id: dto.id) }
+            let fc = try upsertFoodCategory(from: dto.food_category, in: ctx)
+
+            let r = try fetchOrInsert(Recipe.self, id: dto.id, in: ctx) { Recipe(id: dto.id, category: fc) }
 
             r.created_at = dto.created_at ?? r.created_at
             r.updated_at = dto.updated_at ?? r.updated_at
@@ -1488,6 +1492,25 @@ extension Storage {
 
             return r
         }
+    
+    @discardableResult
+    nonisolated static func upsertProductRecipe(order: Int, recipe: Recipe, product: Product, in ctx: ModelContext) throws -> ProductRecipe {
+
+        try checkCancelled()
+        
+        let key = ProductRecipe.makeKey(order: order, recipeId: recipe.id, productId: product.id)
+
+        let pr: ProductRecipe
+        if let existing = try Storage.fetchByKey(ProductRecipe.self, key: key, in: ctx) {
+            pr = existing
+        } else {
+            let created = ProductRecipe(key: key, order: order, recipe: recipe, product: product)
+            ctx.insert(created)
+            pr = created
+        }
+
+        return pr
+    }
 
         @discardableResult
         nonisolated static func upsertCTABucket(

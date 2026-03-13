@@ -46,6 +46,7 @@ public final class Product: HasIntID, HasTimestamps, HasImage {
     @Relationship(deleteRule: .cascade) public var variants: [Variant] = []
     @Relationship(deleteRule: .cascade) public var profile: ProductProfile?
     @Relationship(deleteRule: .cascade) public var preference_data: PreferenceData?
+    @Relationship(deleteRule: .cascade) public var recipes: [ProductRecipe] = []
 
     @Relationship public var cachedMostRecentRating: Tag?
     @Relationship public var cachedWishlist: Tag?

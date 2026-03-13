@@ -24,9 +24,11 @@ public final class Recipe: HasIntID, HasTimestamps, HasImage {
 
     @Relationship(inverse: \RecipeGroup.recipes)
     public var recipe_groups: [RecipeGroup] = []
+    @Relationship(deleteRule: .nullify) public var category: FoodCategory
 
-    public init(id: Int) {
+    public init(id: Int, category : FoodCategory) {
         self.id = id
+        self.category = category
     }
 
     public static func predicate(forID id: Int) -> Predicate<Recipe> {

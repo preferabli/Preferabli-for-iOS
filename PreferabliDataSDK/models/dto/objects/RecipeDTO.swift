@@ -17,6 +17,7 @@ public struct RecipeDTO: Decodable, Sendable {
     public let recipe_groups: [RecipeGroupDTO]?
     public let created_at: Date?
     public let updated_at: Date?
+    public let food_category: FoodCategoryDTO
 }
 
 public struct RecipeGroupDTO: Decodable, Sendable {

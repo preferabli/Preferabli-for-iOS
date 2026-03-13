@@ -344,6 +344,9 @@ private enum ModelRegistry {
         add(VenueMarketTrait.self)
         add(Venue.self)
         
+        add(Recipe.self)
+        add(RecipeGroup.self)
+        
         add(UserCollection.self)
         add(CollectionTrait.self)
         add(CollectionOrder.self)
@@ -361,13 +364,11 @@ private enum ModelRegistry {
         add(ProductProfile.self)
         add(Tag.self)
         add(Variant.self)
+        add(ProductRecipe.self)
         add(Product.self)
         
         add(MarketTraitAssociation.self)
         add(Market.self)
-        
-        add(Recipe.self)
-        add(RecipeGroup.self)
         
         add(CTABucket.self)
     }
@@ -479,6 +480,16 @@ extension Storage {
         in ctx: ModelContext
     ) throws -> VenueMarketTrait? {
         var fd = FetchDescriptor<VenueMarketTrait>(predicate: VenueMarketTrait.predicate(forKey: key))
+        fd.fetchLimit = 1
+        return try ctx.fetch(fd).first
+    }
+    
+    nonisolated static func fetchByKey(
+        _ type: ProductRecipe.Type,
+        key: String,
+        in ctx: ModelContext
+    ) throws -> ProductRecipe? {
+        var fd = FetchDescriptor<ProductRecipe>(predicate: ProductRecipe.predicate(forKey: key))
         fd.fetchLimit = 1
         return try ctx.fetch(fd).first
     }

@@ -1164,6 +1164,69 @@ public class Preferabli {
         }
     }
     
+    public func recipesForProduct(forceRefresh: Bool = false, productId: Int) async throws -> [Int]
+    {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            
+            Analytics.track(["event": "recipes_for_product"])
+            
+            try await Storage.withContext { ctx in
+                guard let product = try Storage.fetchById(Product.self, id: productId, in: ctx) else {
+                    throw PreferabliException.init(type: .BadSwiftData, message: "Product not found.", code: 404)
+                }
+                
+                if (!(product.recommendable ?? false)) {
+                    throw PreferabliException.init(type: .APIError, message: "Product not recommendable.", code: 404)
+                }
+                
+                if (!forceRefresh && !product.recipes.isEmpty) {
+                    throw PreferabliException.init(type: .AlreadyLoaded, message: "Product already has recipes.", code: 567)
+                }
+            }
+                        
+            var params: SParams = [
+                "product_id": productId,
+                "year": Variant.CURRENT_VARIANT_YEAR
+            ]
+
+            let body: [RecipesResponseDTO] = try await api.getAlamo().get(APIEndpoints.recipesForProducts, sparams: params)
+
+            let recipeIds = try await Storage.withContext { ctx in
+                guard let product = try Storage.fetchById(Product.self, id: productId, in: ctx) else {
+                    throw PreferabliException.init(type: .BadSwiftData, message: "Product not found.", code: 404)
+                }
+                
+                guard let first = body.first else {
+                    throw PreferabliException.init(type: .BadData, message: "Proper product / recipe data not returned.", code: 659)
+                }
+                
+                product.recipes.removeAll()
+                
+                var recipeIds = [Int]()
+                
+                var order = 0
+                for item in first.recipes {
+                    let recipe = try Storage.upsertRecipe(from: item, in: ctx)
+                    let productRecipe = try Storage.upsertProductRecipe(order: order, recipe: recipe, product: product, in: ctx)
+                    product.recipes.append(productRecipe)
+                    recipeIds.append(recipe.id)
+                    order = order + 1
+                }
+                
+                try ctx.save()
+                
+                return recipeIds
+            }
+            
+            return recipeIds
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
     public func getShareQRCode(shareLink : String, width : Int, tint : Color, background : Color = .white) async throws -> Data
     {
         do {

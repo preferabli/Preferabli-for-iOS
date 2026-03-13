@@ -10,7 +10,8 @@ public final class FoodCategory: HasIntID, HasTimestamps, HasImage {
     public var updated_at: Date = Foundation.Date.now
     public var name: String?
     public var icon_url: String?
-    
+    public var icon_svg_url: String?
+
     public init(id: Int) { self.id = id }
 
     public static func predicate(forID id: Int) -> Predicate<FoodCategory> {
