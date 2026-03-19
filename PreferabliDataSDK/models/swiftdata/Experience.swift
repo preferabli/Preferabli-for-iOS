@@ -24,6 +24,7 @@ public final class Experience: HasIntID, HasTimestamps, HasImage {
     public var reservations_provider: String?
     public var booking_link: String?
     public var discount_code: String?
+    public var cancellation_fee: String?
 
     // MARK: - Relationships
     @Relationship(deleteRule: .cascade) public var images: [Media] = []

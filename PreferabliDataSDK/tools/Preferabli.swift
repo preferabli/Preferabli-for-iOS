@@ -1171,7 +1171,7 @@ public class Preferabli {
             
             Analytics.track(["event": "recipes_for_product"])
             
-            try await Storage.withContext { ctx in
+            let recipeIdsFirst = try await Storage.withContext { ctx in
                 guard let product = try Storage.fetchById(Product.self, id: productId, in: ctx) else {
                     throw PreferabliException.init(type: .BadSwiftData, message: "Product not found.", code: 404)
                 }
@@ -1180,9 +1180,17 @@ public class Preferabli {
                     throw PreferabliException.init(type: .APIError, message: "Product not recommendable.", code: 404)
                 }
                 
-                if (!forceRefresh && !product.recipes.isEmpty) {
-                    throw PreferabliException.init(type: .AlreadyLoaded, message: "Product already has recipes.", code: 567)
+                if !forceRefresh && !product.recipes.isEmpty {
+                    return product.recipes
+                        .sorted { $0.order < $1.order }
+                        .map { $0.recipe.id }
+                } else {
+                    return []
                 }
+            }
+            
+            if !recipeIdsFirst.isEmpty {
+                return recipeIdsFirst
             }
                         
             var params: SParams = [
