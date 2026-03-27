@@ -78,7 +78,6 @@ public struct CollectionDTO: Decodable, Sendable {
     public let sort_channel_name: String?
     public let location_based_recs: Bool?
     public let primary_image: MediaDTO?
-    public let venue: VenueDTO?
     public let versions: [CollectionVersionDTO]?
     public let traits: [CollectionTraitDTO]?
 }

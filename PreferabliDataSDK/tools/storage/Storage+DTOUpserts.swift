@@ -308,12 +308,16 @@ extension Storage {
     }
 
     @discardableResult
-    nonisolated static func upsertExperience(from dto: ExperienceDTO, venue: Venue, in ctx: ModelContext) throws -> Experience {
+    nonisolated static func upsertExperience(from dto: ExperienceDTO, venue: Venue, in ctx: ModelContext) throws -> Experience? {
 
         try checkCancelled()
 
+        guard let name = dto.name else {
+            return nil
+        }
+        
         let e = try fetchOrInsert(Experience.self, id: dto.id, in: ctx) {
-            Experience(id: dto.id, venue: venue)
+            Experience(id: dto.id, name: name, venue: venue)
         }
 
         e.created_at = dto.created_at ?? e.created_at
@@ -343,11 +347,17 @@ extension Storage {
     // MARK: Venue
 
     @discardableResult
-    nonisolated static func upsertVenue(from dto: VenueDTO, market: Market? = nil, in ctx: ModelContext) throws -> Venue {
+    nonisolated static func upsertVenue(from dto: VenueDTO, market: Market? = nil, in ctx: ModelContext) throws -> Venue? {
 
         try checkCancelled()
 
-        let v = try fetchOrInsert(Venue.self, id: dto.id, in: ctx) { Venue(id: dto.id) }
+        guard let name = dto.name else {
+            return nil
+        }
+        
+        let v = try fetchOrInsert(Venue.self, id: dto.id, in: ctx) {
+            Venue(id: dto.id, name: name)
+        }
 
         // MARK: - Fields
         v.address_l1 = dto.address_l1 ?? v.address_l1
@@ -360,7 +370,6 @@ extension Storage {
         v.primary_inventory_id = dto.primary_inventory_id ?? v.primary_inventory_id
         v.featured_collection_id = dto.featured_collection_id ?? v.featured_collection_id
         v.is_virtual = dto.is_virtual ?? v.is_virtual
-        v.name = dto.name ?? v.name
         v.phone = dto.phone ?? v.phone
         v.email_address = dto.email_address ?? v.email_address
         v.state = dto.state ?? v.state
@@ -540,19 +549,6 @@ extension Storage {
             v.active_delivery_methods = newDms
         }
 
-        if let cols = dto.collections {
-            var newCols: [Collection] = []
-            newCols.reserveCapacity(cols.count)
-
-            for col in cols {
-                try checkCancelled()
-                newCols.append(try upsertCollection(from: col, in: ctx))
-            }
-
-            try checkCancelledBeforeRelationshipWrite()
-            v.collections = newCols
-        }
-
         return v
     }
     
@@ -655,14 +651,6 @@ extension Storage {
         } else {
             try checkCancelledBeforeRelationshipWrite()
             c.primary_image = nil
-        }
-
-        if let vDTO = dto.venue {
-            try checkCancelled()
-            let venue = try upsertVenue(from: vDTO, in: ctx)
-
-            try checkCancelledBeforeRelationshipWrite()
-            if c.venue?.id != venue.id { c.venue = venue }
         }
 
         if let vers = dto.versions {
@@ -1191,7 +1179,7 @@ extension Storage {
                     let v = try upsertVenue(from: vDTO, in: ctx)
 
                     try checkCancelledBeforeRelationshipWrite()
-                    if cv.venue?.id != v.id { cv.venue = v }
+                    if cv.venue?.id != v?.id { cv.venue = v }
                 }
 
                 newJoins.append(cv)

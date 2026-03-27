@@ -299,56 +299,6 @@ public final class Product: HasIntID, HasTimestamps, HasImage {
         
         return candidateToReturn
     }
-
-    /// Filters products by a user's search.
-    /// - Parameters:
-    ///   - products: an array of products to be filtered.
-    ///   - search_text: user's search query.
-    /// - Returns: an array of filtered products.
-    static public func filterProducts(products : [Product], search_text : String) -> [Product] {
-        var filteredWines = [Product]()
-        if (search_text.isEmptyOrWhitespace()) {
-            filteredWines = products
-        } else {
-            let searchTerms = search_text.components(separatedBy: " ")
-            filteredWines = products.filter {
-                for searchTerm in searchTerms {
-                    if ($0.filterProduct(search_term: searchTerm)) {
-                        continue
-                    } else {
-                        return false
-                    }
-                }
-                return true
-            }
-        }
-        return filteredWines
-    }
-
-    internal func filterProduct(search_term : String) -> Bool {
-        if (search_term.isEmptyOrWhitespace()) {
-            return true
-        } else if (name?.containsIgnoreCase(search_term) ?? false) {
-            return true
-        } else if (grape?.containsIgnoreCase(search_term) ?? false) {
-            return true
-        } else if (region?.containsIgnoreCase(search_term) ?? false) {
-            return true
-        } else if (brand?.containsIgnoreCase(search_term) ?? false) {
-            return true
-        } else if (type?.containsIgnoreCase(search_term) ?? false) {
-            return true
-        } else {
-            for tag in ratings_tags {
-                if (tag.comment?.containsIgnoreCase(search_term) ?? false) {
-                    return true
-                } else if (tag.location?.containsIgnoreCase(search_term) ?? false) {
-                    return true
-                }
-            }
-        }
-        return false
-    }
 }
 
 // MARK: - API action passthroughs (unchanged semantics)

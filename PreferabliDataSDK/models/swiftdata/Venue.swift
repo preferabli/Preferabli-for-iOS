@@ -37,7 +37,7 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
     public var primary_inventory_id: Int?
     public var featured_collection_id: Int?
     public var is_virtual: Bool?
-    public var name: String?
+    public var name: String
     public var phone: String?
     public var email_address: String?
     public var state: String?
@@ -54,7 +54,6 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
     @Relationship(deleteRule: .nullify) public var primary_image: Media?
     @Relationship(deleteRule: .nullify) public var logo: Media?
     @Relationship(deleteRule: .nullify) public var video: Media?
-    @Relationship(deleteRule: .nullify) public var collections: [Collection] = []
     @Relationship(deleteRule: .cascade, inverse: \DeliveryMethod.venue) public var active_delivery_methods: [DeliveryMethod] = []
     @Relationship(deleteRule: .cascade) public var images: [Media] = []
     @Relationship(deleteRule: .cascade, inverse: \VenueHour.venue) public var hours: [VenueHour] = []
@@ -75,7 +74,10 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
     @Transient internal var hasInPerson: Bool?
 
     // MARK: - Init
-    public init(id: Int) { self.id = id }
+    public init(id: Int, name: String) {
+        self.id = id
+        self.name = name
+    }
 
     public init(
         address_l1: String? = nil,
@@ -89,7 +91,7 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
         primary_inventory_id: Int? = nil,
         featured_collection_id: Int? = nil,
         is_virtual: Bool? = nil,
-        name: String? = nil,
+        name: String,
         phone: String? = nil,
         email_address: String? = nil,
         state: String? = nil,
@@ -125,7 +127,6 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
         self.url_youtube = url_youtube
         self.zip_code = zip_code
         self.notes = notes
-        self.collections = collections
         self.active_delivery_methods = active_delivery_methods
         self.images = images
         self.hours = hours

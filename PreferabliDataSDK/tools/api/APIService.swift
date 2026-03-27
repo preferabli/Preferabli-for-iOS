@@ -415,6 +415,7 @@ internal struct APIEndpoints {
     internal static let lttt = baseUrl + "lttt"
     internal static let flttt = baseUrl + "flttt"
     internal static let foods = baseUrl + "foods"
+    internal static let config = baseUrl + "config"
     internal static let collections = baseUrl + "collections"
     internal static let foodCategories = baseUrl + "food-categories"
     internal static let whereToBuy = baseUrl + "wheretobuy"

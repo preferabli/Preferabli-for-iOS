@@ -17,6 +17,13 @@ import SwiftUI
 @MainActor
 public class Preferabli {
     
+    public let updateState = ForceUpdateState()
+    private lazy var appConfigLoader = AppConfigLoader(preferabli: self, updateState: updateState)
+
+    public func refreshAppConfigIfNeeded(force: Bool = false) async {
+        await appConfigLoader.refreshIfNeeded(force: force)
+    }
+    
     @MainActor
     public final class PreferabliLoadState: ObservableObject {
         @Published public internal(set) var isProfileLoading: Bool = false
@@ -1424,8 +1431,9 @@ public class Preferabli {
 
                 // 2) Upsert returned venues + ensure they're linked to this market
                 for venueDTO in body {
-                    let venue = try Storage.upsertVenue(from: venueDTO, market: market, in: ctx)
-                    venueIds.append(venue.id)
+                    if let venue = try Storage.upsertVenue(from: venueDTO, market: market, in: ctx) {
+                        venueIds.append(venue.id)
+                    }
                 }
 
                 // 3) Source-of-truth for Market<->Venue: remove market from venues not in response
