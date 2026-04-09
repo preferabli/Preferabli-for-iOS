@@ -22,6 +22,11 @@ public extension HasIntID {
     var hasValidID: Bool { id.isValidID() }
 }
 
+public protocol HasStringID: PersistentModel {
+    var id: String { get set }
+    static func predicate(forID id: String) -> Predicate<Self>
+}
+
 public protocol HasTombstone: PersistentModel {
     var isTombstoned: Bool { get set }
 }

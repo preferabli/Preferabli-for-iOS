@@ -448,6 +448,8 @@ internal struct APIEndpoints {
     internal static func collection(id: Int) -> String { baseUrl + "collections/\(id)" }
     internal static func product(id: Int) -> String { baseUrl + "products/\(id)" }
     internal static func venue(id: Int) -> String { baseUrl + "venues/\(id)" }
+    internal static func experiences(id: Int) -> String { baseUrl + "venues/\(id)/experiences" }
+    internal static func reservations(id: Int) -> String { baseUrl + "users/\(id)/reservations" }
     internal static func user(id: Int) -> String { baseUrl + "users/\(id)" }
     internal static func favoriteVenue(id: Int, venueId : Int) -> String { baseUrl + "users/\(id)/favorite-venues/\(venueId)" }
     internal static func tags(id: Int) -> String { baseUrl + "collections/\(id)/tags" }

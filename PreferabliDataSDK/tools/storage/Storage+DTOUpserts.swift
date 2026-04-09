@@ -308,40 +308,230 @@ extension Storage {
     }
 
     @discardableResult
-    nonisolated static func upsertExperience(from dto: ExperienceDTO, venue: Venue, in ctx: ModelContext) throws -> Experience? {
+    nonisolated static func upsertExperience(
+        from dto: ExperienceDTO,
+        venue: Venue,
+        in ctx: ModelContext
+    ) throws -> Experience {
 
         try checkCancelled()
 
-        guard let name = dto.name else {
-            return nil
-        }
-        
-        let e = try fetchOrInsert(Experience.self, id: dto.id, in: ctx) {
-            Experience(id: dto.id, name: name, venue: venue)
+        let experience = try fetchOrInsert(Experience.self, id: dto.id, in: ctx) {
+            Experience(id: dto.id, name: dto.name, venue: venue)
         }
 
-        e.created_at = dto.created_at ?? e.created_at
-        e.updated_at = dto.updated_at ?? e.updated_at
-        e.name = dto.name ?? e.name
-        e.desc = dto.description ?? e.desc
-        e.primary_inventory_id = dto.primary_inventory_id ?? e.primary_inventory_id
-        e.reservations_provider = dto.reservations_provider ?? e.reservations_provider
-        e.booking_link = dto.booking_link ?? e.booking_link
-        e.discount_code = dto.discount_code ?? e.discount_code
+        try checkCancelled()
 
-        if let imgs = dto.images {
-            try checkCancelled()
+        experience.id = dto.id
+        experience.name = dto.name
 
-            let newImages = try imgs.map { img -> Media in
+        experience.booking_link = dto.booking_link ?? experience.booking_link
+        experience.booking_terms = dto.booking_terms ?? experience.booking_terms
+        experience.brand_id = dto.brand_id ?? experience.brand_id
+        experience.cuvee_experience = dto.cuvee_experience ?? experience.cuvee_experience
+        experience.experience_description = dto.description ?? experience.experience_description
+        experience.discount_code = dto.discount_code ?? experience.discount_code
+        experience.duration = dto.duration ?? experience.duration
+        experience.experience_type = dto.experience_type ?? experience.experience_type
+        experience.header_image_url = dto.header_image_url ?? experience.header_image_url
+        experience.min_availability_notice_days = dto.min_availability_notice_days ?? experience.min_availability_notice_days
+        experience.number_of_wines_poured = dto.number_of_wines_poured ?? experience.number_of_wines_poured
+        experience.order = dto.order ?? experience.order
+        experience.prepayment_required = dto.prepayment_required ?? experience.prepayment_required
+        experience.price = dto.price ?? experience.price
+        experience.qualifier = dto.qualifier ?? experience.qualifier
+        experience.qualifier_text = dto.qualifier_text ?? experience.qualifier_text
+        experience.qualifier_title = dto.qualifier_title ?? experience.qualifier_title
+        experience.reservation_api = dto.reservation_api ?? experience.reservation_api
+        experience.reservation_notice = dto.reservation_notice ?? experience.reservation_notice
+        experience.reservation_options = dto.reservation_options ?? experience.reservation_options
+        experience.reservation_type = dto.reservation_type ?? experience.reservation_type
+        experience.show_upgrade = dto.show_upgrade ?? experience.show_upgrade
+        experience.stripe_product_id = dto.stripe_product_id ?? experience.stripe_product_id
+        experience.terms_and_conditions = dto.terms_and_conditions ?? experience.terms_and_conditions
+        experience.unit_label = dto.unit_label ?? experience.unit_label
+        experience.upgrade_experience_id = dto.upgrade_experience_id ?? experience.upgrade_experience_id
+        experience.visible = dto.visible ?? experience.visible
+        experience.wt_nft_id = dto.wt_nft_id ?? experience.wt_nft_id
+        experience.reservations_provider = dto.reservations_provider ?? experience.reservations_provider
+        experience.cancellation_fee = dto.cancellation_fee ?? experience.cancellation_fee
+        experience.badge_title = dto.badge_title ?? experience.badge_title
+        experience.badge_subtitle = dto.badge_subtitle ?? experience.badge_subtitle
+        experience.badge_color = dto.badge_color ?? experience.badge_color
+        experience.badge_text_color = dto.badge_text_color ?? experience.badge_text_color
+        experience.primary_inventory_id = dto.primary_inventory_id ?? experience.primary_inventory_id
+
+        try checkCancelledBeforeRelationshipWrite()
+        if experience.venue.id != venue.id {
+            experience.venue = venue
+        }
+
+        // MARK: Benefits
+        if let benefitDTOs = dto.experience_benefits {
+            var newBenefits: [ExperienceBenefit] = []
+            newBenefits.reserveCapacity(benefitDTOs.count)
+
+            for benefitDTO in benefitDTOs {
                 try checkCancelled()
-                return try upsertMedia(from: img, in: ctx)
+                let benefit = try upsertExperienceBenefit(from: benefitDTO, experience: experience, in: ctx)
+                newBenefits.append(benefit)
             }
 
             try checkCancelledBeforeRelationshipWrite()
-            e.images = newImages
+            experience.benefits = newBenefits
         }
 
-        return e
+        // MARK: Operation Hours Normals
+        if let hourDTOs = dto.operation_hours_normals {
+            var newHours: [ExperienceOperationHoursNormal] = []
+            newHours.reserveCapacity(hourDTOs.count)
+
+            for hourDTO in hourDTOs {
+                try checkCancelled()
+                let hour = try upsertExperienceOperationHoursNormal(from: hourDTO, experience: experience, in: ctx)
+                newHours.append(hour)
+            }
+
+            try checkCancelledBeforeRelationshipWrite()
+            experience.operation_hours_normals = newHours
+        }
+
+        // MARK: Prices
+        if let priceDTOs = dto.experience_prices {
+            var newPrices: [ExperiencePrice] = []
+            newPrices.reserveCapacity(priceDTOs.count)
+
+            for priceDTO in priceDTOs {
+                try checkCancelled()
+                let price = try upsertExperiencePrice(from: priceDTO, experience: experience, in: ctx)
+                newPrices.append(price)
+            }
+
+            try checkCancelledBeforeRelationshipWrite()
+            experience.prices = newPrices
+        }
+
+        // MARK: Types
+        if let typeDTOs = dto.experience_types {
+            var newTypes: [ExperienceType] = []
+            newTypes.reserveCapacity(typeDTOs.count)
+
+            for typeDTO in typeDTOs {
+                try checkCancelled()
+                let type = try upsertExperienceType(from: typeDTO, experience: experience, in: ctx)
+                newTypes.append(type)
+            }
+
+            try checkCancelledBeforeRelationshipWrite()
+            experience.experience_types = newTypes
+        }
+
+        return experience
+    }
+
+    @discardableResult
+    nonisolated static func upsertExperienceBenefit(
+        from dto: ExperienceBenefitDTO,
+        experience: Experience,
+        in ctx: ModelContext
+    ) throws -> ExperienceBenefit {
+
+        try checkCancelled()
+
+        let benefit = try fetchOrInsert(ExperienceBenefit.self, id: dto.id, in: ctx) {
+            ExperienceBenefit(id: dto.id)
+        }
+
+        benefit.id = dto.id
+        benefit.experience_id = dto.experience_id ?? experience.id
+        benefit.benefit_description = dto.description ?? benefit.benefit_description
+        benefit.image_url = dto.image_url ?? benefit.image_url
+        benefit.subtitle = dto.subtitle ?? benefit.subtitle
+        benefit.title = dto.title ?? benefit.title
+
+        return benefit
+    }
+
+    @discardableResult
+    nonisolated static func upsertExperienceOperationHoursNormal(
+        from dto: ExperienceOperationHoursNormalDTO,
+        experience: Experience,
+        in ctx: ModelContext
+    ) throws -> ExperienceOperationHoursNormal {
+
+        try checkCancelled()
+
+        let hours = try fetchOrInsert(ExperienceOperationHoursNormal.self, id: dto.id, in: ctx) {
+            ExperienceOperationHoursNormal(id: dto.id)
+        }
+
+        hours.id = dto.id
+        hours.day_of_week = dto.day_of_week ?? hours.day_of_week
+        hours.end_times = dto.end_times ?? hours.end_times
+        hours.experience_id = dto.experience_id ?? experience.id
+        hours.increment = dto.increment ?? hours.increment
+        hours.start_times = dto.start_times ?? hours.start_times
+
+        return hours
+    }
+
+    @discardableResult
+    nonisolated static func upsertExperiencePrice(
+        from dto: ExperiencePriceDTO,
+        experience: Experience,
+        in ctx: ModelContext
+    ) throws -> ExperiencePrice {
+
+        try checkCancelled()
+
+        let price = try fetchOrInsert(ExperiencePrice.self, id: dto.id, in: ctx) {
+            ExperiencePrice(id: dto.id)
+        }
+
+        price.id = dto.id
+        price.active = dto.active ?? price.active
+        price.age_range = dto.age_range ?? price.age_range
+        price.experience_economics = dto.experience_economics ?? price.experience_economics
+        price.experience_id = dto.experience_id ?? experience.id
+        price.experience_tier = dto.experience_tier ?? price.experience_tier
+        price.guest_increment = dto.guest_increment ?? price.guest_increment
+        price.incentive_type_id = dto.incentive_type_id ?? price.incentive_type_id
+        price.list_price = dto.list_price ?? price.list_price
+        price.max_count = dto.max_count ?? price.max_count
+        price.min_count = dto.min_count ?? price.min_count
+        price.partner_ref = dto.partner_ref ?? price.partner_ref
+        price.price = dto.price ?? price.price
+        price.price_type = dto.price_type ?? price.price_type
+        price.stripe_product_price_id = dto.stripe_product_price_id ?? price.stripe_product_price_id
+
+        return price
+    }
+
+    @discardableResult
+    nonisolated static func upsertExperienceType(
+        from dto: ExperienceTypeDTO,
+        experience: Experience,
+        in ctx: ModelContext
+    ) throws -> ExperienceType {
+
+        try checkCancelled()
+
+        let type = try fetchOrInsert(ExperienceType.self, id: dto.id, in: ctx) {
+            ExperienceType(id: dto.id)
+        }
+
+        type.id = dto.id
+        type.filter_order = dto.filter_order ?? type.filter_order
+        type.filter_visible = dto.filter_visible ?? type.filter_visible
+        type.highlight = dto.highlight ?? type.highlight
+        type.home_order = dto.home_order ?? type.home_order
+        type.home_visible = dto.home_visible ?? type.home_visible
+        type.icon_url = dto.icon_url ?? type.icon_url
+        type.image_url = dto.image_url ?? type.image_url
+        type.market_id = dto.market_id ?? type.market_id
+        type.name = dto.name ?? type.name
+
+        return type
     }
 
     // MARK: Venue
@@ -938,21 +1128,204 @@ extension Storage {
 
     // MARK: - Reservation
 
+    // MARK: - Reservation
+
     @discardableResult
     nonisolated static func upsertReservation(from dto: ReservationDTO, in ctx: ModelContext) throws -> Reservation {
 
         try checkCancelled()
 
-        let r = try fetchOrInsert(Reservation.self, id: dto.id, in: ctx) { Reservation(id: dto.id) }
-        r.created_at     = dto.created_at ?? r.created_at
-        r.updated_at     = dto.updated_at ?? r.updated_at
-        r.region         = dto.region ?? r.region
-        r.date           = dto.date ?? r.date
-        r.title          = dto.title ?? r.title
-        r.timeString     = dto.timeString ?? r.timeString
-        r.imageURLString = dto.imageURLString ?? r.imageURLString
+        let r = try fetchOrInsert(Reservation.self, id: dto.id, in: ctx) {
+            Reservation(id: dto.id)
+        }
+
+        try checkCancelled()
+
+        r.id = dto.id
+
+        // MARK: - Top-level fields
+        r.customer_slug = dto.customer_slug ?? r.customer_slug
+        r.date = dto.date ?? r.date
+        r.status = dto.status ?? r.status
+        r.requested_times = dto.requested_times ?? r.requested_times
+        r.times_available = dto.times_available ?? r.times_available
+
+        // MARK: - Brand snapshot
+        if let brandDTO = dto.brand {
+            r.brand_id = brandDTO.id
+            r.brand_name = brandDTO.name ?? r.brand_name
+            r.brand_logo_image_url = brandDTO.logo_image_url ?? r.brand_logo_image_url
+        }
+
+        // MARK: - Experience snapshot
+        if let experienceDTO = dto.experience {
+            r.experience_id = experienceDTO.id
+            r.experience_name = experienceDTO.name ?? r.experience_name
+            r.experience_header_image_url = experienceDTO.header_image_url ?? r.experience_header_image_url
+        }
+
+        // MARK: - Booking snapshot
+        if let bookingDTO = dto.concierge_reservation_booking {
+            r.booking_id = bookingDTO.id ?? r.booking_id
+            r.booking_account_id = bookingDTO.account_id ?? r.booking_account_id
+            r.booking_confirmation_ref = bookingDTO.booking_confirmation_ref ?? r.booking_confirmation_ref
+            r.booking_type = bookingDTO.booking_type ?? r.booking_type
+            r.booking_brand_id = bookingDTO.brand_id ?? r.booking_brand_id
+            r.booking_confirmed_time = bookingDTO.confirmed_time ?? r.booking_confirmed_time
+            r.booking_created_on = Storage.parseDate(bookingDTO.created_on) ?? r.booking_created_on
+            r.booking_updated_on = Storage.parseDate(bookingDTO.updated_on) ?? r.booking_updated_on
+            r.booking_customer_slug = bookingDTO.customer_slug ?? r.booking_customer_slug
+            r.booking_date = bookingDTO.date ?? r.booking_date
+            r.booking_experience_id = bookingDTO.experience_id ?? r.booking_experience_id
+            r.booking_modification_link = bookingDTO.modification_link ?? r.booking_modification_link
+            r.booking_payment_method_id = bookingDTO.payment_method_id ?? r.booking_payment_method_id
+            r.booking_request_id = bookingDTO.request_id ?? r.booking_request_id
+            r.booking_specific_requests = bookingDTO.specific_requests ?? r.booking_specific_requests
+            r.booking_status = bookingDTO.status ?? r.booking_status
+
+            if dto.experience == nil, let bookingExperienceDTO = bookingDTO.experience {
+                r.experience_id = bookingExperienceDTO.id
+                r.experience_name = bookingExperienceDTO.name ?? r.experience_name
+                r.experience_header_image_url = bookingExperienceDTO.header_image_url ?? r.experience_header_image_url
+            }
+        }
+
+        // MARK: - Request guests
+        if let guestDTOs = dto.concierge_reservation_request_guests {
+            var newGuests: [ReservationRequestGuest] = []
+            newGuests.reserveCapacity(guestDTOs.count)
+
+            for (index, guestDTO) in guestDTOs.enumerated() {
+                try checkCancelled()
+                let guest = try upsertReservationRequestGuest(
+                    from: guestDTO,
+                    reservation: r,
+                    index: index,
+                    in: ctx
+                )
+                newGuests.append(guest)
+            }
+
+            try checkCancelledBeforeRelationshipWrite()
+            r.request_guests = newGuests
+        }
+
         return r
     }
+
+    @discardableResult
+    nonisolated static func upsertReservationRequestGuest(
+        from dto: ReservationRequestGuestDTO,
+        reservation: Reservation,
+        index: Int,
+        in ctx: ModelContext
+    ) throws -> ReservationRequestGuest {
+
+        try checkCancelled()
+
+        let key = ReservationRequestGuest.makeKey(
+            reservationID: reservation.id,
+            experiencePriceID: dto.experience_price_id,
+            index: index
+        )
+
+        let guest: ReservationRequestGuest
+        if let existing = try Storage.fetchByKey(ReservationRequestGuest.self, key: key, in: ctx) {
+            guest = existing
+        } else {
+            let created = ReservationRequestGuest(key: key)
+            ctx.insert(created)
+            guest = created
+        }
+
+        guest.key = key
+        guest.reservation_id = reservation.id
+        guest.concierge_reservation_request = dto.concierge_reservation_request ?? guest.concierge_reservation_request
+        guest.experience_price_id = dto.experience_price_id ?? guest.experience_price_id
+        guest.quantity = dto.quantity ?? guest.quantity
+
+        if let priceDTO = dto.experience_price {
+            guest.price_active = priceDTO.active ?? guest.price_active
+            guest.price_age_range = priceDTO.age_range ?? guest.price_age_range
+            guest.price_experience_economics = priceDTO.experience_economics ?? guest.price_experience_economics
+            guest.price_experience_id = priceDTO.experience_id ?? guest.price_experience_id
+            guest.price_experience_tier = priceDTO.experience_tier ?? guest.price_experience_tier
+            guest.price_guest_increment = priceDTO.guest_increment ?? guest.price_guest_increment
+            guest.price_incentive_type_id = priceDTO.incentive_type_id ?? guest.price_incentive_type_id
+            guest.price_list_price = priceDTO.list_price ?? guest.price_list_price
+            guest.price_max_count = priceDTO.max_count ?? guest.price_max_count
+            guest.price_min_count = priceDTO.min_count ?? guest.price_min_count
+            guest.price_partner_ref = priceDTO.partner_ref ?? guest.price_partner_ref
+            guest.price_price = priceDTO.price ?? guest.price_price
+            guest.price_price_type = priceDTO.price_type ?? guest.price_price_type
+            guest.price_stripe_product_price_id = priceDTO.stripe_product_price_id ?? guest.price_stripe_product_price_id
+        }
+
+        return guest
+    }
+    
+
+        // MARK: - BalloonReservation
+
+        @discardableResult
+        nonisolated static func upsertBalloonReservation(
+            from dto: BalloonReservationDTO,
+            in ctx: ModelContext
+        ) throws -> BalloonReservation {
+
+            try checkCancelled()
+
+            let reservation = try fetchOrInsert(BalloonReservation.self, id: dto.id, in: ctx) {
+                BalloonReservation(id: dto.id)
+            }
+
+            try checkCancelled()
+
+            reservation.id = dto.id
+            reservation.customer_email = dto.customer_email ?? reservation.customer_email
+            reservation.customer_name = dto.customer_name ?? reservation.customer_name
+            reservation.customer_phone = dto.customer_phone ?? reservation.customer_phone
+
+            if let itemDTOs = dto.items {
+                var newItems: [BalloonReservationItem] = []
+                newItems.reserveCapacity(itemDTOs.count)
+
+                for itemDTO in itemDTOs {
+                    try checkCancelled()
+                    let item = try upsertBalloonReservationItem(from: itemDTO, in: ctx)
+                    newItems.append(item)
+                }
+
+                try checkCancelledBeforeRelationshipWrite()
+                reservation.items = newItems
+            }
+
+            return reservation
+        }
+
+        @discardableResult
+        nonisolated static func upsertBalloonReservationItem(
+            from dto: BalloonReservationItemDTO,
+            in ctx: ModelContext
+        ) throws -> BalloonReservationItem {
+
+            try checkCancelled()
+
+            let item = BalloonReservationItem()
+            item.meeting_point = dto.meeting_point
+            item.meeting_point_coordinates = dto.meeting_point_coordinates
+            item.qty = dto.qty
+            item.sku = dto.sku
+
+            if let start = dto.start_date {
+                item.start_date = Date(timeIntervalSince1970: TimeInterval(start))
+            } else {
+                item.start_date = nil
+            }
+
+            ctx.insert(item)
+            return item
+        }
 
     // MARK: - Style
 

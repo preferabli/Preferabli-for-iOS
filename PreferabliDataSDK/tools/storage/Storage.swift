@@ -325,6 +325,15 @@ private enum ModelRegistry {
         }
         
         // try to order these children -> parents
+        
+        add(ExperienceType.self)
+        add(ExperiencePrice.self)
+        add(ExperienceOperationHoursNormal.self)
+        add(ExperienceBenefit.self)
+        add(Experience.self)
+        
+        add(BalloonReservationItem.self)
+        add(BalloonReservation.self)
 
         add(Location.self)
         add(Media.self)
@@ -359,6 +368,7 @@ private enum ModelRegistry {
         add(DeliveryMethod.self)
         add(Food.self)
         add(FoodCategory.self)
+        add(ReservationRequestGuest.self)
         add(Reservation.self)
         
         add(ProductProfile.self)
@@ -465,6 +475,37 @@ extension Storage {
         return obj
     }
     
+    @inline(__always)
+    nonisolated static public func fetchById<T: HasStringID>(
+        _ type: T.Type,
+        id: String?,
+        in ctx: ModelContext
+    ) throws -> T? {
+        guard let id else { return nil }
+        var fd = FetchDescriptor<T>(predicate: T.predicate(forID: id))
+        fd.fetchLimit = 1
+        return try ctx.fetch(fd).first
+    }
+
+    nonisolated static func fetchOrInsert<T: HasStringID>(
+        _ type: T.Type,
+        id: String,
+        in ctx: ModelContext,
+        makeNew: () -> T
+    ) throws -> T {
+        var fd = FetchDescriptor<T>(predicate: T.predicate(forID: id))
+        fd.fetchLimit = 1
+
+        if let existing = try ctx.fetch(fd).first {
+            return existing
+        }
+
+        let obj = makeNew()
+        obj.id = id
+        ctx.insert(obj)
+        return obj
+    }
+    
     nonisolated static func fetchByKey<T: PersistentModel>(
         _ type: T.Type,
         key: String,
@@ -490,6 +531,18 @@ extension Storage {
         in ctx: ModelContext
     ) throws -> ProductRecipe? {
         var fd = FetchDescriptor<ProductRecipe>(predicate: ProductRecipe.predicate(forKey: key))
+        fd.fetchLimit = 1
+        return try ctx.fetch(fd).first
+    }
+    
+    nonisolated static func fetchByKey(
+        _ type: ReservationRequestGuest.Type,
+        key: String,
+        in ctx: ModelContext
+    ) throws -> ReservationRequestGuest? {
+        var fd = FetchDescriptor<ReservationRequestGuest>(
+            predicate: ReservationRequestGuest.predicate(forKey: key)
+        )
         fd.fetchLimit = 1
         return try ctx.fetch(fd).first
     }
