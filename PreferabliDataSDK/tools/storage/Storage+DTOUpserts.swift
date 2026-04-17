@@ -382,7 +382,7 @@ extension Storage {
         }
 
         // MARK: Operation Hours Normals
-        if let hourDTOs = dto.operation_hours_normals {
+        if let hourDTOs = dto.operation_hours_normal {
             var newHours: [ExperienceOperationHoursNormal] = []
             newHours.reserveCapacity(hourDTOs.count)
 
@@ -529,6 +529,7 @@ extension Storage {
         type.icon_url = dto.icon_url ?? type.icon_url
         type.image_url = dto.image_url ?? type.image_url
         type.market_id = dto.market_id ?? type.market_id
+        type.preferabli_market_trait_id = dto.preferabli_market_trait_id ?? type.preferabli_market_trait_id
         type.name = dto.name ?? type.name
 
         return type
@@ -619,10 +620,10 @@ extension Storage {
         // Source-of-truth for this venue within the provided market scope:
         // - nil: endpoint didn't include market_traits -> leave as-is
         // - [] : explicitly none -> clear join rows for this venue+market scope
-        if let venueTraitDTOs = dto.market_traits {
+        if let venueTraitDTOs = dto.market_trait_associations {
 
             let resolved: [(order: Int?, trait: MarketTraitDTO)] = venueTraitDTOs.compactMap { row in
-                guard let t = row.trait else { return nil }
+                guard let t = row.market_trait else { return nil }
                 return (row.order, t)
             }
 
@@ -1145,7 +1146,7 @@ extension Storage {
 
         // MARK: - Top-level fields
         r.customer_slug = dto.customer_slug ?? r.customer_slug
-        r.date = dto.date ?? r.date
+        r.date = Storage.normalizeAPIDateString(dto.date) ?? r.date
         r.status = dto.status ?? r.status
         r.requested_times = dto.requested_times ?? r.requested_times
         r.times_available = dto.times_available ?? r.times_available
@@ -1153,6 +1154,7 @@ extension Storage {
         // MARK: - Brand snapshot
         if let brandDTO = dto.brand {
             r.brand_id = brandDTO.id
+            r.venue_id = brandDTO.venue_id
             r.brand_name = brandDTO.name ?? r.brand_name
             r.brand_logo_image_url = brandDTO.logo_image_url ?? r.brand_logo_image_url
         }
@@ -1171,11 +1173,12 @@ extension Storage {
             r.booking_confirmation_ref = bookingDTO.booking_confirmation_ref ?? r.booking_confirmation_ref
             r.booking_type = bookingDTO.booking_type ?? r.booking_type
             r.booking_brand_id = bookingDTO.brand_id ?? r.booking_brand_id
+            r.booking_venue_id = bookingDTO.venue_id ?? r.booking_venue_id
             r.booking_confirmed_time = bookingDTO.confirmed_time ?? r.booking_confirmed_time
             r.booking_created_on = Storage.parseDate(bookingDTO.created_on) ?? r.booking_created_on
             r.booking_updated_on = Storage.parseDate(bookingDTO.updated_on) ?? r.booking_updated_on
             r.booking_customer_slug = bookingDTO.customer_slug ?? r.booking_customer_slug
-            r.booking_date = bookingDTO.date ?? r.booking_date
+            r.booking_date = Storage.normalizeAPIDateString(bookingDTO.date) ?? r.booking_date
             r.booking_experience_id = bookingDTO.experience_id ?? r.booking_experience_id
             r.booking_modification_link = bookingDTO.modification_link ?? r.booking_modification_link
             r.booking_payment_method_id = bookingDTO.payment_method_id ?? r.booking_payment_method_id
@@ -1314,7 +1317,7 @@ extension Storage {
             let item = BalloonReservationItem()
             item.meeting_point = dto.meeting_point
             item.meeting_point_coordinates = dto.meeting_point_coordinates
-            item.qty = dto.qty
+            item.qty = Int(dto.qty ?? "1")
             item.sku = dto.sku
 
             if let start = dto.start_date {

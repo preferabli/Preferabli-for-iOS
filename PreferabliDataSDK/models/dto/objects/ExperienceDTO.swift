@@ -12,6 +12,7 @@ public struct ExperienceDTO: Decodable, Sendable {
     public let booking_link: String?
     public let booking_terms: String?
     public let brand_id: Int?
+    public let preferabli_venue_id: Int?
     public let cuvee_experience: Bool?
     public let description: String?
     public let discount_code: String?
@@ -47,7 +48,7 @@ public struct ExperienceDTO: Decodable, Sendable {
     public let reservations_provider: String?
 
     public let experience_benefits: [ExperienceBenefitDTO]?
-    public let operation_hours_normals: [ExperienceOperationHoursNormalDTO]?
+    public let operation_hours_normal: [ExperienceOperationHoursNormalDTO]?
     public let experience_prices: [ExperiencePriceDTO]?
     public let experience_types: [ExperienceTypeDTO]?
 
@@ -56,6 +57,7 @@ public struct ExperienceDTO: Decodable, Sendable {
         case booking_link
         case booking_terms
         case brand_id
+        case preferabli_venue_id
         case cuvee_experience
         case description
         case discount_code
@@ -90,10 +92,10 @@ public struct ExperienceDTO: Decodable, Sendable {
         case badge_color
         case badge_text_color
         
-        case experience_benefits = "ExperienceBenefits"
-        case operation_hours_normals = "ExperienceOperationHoursNormals"
-        case experience_prices = "ExperiencePrices"
-        case experience_types = "Experience_types"
+        case experience_benefits = "benefits"
+        case operation_hours_normal
+        case experience_prices = "prices"
+        case experience_types
     }
 }
 
@@ -170,5 +172,6 @@ public struct ExperienceTypeDTO: Decodable, Sendable {
     public let icon_url: String?
     public let image_url: String?
     public let market_id: Int?
+    public let preferabli_market_trait_id: Int?
     public let name: String?
 }

@@ -1,5 +1,5 @@
 //
-//  SearchResponseDTO.swift
+//  ProductSearchResponseDTO.swift
 //  Preferabli
 //
 //  Created by Nicholas Bortolussi on 11/17/25.
@@ -7,6 +7,6 @@
 
 import Foundation
 
-struct SearchResponseDTO: Decodable {
+struct ProductSearchResponseDTO: Decodable {
     let products: [ProductDTO]
 }

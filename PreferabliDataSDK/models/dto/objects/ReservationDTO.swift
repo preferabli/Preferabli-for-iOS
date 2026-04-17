@@ -37,8 +37,16 @@ public struct ReservationDTO: Decodable, Sendable {
 
 public struct ReservationBrandDTO: Decodable, Sendable {
     public let id: Int
+    public let venue_id: Int?
     public let logo_image_url: String?
     public let name: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case venue_id = "preferabli_venue_id"
+        case logo_image_url
+        case name
+    }
 }
 
 public struct ReservationExperienceDTO: Decodable, Sendable {
@@ -52,6 +60,7 @@ public struct ReservationBookingDTO: Decodable, Sendable {
     public let booking_confirmation_ref: String?
     public let booking_type: String?
     public let brand_id: Int?
+    public let venue_id: Int?
     public let confirmed_time: String?
     public let created_on: String?
     public let updated_on: String?
@@ -96,21 +105,4 @@ public struct ReservationExperiencePriceDTO: Decodable, Sendable {
     public let price: Double?
     public let price_type: String?
     public let stripe_product_price_id: String?
-
-    enum CodingKeys: String, CodingKey {
-        case active
-        case age_range
-        case experience_economics = "experience_ec"
-        case experience_id
-        case experience_tier = "experience_ti"
-        case guest_increment = "guest_increme"
-        case incentive_type_id = "incentive_typ"
-        case list_price
-        case max_count
-        case min_count
-        case partner_ref
-        case price
-        case price_type
-        case stripe_product_price_id = "stripe_produc"
-    }
 }

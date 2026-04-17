@@ -407,6 +407,8 @@ public struct StorageFacade {
         /// Products whose `id` is in the given list.
         public func products(withIDs ids: [Int]) -> Predicate<Product> { ids.isEmpty ? #Predicate { _ in false } : #Predicate { p in ids.contains(p.id) } }
         
+        public func experiences(withIDs ids: [Int]) -> Predicate<Experience> { ids.isEmpty ? #Predicate { _ in false } : #Predicate { p in ids.contains(p.id) } }
+        
         public func venues(withIDs ids: [Int]) -> Predicate<Venue> { ids.isEmpty ? #Predicate { _ in false } : #Predicate { p in ids.contains(p.id) } }
         
         public func tags(for spec: CollectionSpec) -> (predicate: Predicate<Tag>, sort: [SortDescriptor<Tag>]) {
@@ -551,6 +553,25 @@ extension Storage {
 
 // Coercers / parsing
 extension Storage {
+    
+    // this is for Fabricio's Tastefuli calls
+    nonisolated static func normalizeAPIDateString(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        guard let date = iso.date(from: raw) else { return raw }
+
+        let out = DateFormatter()
+        out.calendar = Calendar(identifier: .gregorian)
+        out.locale = Locale(identifier: "en_US_POSIX")
+        out.timeZone = TimeZone(secondsFromGMT: 0)
+        out.dateFormat = "yyyy-MM-dd"
+
+        return out.string(from: date)
+    }
+    
     @inline(__always) nonisolated static internal func parseDate(_ any: Any?) -> Date? {
         guard let any else { return nil }
         if let s = any as? String {

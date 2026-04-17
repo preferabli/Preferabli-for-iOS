@@ -109,7 +109,7 @@ public final class Product: HasIntID, HasTimestamps, HasImage {
         guard let hash = product_hash else {
             return nil
         }
-        return "https://www.tastefuli.com/product/\(id)"
+        return "https://www.tastefuli.com/links/products/\(id)"
     }
 
     /// All of the product tags of type ``TagType/PURCHASE`` for the current user.

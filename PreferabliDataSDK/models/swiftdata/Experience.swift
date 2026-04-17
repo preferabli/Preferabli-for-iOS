@@ -167,6 +167,7 @@ public final class ExperienceType: HasIntID {
     public var icon_url: String?
     public var image_url: String?
     public var market_id: Int?
+    public var preferabli_market_trait_id: Int?
     public var name: String?
 
     public init(id: Int) {

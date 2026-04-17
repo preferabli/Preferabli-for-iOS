@@ -411,23 +411,6 @@ public class Preferabli {
         }
     }
     
-    public func logout() async throws {
-        try await canWeContinue(needsToBeLoggedIn: true)
-        
-        try await PreferabliTools.withLogout {
-            // ✅ first thing
-            await Storage.beginLogoutCancellation()
-            defer { Task { await Storage.endLogoutCancellation() } }
-            
-            // then cancel other inflight
-            await PreferabliTools.cancelAllInflight()
-            
-            // then wipe
-            try await clearAllData()
-            await sessionBootstrapper.reset(preferabli: self)
-        }
-    }
-    
     public func bootstrapAnonymousIfNeeded() async throws {
         try await createAnonymousSession(create_anonymous_user: isInternal())
     }
@@ -540,6 +523,324 @@ public class Preferabli {
         }
     }
     
+    public func cancelReservation(
+        reservation_id: Int
+    ) async throws {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            Analytics.track( ["event" : "cancel_reservation"])
+
+            let response = try await api.getAlamo().delete(APIEndpoints.externalReservation(id: reservation_id) + "?cancellation_reason=Customer%20requested%20cancellation")
+            
+            let body: ReservationsResponseDTO = try await api.getAlamo().get(APIEndpoints.reservations)
+            
+            try await Storage.withBackgroundContext { ctx in
+                for dto in body.data {
+                    try Storage.upsertReservation(from: dto, in: ctx)
+                }
+                
+                try ctx.save()
+            }
+                        
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func alternativeTime(
+        reservation_id: Int,
+        time: String
+    ) async throws {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            Analytics.track( ["event" : "alternative_time"])
+            
+            var dictionary: SParams = [
+                "time": time
+            ]
+
+            let response : ReservationResponseDTO = try await api.getAlamo().put(APIEndpoints.alternativeTimes(id: reservation_id), sjson: dictionary)
+            
+            let body: ReservationsResponseDTO = try await api.getAlamo().get(APIEndpoints.reservations)
+            
+            try await Storage.withBackgroundContext { ctx in
+                for dto in body.data {
+                    try Storage.upsertReservation(from: dto, in: ctx)
+                }
+                
+                try ctx.save()
+            }
+                        
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func updateReservation(
+        external : Bool,
+        reservation_id: Int,
+        date : String?,
+        time : String?,
+        guest_count : Int?,
+        specific_requests : String?
+    ) async throws {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            Analytics.track( ["event" : "update_reservation"])
+            
+            var dictionary = SParams()
+
+            // Optional fields
+            
+            if let date {
+                dictionary["date"] = date
+            }
+            
+            if let time {
+                dictionary["time"] = time
+            }
+            
+            if let guest_count {
+                dictionary["guest_count"] = guest_count
+            }
+            
+            if let specific_requests {
+                dictionary["specific_requests"] = specific_requests
+            }
+
+            let response : ReservationResponseDTO
+            if (external) {
+                response = try await api.getAlamo().post(APIEndpoints.externalReservation(id: reservation_id), sjson: dictionary)
+            } else {
+                response = try await api.getAlamo().post(APIEndpoints.externalReservation(id: reservation_id), sjson: dictionary)
+            }
+            
+            let body: ReservationsResponseDTO = try await api.getAlamo().get(APIEndpoints.reservations)
+            
+            try await Storage.withBackgroundContext { ctx in
+                for dto in body.data {
+                    try Storage.upsertReservation(from: dto, in: ctx)
+                }
+                
+                try ctx.save()
+            }
+                        
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func createInternalReservation(
+        experience_id: Int,
+        hubspot_deal_id: String,
+        date: String,
+        requested_times: [String],
+        guests: [[String: Any]],
+        reservation_source: String = "website"
+    ) async throws -> Int {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            Analytics.track(["event": "create_internal_reservation"])
+            
+            var guestParams = [SParams]()
+            for guest in guests {
+                var guestParam: SParams = [
+                    "price_id": guest["price_id"] as! Int,
+                    "quantity": guest["quantity"] as! Int
+                ]
+            }
+
+            let dictionary: SParams = [
+                "date": date,
+                "requested_times": requested_times,
+                "guests": guestParams,
+                "reservation_source": reservation_source,
+                "hubspot_deal_id": hubspot_deal_id
+            ]
+
+            let response: InternalReservationResponseDTO = try await api
+                .getAlamo()
+                .post(APIEndpoints.internalReservations(id: experience_id), sjson: dictionary)
+
+            let body: ReservationsResponseDTO = try await api
+                .getAlamo()
+                .get(APIEndpoints.reservations)
+
+            try await Storage.withBackgroundContext { ctx in
+                for dto in body.data {
+                    try Storage.upsertReservation(from: dto, in: ctx)
+                }
+                try ctx.save()
+            }
+
+            return response.id
+
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func createExternalReservation(
+        experience_id : Int,
+        hubspot_deal_id : String,
+        date : String,
+        time : String,
+        guest_count : Int,
+        modification_link : String?,
+        booking_confirmation_ref : String?,
+        unit_price : Int?,
+        total_price : Int?,
+        specific_requests : String?,
+        cancellation_policy : String?,
+        confirmation_message : String?
+    ) async throws -> Int {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            Analytics.track( ["event" : "create_reservation"])
+            
+            var dictionary: SParams = [
+                "reservation_source": "v3_ios_app",
+                "experience_id": experience_id,
+                "hubspot_deal_id": hubspot_deal_id,
+                "date": date,
+                "time": time,
+                "guest_count": guest_count
+            ]
+
+            // Optional fields
+            if let modification_link {
+                dictionary["modification_link"] = modification_link
+            }
+
+            if let booking_confirmation_ref {
+                dictionary["booking_confirmation_ref"] = booking_confirmation_ref
+            }
+
+            if let unit_price {
+                dictionary["unit_price"] = unit_price
+            }
+
+            if let total_price {
+                dictionary["total_price"] = total_price
+            }
+
+            if let specific_requests {
+                dictionary["specific_requests"] = specific_requests
+            }
+
+            if let cancellation_policy {
+                dictionary["cancellation_policy"] = cancellation_policy
+            }
+
+            if let confirmation_message {
+                dictionary["confirmation_message"] = confirmation_message
+            }
+
+            let response : ReservationResponseDTO = try await api.getAlamo().post(APIEndpoints.externalReservations(id: experience_id), sjson: dictionary)
+            
+            let body: ReservationsResponseDTO = try await api.getAlamo().get(APIEndpoints.reservations)
+            
+            try await Storage.withBackgroundContext { ctx in
+                for dto in body.data {
+                    try Storage.upsertReservation(from: dto, in: ctx)
+                }
+                
+                try ctx.save()
+            }
+            
+            return response.reservation_request_id
+                        
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func createHubspotDeal(
+        experience_id : Int
+    ) async throws -> String {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track( ["event" : "create_hubspot_deal"])
+            
+            var dictionary: SParams = ["experience_id" : experience_id]
+
+            let response : HubspotResponseDTO = try await api.getAlamo().post(APIEndpoints.hubspotDeal, sjson: dictionary)
+            
+            return response.hubspot_deal_id
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func createStripePaymentIntent(
+        first_name: String,
+        last_name: String,
+        email: String
+    ) async throws -> StripeResponseDTO {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "create_stripe_payment_intent"])
+
+            let dictionary: SParams = [
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": email
+            ]
+
+            let response: StripeResponseDTO = try await api
+                .getAlamo()
+                .post(APIEndpoints.stripePaymentIntent, sjson: dictionary)
+
+            return response
+
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func searchVenues(
+        query : String,
+        market_trait_ids : [Int]? = nil,
+    ) async throws -> [Int] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track( ["event" : "search_venues"])
+            
+            var dictionary: SParams = ["search" : query , "search_types" : ["venues"], "has_market_id" : true]
+            if let market_trait_ids = market_trait_ids {
+                dictionary["market_trait_ids"] = market_trait_ids
+            }
+            
+            let searchResponse : VenueSearchResponseDTO = try await api.getAlamo().get(APIEndpoints.search, sparams: dictionary)
+            
+            let venueIds = try await Storage.withBackgroundContext { ctx in
+                var venuesToReturn = [Int]()
+                
+                for vd in searchResponse.venues {
+                    if let v = try Storage.upsertVenue(from: vd, in: ctx) {
+                        venuesToReturn.append(v.id)
+                    }
+                }
+                try ctx.save()
+                return venuesToReturn
+            }
+            
+            return venueIds
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
     
     /// Search for a ``Product``.
     /// - Parameters:
@@ -579,7 +880,7 @@ public class Preferabli {
                 if !types.isEmpty { dictionary["product_types"] = types }
             }
             
-            var searchResponse : SearchResponseDTO = try await api.getAlamo().get(APIEndpoints.search, sparams: dictionary)
+            var searchResponse : ProductSearchResponseDTO = try await api.getAlamo().get(APIEndpoints.search, sparams: dictionary)
             
             // Upsert Products
             let productIds = try Storage.withContext { ctx in
@@ -594,6 +895,73 @@ public class Preferabli {
             }
             
             return productIds
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func searchExperiences(
+        query : String
+    ) async throws -> [Int] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track( ["event" : "search_experiences"])
+            
+            let searchResponse : ExperiencesResponseDTO = try await api.getAlamo().get(APIEndpoints.searchExperiences(query: query))
+            
+            let needsVenues = try await Storage.withBackgroundContext { ctx in
+                var needsVenues = [Int]()
+                
+                for expDTO in searchResponse.data {
+                    if let venueId = expDTO.preferabli_venue_id {
+                        guard let venue = try Storage.fetchById(Venue.self, id: venueId, in: ctx) else {
+                            needsVenues.append(venueId)
+                            continue
+                        }
+                    } else {
+                        continue
+                    }
+                }
+                
+                return needsVenues
+            }
+            
+            var venueResponses = [VenueDTO]()
+            for venueId in needsVenues {
+                let body: VenueDTO = try await api.getAlamo().get(APIEndpoints.venue(id: venueId))
+                venueResponses.append(body)
+            }
+            
+            let venueResponsesFinal = venueResponses
+            let experienceIds = try await Storage.withBackgroundContext { ctx in
+                var experienceIds = [Int]()
+
+                for venueResponse in venueResponsesFinal {
+                    try Storage.upsertVenue(from: venueResponse, in: ctx)
+
+                }
+                try ctx.save()
+
+                for expDTO in searchResponse.data {
+                    if let venueId = expDTO.preferabli_venue_id {
+                        guard let venue = try Storage.fetchById(Venue.self, id: venueId, in: ctx) else {
+                            continue
+                        }
+                        
+                        let experience = try Storage.upsertExperience(from: expDTO, venue: venue, in: ctx)
+                        experienceIds.append(experience.id)
+
+                    } else {
+                        continue
+                    }
+                }
+                
+                return experienceIds
+            }
+            
+            return experienceIds
             
         } catch {
             handleError(error: error)
@@ -1415,7 +1783,7 @@ public class Preferabli {
             
             Analytics.track(["event": "get_venues"])
             
-            let params: SParams = ["limit": 10000, "offset": 0]
+            let params: SParams = ["limit": 9999, "offset": 0]
             let body: [VenueDTO] = try await api.getAlamo().get(APIEndpoints.venues(id: market_id), sparams: params)
             
             let venueIds: [Int] = try await Storage.withBackgroundContext { ctx in
@@ -1423,7 +1791,7 @@ public class Preferabli {
                 venueIds.reserveCapacity(body.count)
                 
                 guard let market = try Storage.fetchById(Market.self, id: market_id, in: ctx) else {
-                    return []
+                    throw PreferabliException.init(type: .BadSwiftData, message: "Could not get venues due to lack of a market. This should never happen.", code: 659)
                 }
                 
                 // 1) Keep set from API
@@ -1444,6 +1812,41 @@ public class Preferabli {
             }
             
             return venueIds
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func getExperiences(market_id: Int) async throws -> [Int] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            
+            Analytics.track(["event": "get_experiences"])
+            
+            let params: SParams = ["limit": 9999, "offset": 0]
+            let body: ExperiencesResponseDTO = try await api.getAlamo().get(APIEndpoints.experiences(marketId: market_id), sparams: params)
+            
+            let experienceIds: [Int] = try await Storage.withBackgroundContext { ctx in
+                var experienceIds: [Int] = []
+                experienceIds.reserveCapacity(body.data.count)
+                
+                for experienceDTO in body.data {
+                    
+                    guard let preferabli_venue_id =  experienceDTO.preferabli_venue_id, let venue = try Storage.fetchById(Venue.self, id: preferabli_venue_id, in: ctx) else {
+                        continue
+                    }
+                    
+                    let experience = try Storage.upsertExperience(from: experienceDTO, venue: venue, in: ctx)
+                    experienceIds.append(experience.id)
+                }
+
+                try ctx.save()
+                return experienceIds
+            }
+            
+            return experienceIds
             
         } catch {
             handleError(error: error)
@@ -1673,10 +2076,70 @@ public class Preferabli {
                     try Storage.upsertProduct(from: body, in: ctx)
                     
                     try ctx.save()
+                    
+                    Storage.getKeyStore().set(Date(), forKey: "lastCalledProduct\(product_id)")
                 }
             }
             
             return product_id
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func getExperience(force_refresh : Bool = false, venue_id : Int, experience_id : Int) async throws -> Int
+    {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            
+            Analytics.track(["event": "experience_refresh"])
+            
+            var needsRefresh = true
+            var needsVenue = true
+            
+                try Storage.withContext { ctx in
+                    if let venue = try Storage.fetchById(Venue.self, id: venue_id, in: ctx) {
+                        needsVenue = false
+                    }
+                    if let experience = try Storage.fetchById(Experience.self, id: experience_id, in: ctx) {
+                        needsRefresh = PreferabliTools.hasMinutesPassed(minutes: 60, startDate: Storage.getKeyStore().object(forKey: "lastCalledExperiences\(venue_id)") as? Date) || force_refresh
+                    }
+                }
+            
+            if needsVenue {
+                let body: VenueDTO = try await api.getAlamo().get(APIEndpoints.venue(id: venue_id))
+                
+                try Storage.withContext { ctx in
+                    try Storage.upsertVenue(from: body, in: ctx)
+                    
+                    try ctx.save()
+                }
+            }
+            
+            if needsRefresh {
+                
+                let params: SParams = ["limit": 9999, "offset": 0]
+                let body: ExperiencesResponseDTO = try await api.getAlamo().get(APIEndpoints.experiences(id: venue_id), sparams: params)
+                
+                try await Storage.withBackgroundContext { ctx in
+                    for experienceDTO in body.data {
+                        
+                        guard let preferabli_venue_id =  experienceDTO.preferabli_venue_id, let venue = try Storage.fetchById(Venue.self, id: preferabli_venue_id, in: ctx) else {
+                            continue
+                        }
+                        
+                        try Storage.upsertExperience(from: experienceDTO, venue: venue, in: ctx)
+                    }
+
+                    try ctx.save()
+                    
+                    Storage.getKeyStore().set(Date(), forKey: "lastCalledExperiences\(venue_id)")
+                }
+            }
+            
+            return experience_id
             
         } catch {
             handleError(error: error)
@@ -1708,6 +2171,8 @@ public class Preferabli {
                     try Storage.upsertVenue(from: body, in: ctx)
                     
                     try ctx.save()
+                    
+                    Storage.getKeyStore().set(Date(), forKey: "lastCalledVenue\(venue_id)")
                 }
             }
             
@@ -1728,17 +2193,11 @@ public class Preferabli {
             var needsRefresh = true
             
             
-            let body: [ReservationDTO]
-            
-#if DEBUG
-            body = try Self.decodeStubReservationsJSON()
-#else
-            body = try await api.getAlamo().get(APIEndpoints.reservations(id: PreferabliTools.getPreferabliUserId()))
-#endif
+            let body: ReservationsResponseDTO = try await api.getAlamo().get(APIEndpoints.reservations)
             
             let reservationIds = try Storage.withContext { ctx in
                 var ids = [Int]()
-                for dto in body {
+                for dto in body.data {
                     let reservation = try Storage.upsertReservation(from: dto, in: ctx)
                     ids.append(reservation.id)
                 }
@@ -1777,26 +2236,26 @@ public class Preferabli {
             
             var experienceIds = [Int]()
             if needsRefresh {
-                let body: [ExperienceDTO]
                 
-#if DEBUG
-                body = try Self.decodeStubExperiencesJSON()
-#else
-                body = try await api.getAlamo().get(APIEndpoints.experiences(id: venue_id))
-#endif
+                let params: SParams = ["limit": 9999, "offset": 0]
+                let body: ExperiencesResponseDTO = try await api.getAlamo().get(APIEndpoints.experiences(id: venue_id), sparams: params)
                 
-                experienceIds = try Storage.withContext { ctx in
-                    var ids = [Int]()
-                    if let venue = try Storage.fetchById(Venue.self, id: venue_id, in: ctx) {
-                        for dto in body {
-                            try Storage.upsertExperience(from: dto, venue: venue, in: ctx)
+                experienceIds = try await Storage.withBackgroundContext { ctx in
+                    var experienceIds: [Int] = []
+                    experienceIds.reserveCapacity(body.data.count)
+                    
+                    for experienceDTO in body.data {
+                        
+                        guard let preferabli_venue_id =  experienceDTO.preferabli_venue_id, let venue = try Storage.fetchById(Venue.self, id: preferabli_venue_id, in: ctx) else {
+                            continue
                         }
                         
-                        Storage.getKeyStore().set(Date(), forKey: "lastCalledVenueExperiences\(venue_id)")
-                        try ctx.save()
+                        let experience = try Storage.upsertExperience(from: experienceDTO, venue: venue, in: ctx)
+                        experienceIds.append(experience.id)
                     }
-                    
-                    return ids
+
+                    try ctx.save()
+                    return experienceIds
                 }
             }
             
@@ -1813,16 +2272,9 @@ public class Preferabli {
             try await canWeContinue(needsToBeLoggedIn: false)
             
             Analytics.track(["event": "add_balloon_ticket"])
-            
-            if (booking_code != "E4TDERV9") {
-                throw PreferabliException.init(error: .init(code: 12378, message: "Temp fail!! Only one code works."))
-            }
 
-#if DEBUG
-            let body: BalloonResponseDTO = try Self.decodeStubBallooonJSON()
-#else
-            let body = try await api.getAlamo().get(APIEndpoints.experiences(id: venue_id))
-#endif
+            let params: SParams = ["search": booking_code]
+            let body : BalloonResponseDTO = try await api.getAlamo().get(APIEndpoints.balloonBooking, sparams: params)
             
             let reservationId = try Storage.withContext { ctx in
                 let reservation = try Storage.upsertBalloonReservation(from: body.data.booking, in: ctx)
@@ -1831,41 +2283,6 @@ public class Preferabli {
             }
             
             return reservationId
-            
-        } catch {
-            handleError(error: error)
-            throw error
-        }
-    }
-    
-    public func getExperience(force_refresh : Bool = false, experience_id : Int) async throws -> Int
-    {
-        do {
-            try await canWeContinue(needsToBeLoggedIn: false)
-            
-            Analytics.track(["event": "experience_refresh"])
-            //
-            //            var needsRefresh = true
-            //
-            //            if (!force_refresh) {
-            //                try Storage.withContext { ctx in
-            //                    if let venue = try Storage.fetchById(Venue.self, id: venue_id, in: ctx) {
-            //                        needsRefresh = PreferabliTools.hasMinutesPassed(minutes: 60, startDate: Storage.getKeyStore().object(forKey: "lastCalledVenue\(venue_id)") as? Date)
-            //                    }
-            //                }
-            //            }
-            //
-            //            if needsRefresh {
-            //                let body: VenueDTO = try await api.getAlamo().get(APIEndpoints.product(id: venue_id))
-            //
-            //                try Storage.withContext { ctx in
-            //                    try Storage.upsertVenue(from: body, in: ctx)
-            //
-            //                    try ctx.save()
-            //                }
-            //            }
-            //
-            return experience_id
             
         } catch {
             handleError(error: error)
@@ -2873,1324 +3290,78 @@ public class Preferabli {
     }
 }
 
+extension Preferabli {
 
-private extension Preferabli {
-    static func decodeStubExperiencesJSON() throws -> [ExperienceDTO] {
-        let json = """
-        [
-          {
-            "Affiliates": [],
-            "ExperienceBenefits": [
-              {
-                "description": "What’s Included:\\n• 5 wine flight\\n• 5 Kollar chocolates\\n• 90-minute experience\\n• Accommodates 1-8 guests\\n\\nReservation no-shows and late cancellations will be charged the total retail value of the tasting.\\n",
-                "experience_benefits_id": 374,
-                "experience_id": 376,
-                "image_url": "https://assets.cuveecollective.com/brands/undefined/experience/experience_benefits/0088d200fe869ebc12a01910c.jpg",
-                "subtitle": "In Person Tasting",
-                "title": "Reservations MUST Be Made In Advance"
-              }
-            ],
-            "ExperienceOperationHoursNormals": [],
-            "ExperiencePrices": [
-              {
-                "active": true,
-                "age_range": "21+",
-                "experience_economics": null,
-                "experience_id": 376,
-                "experience_price_id": 363,
-                "experience_tier": null,
-                "guest_increment": 1,
-                "incentive_type_id": null,
-                "list_price": 0,
-                "max_count": 8,
-                "min_count": 1,
-                "partner_ref": 30,
-                "price": 75,
-                "price_type": "adult",
-                "stripe_product_price_id": "price_1PhlLqI3TXWMhy8uUUYKuedO"
-              }
-            ],
-            "Experience_types": [],
-            "FavoritesExperiences": [],
-            "booking_link": "https://www.exploretock.com/maxvillewinery/experience/442453/maxville-kollar-chocolate-wine-pairing",
-            "booking_terms": "\\"<ul><li>Cancellations must be made at least 48 hours in advance.</li><li><strong>No-shows:</strong> No-shows or cancellations made within 48 hours of the reservation may be charged the full retail price of the tasting. This includes promotional offers and free tastings.</li><li>This property does not allow shared tastings.</li><li>This property does not allow or any persons under the age of 21 on-site.</li></ul>\\"",
-            "brand_id": 135,
-            "cuvee_experience": false,
-            "description": "\\"<p>Description</p>\\"",
-            "discount_code": null,
-            "duration": null,
-            "experience_type": "in_person",
-            "header_image_url": "https://assets.cuveecollective.com/brands/maxville-winery/experience/597bb24fb4a0872b93bb2e937.jpg",
-            "id": 376,
-            "min_availability_notice_days": 0,
-            "name": "Chocolate & Wine Pairing",
-            "number_of_wines_poured": null,
-            "order": 0,
-            "prepayment_required": true,
-            "price": null,
-            "qualifier": false,
-            "qualifier_text": "",
-            "qualifier_title": "",
-            "reservation_api": "cuvee_reservation_request",
-            "reservation_notice": "",
-            "reservation_options": null,
-            "reservation_type": "Cuvee Web Request",
-            "show_upgrade": false,
-            "stripe_product_id": "prod_QYt6WU4syXFTZy",
-            "terms_and_conditions": "\\"<ul><li>Reservations must be made via the Tastefuli app or Tastefuli Concierge.<li>Winery and Tastefuli reserve the right to refuse or cancel any reservation or service before or upon arrival. In any dispute, Winery and Tastefuli's decision is final.<li>Winery or Tastefuli may contact the guest who has booked the reservation. Please ensure your email and phone number are updated in your Tastefuli profile settings.</ul>\\"",
-            "unit_label": null,
-            "upgrade_experience_id": null,
-            "visible": true,
-            "wt_nft_id": 0
-          },
-          {
-            "Affiliates": [],
-            "ExperienceBenefits": [
-              {
-                "description": "What's included:\\n• 5 wine flight\\n• House-made charcuterie and artisan cheeses \\n• 90-minute experience\\n• Accommodates 2-8 guests\\n\\nReservation no-shows and late cancellations will be charged the total retail value of the tasting.\\n",
-                "experience_benefits_id": 372,
-                "experience_id": 374,
-                "image_url": "https://assets.cuveecollective.com/brands/undefined/experience/experience_benefits/0088d200fe869ebc12a01910e.jpg",
-                "subtitle": "In Person Tasting",
-                "title": "Reservations MUST Be Made In Advance"
-              }
-            ],
-            "ExperienceOperationHoursNormals": [
-              {
-                "day_of_week": 3,
-                "end_times": ["15:00:00"],
-                "experience_id": 374,
-                "id": 2107,
-                "increment": 60,
-                "start_times": ["10:00:00"]
-              },
-              {
-                "day_of_week": 4,
-                "end_times": ["15:00:00"],
-                "experience_id": 374,
-                "id": 2108,
-                "increment": 60,
-                "start_times": ["10:00:00"]
-              },
-              {
-                "day_of_week": 5,
-                "end_times": ["15:00:00"],
-                "experience_id": 374,
-                "id": 2109,
-                "increment": 60,
-                "start_times": ["10:00:00"]
-              },
-              {
-                "day_of_week": 6,
-                "end_times": ["15:00:00"],
-                "experience_id": 374,
-                "id": 2110,
-                "increment": 60,
-                "start_times": ["10:00:00"]
-              },
-              {
-                "day_of_week": 7,
-                "end_times": ["15:00:00"],
-                "experience_id": 374,
-                "id": 2111,
-                "increment": 60,
-                "start_times": ["10:00:00"]
-              }
-            ],
-            "ExperiencePrices": [
-              {
-                "active": true,
-                "age_range": "21+",
-                "experience_economics": "incentivized",
-                "experience_id": 374,
-                "experience_price_id": 590,
-                "experience_tier": "tier_1",
-                "guest_increment": 1,
-                "incentive_type_id": null,
-                "list_price": 0,
-                "max_count": 8,
-                "min_count": 2,
-                "partner_ref": 15,
-                "price": 38,
-                "price_type": "adult",
-                "stripe_product_price_id": "price_1SAG3kI3TXWMhy8uKYs1soHs"
-              }
-            ],
-            "Experience_types": [
-              {
-                "filter_order": null,
-                "filter_visible": true,
-                "highlight": true,
-                "home_order": 2,
-                "home_visible": true,
-                "icon_url": null,
-                "id": 20,
-                "image_url": "app/experience_types/thumb/visit_exclusive_to_tastefuli_3.jpg",
-                "market_id": 1,
-                "name": "Featured Tastings"
-              },
-              {
-                "filter_order": 1,
-                "filter_visible": true,
-                "highlight": false,
-                "home_order": 3,
-                "home_visible": true,
-                "icon_url": null,
-                "id": 1,
-                "image_url": "app/experience_types/thumb/top_rated_1_thumb.jpg",
-                "market_id": 1,
-                "name": "Top Rated Tastings"
-              }
-            ],
-            "FavoritesExperiences": [],
-            "booking_link": "https://www.exploretock.com/maxvillewinery/experience/private/02a8d419-802e-441d-8c57-d7a809125157",
-            "booking_terms": "\\"<ul><li>Cancellations must be made at least 48 hours in advance.</li><li><strong>No-shows:</strong> No-shows or cancellations made within 48 hours of the reservation may be charged the full retail price of the tasting. This includes promotional offers and free tastings.</li><li>This property does not allow shared tastings.</li><li>This property does not allow or any persons under the age of 21 on-site.</li></ul>\\"",
-            "brand_id": 135,
-            "cuvee_experience": true,
-            "description": "\\"<p>Description</p>\\"",
-            "discount_code": "",
-            "duration": null,
-            "experience_type": "in_person",
-            "header_image_url": "https://assets.cuveecollective.com/brands/maxville-winery/experience/Maxville2for1.jpg",
-            "id": 374,
-            "min_availability_notice_days": 0,
-            "name": "Estate Tasting",
-            "number_of_wines_poured": null,
-            "order": 1,
-            "prepayment_required": true,
-            "price": null,
-            "qualifier": false,
-            "qualifier_text": "",
-            "qualifier_title": "",
-            "reservation_api": "cuvee_reservation_request",
-            "reservation_notice": "",
-            "reservation_options": null,
-            "reservation_type": "Cuvee Web Request",
-            "show_upgrade": false,
-            "stripe_product_id": "prod_QYt1lacBmr5aTg",
-            "terms_and_conditions": "\\"<ul><li>Reservations must be made via the Tastefuli app or Tastefuli Concierge.<li>Winery and Tastefuli reserve the right to refuse or cancel any reservation or service before or upon arrival. In any dispute, Winery and Tastefuli's decision is final.<li>Winery or Tastefuli may contact the guest who has booked the reservation. Please ensure your email and phone number are updated in your Tastefuli profile settings.</ul>\\"",
-            "unit_label": null,
-            "upgrade_experience_id": null,
-            "visible": true,
-            "wt_nft_id": 0
-          },
-          {
-            "Affiliates": [],
-            "ExperienceBenefits": [
-              {
-                "description": "What’s Included:\\n• Five wine flight\\n• 90-minute experience\\n• Accommodates 1-8 guests\\n\\nReservation no-shows and late cancellations will be charged the total retail value of the tasting.",
-                "experience_benefits_id": 373,
-                "experience_id": 375,
-                "image_url": "https://assets.cuveecollective.com/brands/undefined/experience/experience_benefits/75233a75354f1f2010776ad4a.jpg",
-                "subtitle": "In Person Tasting",
-                "title": "Reservations MUST Be Made In Advance"
-              }
-            ],
-            "ExperienceOperationHoursNormals": [
-              {
-                "day_of_week": 3,
-                "end_times": ["15:00:00"],
-                "experience_id": 375,
-                "id": 2244,
-                "increment": 60,
-                "start_times": ["10:00:00"]
-              },
-              {
-                "day_of_week": 4,
-                "end_times": ["15:00:00"],
-                "experience_id": 375,
-                "id": 2245,
-                "increment": 60,
-                "start_times": ["10:00:00"]
-              },
-              {
-                "day_of_week": 5,
-                "end_times": ["15:00:00"],
-                "experience_id": 375,
-                "id": 2246,
-                "increment": 60,
-                "start_times": ["10:00:00"]
-              },
-              {
-                "day_of_week": 6,
-                "end_times": ["15:00:00"],
-                "experience_id": 375,
-                "id": 2247,
-                "increment": 60,
-                "start_times": ["10:00:00"]
-              },
-              {
-                "day_of_week": 7,
-                "end_times": ["15:00:00"],
-                "experience_id": 375,
-                "id": 2248,
-                "increment": 60,
-                "start_times": ["10:00:00"]
-              }
-            ],
-            "ExperiencePrices": [
-              {
-                "active": true,
-                "age_range": "21+",
-                "experience_economics": null,
-                "experience_id": 375,
-                "experience_price_id": 525,
-                "experience_tier": null,
-                "guest_increment": 1,
-                "incentive_type_id": null,
-                "list_price": 0,
-                "max_count": 6,
-                "min_count": 1,
-                "partner_ref": 30,
-                "price": 110,
-                "price_type": "adult",
-                "stripe_product_price_id": "price_1RZF68I3TXWMhy8uJqgnV4np"
-              }
-            ],
-            "Experience_types": [
-              {
-                "filter_order": 12,
-                "filter_visible": true,
-                "highlight": false,
-                "home_order": 7,
-                "home_visible": true,
-                "icon_url": null,
-                "id": 12,
-                "image_url": "app/experience_types/thumb/scenic_views_1_thumb.jpg",
-                "market_id": 1,
-                "name": "Scenic Views"
-              },
-              {
-                "filter_order": 2,
-                "filter_visible": true,
-                "highlight": false,
-                "home_order": 6,
-                "home_visible": true,
-                "icon_url": null,
-                "id": 2,
-                "image_url": "app/experience_types/thumb/food_and_wine_pairings_1_thumb.jpg",
-                "market_id": 1,
-                "name": "Food + Wine Pairings"
-              }
-            ],
-            "FavoritesExperiences": [],
-            "booking_link": "https://www.exploretock.com/maxvillewinery/experience/372772/grand-reserve-tasting",
-            "booking_terms": "\\"<ul><li>Cancellations must be made at least 48 hours in advance.</li><li><strong>No-shows:</strong> No-shows or cancellations made within 48 hours of the reservation may be charged the full retail price of the tasting. This includes promotional offers and free tastings.</li><li>This property does not allow shared tastings.</li><li>This property does not allow or any persons under the age of 21 on-site.</li></ul>\\"",
-            "brand_id": 135,
-            "cuvee_experience": false,
-            "description": "\\"<p>Description</p>\\"",
-            "discount_code": null,
-            "duration": null,
-            "experience_type": "in_person",
-            "header_image_url": "https://assets.cuveecollective.com/brands/maxville-winery/experience/Maxville.jpg",
-            "id": 375,
-            "min_availability_notice_days": 1,
-            "name": "Grand Reserve Tasting",
-            "cancellation_fee": "$50",
-            "reservations_provider": "tock",
-            "primary_inventory_id": 737056,
-            "number_of_wines_poured": null,
-            "order": 3,
-            "prepayment_required": true,
-            "price": null,
-            "qualifier": false,
-            "qualifier_text": "",
-            "qualifier_title": "",
-            "reservation_api": "cuvee_reservation_request",
-            "reservation_notice": "",
-            "reservation_options": null,
-            "reservation_type": "Cuvee Web Request",
-            "show_upgrade": false,
-            "stripe_product_id": "prod_QYt4yzMJpmuhJu",
-            "terms_and_conditions": "\\"<ul><li>Reservations must be made via the Tastefuli app or Tastefuli Concierge.<li>Winery and Tastefuli reserve the right to refuse or cancel any reservation or service before or upon arrival. In any dispute, Winery and Tastefuli's decision is final.<li>Winery or Tastefuli may contact the guest who has booked the reservation. Please ensure your email and phone number are updated in your Tastefuli profile settings.</ul>\\"",
-            "unit_label": null,
-            "upgrade_experience_id": null,
-            "visible": true,
-            "wt_nft_id": 0
-          }
-        ]
-        """
-        
-        let data = Data(json.utf8)
-        let decoder = JSONDecoder()
-        return try decoder.decode([ExperienceDTO].self, from: data)
+    @MainActor
+    private static var forcedLogoutHandler: (@Sendable () async -> Void)?
+
+    @MainActor
+    internal static var isRunningForcedLogoutHandler = false
+
+    @MainActor
+    public static func setForcedLogoutHandler(
+        _ handler: (@Sendable () async -> Void)?
+    ) {
+        forcedLogoutHandler = handler
     }
-    
-    static func decodeStubReservationsJSON() throws -> [ReservationDTO] {
-        let json = #"""
-        [
-          {
-            "id": 4848,
-            "date": "2025-04-03",
-            "requested_times": [
-              "14:00"
-            ],
-            "status": "availability_requested",
-            "customer_slug": "629bc72b-4647-4188-a198-37ae9a3c80cc",
-            "brand": {
-              "id": 47,
-              "name": "Reynolds Family Winery",
-              "logo_image_url": "https://assets.cuveecollective.com/brands/Reynolds-Family-Winery/960f2a26505a73251ee6d8e04.jpg"
-            },
-            "experience": {
-              "id": 428,
-              "name": "DON'T USE",
-              "header_image_url": "https://assets.cuveecollective.com/brands/Reynolds-Family-Winery/experience/Reynolds2for1.jpg"
-            },
-            "ConciergeReservationRequestGuests": [
-              {
-                "concierge_reservation_request": 4848,
-                "experience_price_id": 461,
-                "quantity": 1,
-                "ExperiencePrice": {
-                  "experience_pr": 461,
-                  "experience_id": 428,
-                  "price_type": "adult",
-                  "price": 0,
-                  "min_count": 1,
-                  "max_count": 4,
-                  "guest_increme": 1,
-                  "partner_ref": 18,
-                  "age_range": "21+",
-                  "stripe_produc": "price_1R04MMI3TXWMhy8uO4ijd8WV",
-                  "active": false,
-                  "experience_ec": null,
-                  "experience_ti": null,
-                  "list_price": 0,
-                  "incentive_typ": null
-                }
-              }
-            ],
-            "ConciergeReservationBooking": null
-          },
-          {
-            "id": 7206,
-            "date": "2025-08-28",
-            "requested_times": [
-              "10:00"
-            ],
-            "status": "booking_confirmed",
-            "customer_slug": "58133c47-c2d2-49ea-9af3-a8736bbedb31",
-            "brand": {
-              "id": 125,
-              "name": "Cuvee Collective Test Update",
-              "logo_image_url": "https://assets.cuveecollective.com/brands/cuvee-collective-test-two/dc100f74e3f4d0ccb272cea34.jpg"
-            },
-            "experience": {
-              "id": 381,
-              "name": "TEST_EXPERIENCE_2",
-              "header_image_url": "https://assets.cuveecollective.com/brands/cuvee-collective-test-two/experience/84ae2a9609b645f6451ecf938.jpg"
-            },
-            "ConciergeReservationRequestGuests": [
-              {
-                "concierge_reservation_request": 7206,
-                "experience_price_id": 372,
-                "quantity": 2,
-                "ExperiencePrice": {
-                  "experience_pr": 372,
-                  "experience_id": 381,
-                  "price_type": "adult",
-                  "price": 78,
-                  "min_count": 1,
-                  "max_count": 2,
-                  "guest_increme": 1,
-                  "partner_ref": 0,
-                  "age_range": "21+",
-                  "stripe_produc": "price_1PkvtVI3TXWMhy8ulP3orjzs",
-                  "active": true,
-                  "experience_ec": null,
-                  "experience_ti": null,
-                  "list_price": 0,
-                  "incentive_typ": null
-                }
-              }
-            ],
-            "ConciergeReservationBooking": {
-              "id": 3388,
-              "experience_id": 381,
-              "brand_id": 125,
-              "request_id": 7206,
-              "account_id": "996150a9-135e-41b7-a33a-8cef56e2e09b",
-              "date": "2025-08-28",
-              "confirmed_time": "10:00:00",
-              "specific_requests": null,
-              "payment_method_id": "EXTERNAL",
-              "status": "booking_confirmed",
-              "booking_type": null,
-              "created_on": "2025-06-30T14:16:50.803Z",
-              "updated_on": "2025-06-30T14:16:50.840Z",
-              "customer_slug": "771ac6cc-7550-4a4e-ac13-b279727d517a",
-              "modification_link": "https://www.exploretock.com/tankgaragewinery/receipt?purchaseId=324836161&source=checkout",
-              "booking_confirmation_ref": "TOCK-R-3V3C4SCO",
-              "experience": {
-                "id": 381,
-                "name": "TEST_EXPERIENCE_2",
-                "header_image_url": "brands/cuvee-collective-test-two/experience/84ae2a9609b645f6451ecf938.jpg"
-              },
-              "ConciergeReservationBookingGuests": [
-                {}
-              ]
-            }
-          },
-          {
-            "id": 7208,
-            "date": "2025-06-30",
-            "requested_times": [
-              "10:00:00"
-            ],
-            "status": "booking_confirmed",
-            "customer_slug": "f0a67df6-94c6-49b6-9d94-2ce1db3008d2",
-            "brand": {
-              "id": 125,
-              "name": "Cuvee Collective Test Update",
-              "logo_image_url": "https://assets.cuveecollective.com/brands/cuvee-collective-test-two/dc100f74e3f4d0ccb272cea34.jpg"
-            },
-            "experience": {
-              "id": 381,
-              "name": "TEST_EXPERIENCE_2",
-              "header_image_url": "https://assets.cuveecollective.com/brands/cuvee-collective-test-two/experience/84ae2a9609b645f6451ecf938.jpg"
-            },
-            "ConciergeReservationRequestGuests": [
-              {
-                "concierge_reservation_request": 7208,
-                "experience_price_id": 372,
-                "quantity": 2,
-                "ExperiencePrice": {
-                  "experience_pr": 372,
-                  "experience_id": 381,
-                  "price_type": "adult",
-                  "price": 78,
-                  "min_count": 1,
-                  "max_count": 2,
-                  "guest_increme": 1,
-                  "partner_ref": 0,
-                  "age_range": "21+",
-                  "stripe_produc": "price_1PkvtVI3TXWMhy8ulP3orjzs",
-                  "active": true,
-                  "experience_ec": null,
-                  "experience_ti": null,
-                  "list_price": 0,
-                  "incentive_typ": null
-                }
-              }
-            ],
-            "ConciergeReservationBooking": {
-              "id": 3389,
-              "experience_id": 381,
-              "brand_id": 125,
-              "request_id": 7208,
-              "account_id": "996150a9-135e-41b7-a33a-8cef56e2e09b",
-              "date": "2025-08-07",
-              "confirmed_time": "10:00:00",
-              "specific_requests": "[\n  {\n    \"answer\" : \"Nothing now\",\n    \"question\" : \"Is there anything you'd like us to know before your visit?\"\n  }\n]",
-              "payment_method_id": "EXTERNAL",
-              "status": "booking_cancelled",
-              "booking_type": null,
-              "created_on": "2025-06-30T15:13:39.635Z",
-              "updated_on": "2025-06-30T15:54:58.650Z",
-              "customer_slug": "18ad8d13-320b-4b61-a9d3-f0105a9ce264",
-              "modification_link": "https://www.exploretock.com/tankgaragewinery/receipt?purchaseId=324840772&source=checkout",
-              "booking_confirmation_ref": "TOCK-R-7FGL2WMX",
-              "experience": {
-                "id": 381,
-                "name": "TEST_EXPERIENCE_2",
-                "header_image_url": "brands/cuvee-collective-test-two/experience/84ae2a9609b645f6451ecf938.jpg"
-              },
-              "ConciergeReservationBookingGuests": [
-                {}
-              ]
-            }
-          },
-          {
-            "id": 7210,
-            "date": "2025-09-03",
-            "requested_times": [
-              "10:00:00"
-            ],
-            "status": "booking_confirmed",
-            "customer_slug": "cc148b66-6a03-465a-8d22-16605528d642",
-            "brand": {
-              "id": 125,
-              "name": "Cuvee Collective Test Update",
-              "logo_image_url": "https://assets.cuveecollective.com/brands/cuvee-collective-test-two/dc100f74e3f4d0ccb272cea34.jpg"
-            },
-            "experience": {
-              "id": 381,
-              "name": "TEST_EXPERIENCE_2",
-              "header_image_url": "https://assets.cuveecollective.com/brands/cuvee-collective-test-two/experience/84ae2a9609b645f6451ecf938.jpg"
-            },
-            "ConciergeReservationRequestGuests": [
-              {
-                "concierge_reservation_request": 7210,
-                "experience_price_id": 372,
-                "quantity": 2,
-                "ExperiencePrice": {
-                  "experience_pr": 372,
-                  "experience_id": 381,
-                  "price_type": "adult",
-                  "price": 78,
-                  "min_count": 1,
-                  "max_count": 2,
-                  "guest_increme": 1,
-                  "partner_ref": 0,
-                  "age_range": "21+",
-                  "stripe_produc": "price_1PkvtVI3TXWMhy8ulP3orjzs",
-                  "active": true,
-                  "experience_ec": null,
-                  "experience_ti": null,
-                  "list_price": 0,
-                  "incentive_typ": null
-                }
-              }
-            ],
-            "ConciergeReservationBooking": {
-              "id": 3391,
-              "experience_id": 381,
-              "brand_id": 125,
-              "request_id": 7210,
-              "account_id": "996150a9-135e-41b7-a33a-8cef56e2e09b",
-              "date": "2025-09-03",
-              "confirmed_time": "10:00:00",
-              "specific_requests": "[\n  {\n    \"question\" : \"Is there anything you'd like us to know before your visit?\",\n    \"answer\" : \"Nothing here\"\n  }\n]",
-              "payment_method_id": "EXTERNAL",
-              "status": "booking_cancelled",
-              "booking_type": null,
-              "created_on": "2025-06-30T17:06:20.506Z",
-              "updated_on": "2025-06-30T17:07:22.435Z",
-              "customer_slug": "ec2f9ed0-02c2-4a16-b263-cd443550e292",
-              "modification_link": "https://www.exploretock.com/tankgaragewinery/receipt?purchaseId=325045447&source=checkout",
-              "booking_confirmation_ref": "TOCK-R-UDG7ODRK",
-              "experience": {
-                "id": 381,
-                "name": "TEST_EXPERIENCE_2",
-                "header_image_url": "brands/cuvee-collective-test-two/experience/84ae2a9609b645f6451ecf938.jpg"
-              },
-              "ConciergeReservationBookingGuests": [
-                {}
-              ]
-            }
-          },
-          {
-            "id": 7228,
-            "date": "2025-07-25",
-            "requested_times": [
-              "17:00"
-            ],
-            "status": "booking_confirmed",
-            "customer_slug": "94d176f9-19fd-4340-ac36-40757f6e258e",
-            "brand": {
-              "id": 125,
-              "name": "Cuvee Collective Test Update",
-              "logo_image_url": "https://assets.cuveecollective.com/brands/cuvee-collective-test-two/dc100f74e3f4d0ccb272cea34.jpg"
-            },
-            "experience": {
-              "id": 381,
-              "name": "TEST_EXPERIENCE_2",
-              "header_image_url": "https://assets.cuveecollective.com/brands/cuvee-collective-test-two/experience/84ae2a9609b645f6451ecf938.jpg"
-            },
-            "ConciergeReservationRequestGuests": [
-              {
-                "concierge_reservation_request": 7228,
-                "experience_price_id": 372,
-                "quantity": 1,
-                "ExperiencePrice": {
-                  "experience_pr": 372,
-                  "experience_id": 381,
-                  "price_type": "adult",
-                  "price": 78,
-                  "min_count": 1,
-                  "max_count": 2,
-                  "guest_increme": 1,
-                  "partner_ref": 0,
-                  "age_range": "21+",
-                  "stripe_produc": "price_1PkvtVI3TXWMhy8ulP3orjzs",
-                  "active": true,
-                  "experience_ec": null,
-                  "experience_ti": null,
-                  "list_price": 0,
-                  "incentive_typ": null
-                }
-              }
-            ],
-            "ConciergeReservationBooking": {
-              "id": 3398,
-              "experience_id": 381,
-              "brand_id": 125,
-              "request_id": 7228,
-              "account_id": "996150a9-135e-41b7-a33a-8cef56e2e09b",
-              "date": "2025-07-25",
-              "confirmed_time": "17:00:00",
-              "specific_requests": "[\n  {\n    \"question\" : \"Is there anything you'd like us to know before you visit?\",\n    \"answer\" : \"Test this\"\n  }\n]",
-              "payment_method_id": "EXTERNAL",
-              "status": "booking_cancelled",
-              "booking_type": null,
-              "created_on": "2025-07-02T12:09:16.621Z",
-              "updated_on": "2025-07-02T12:11:46.124Z",
-              "customer_slug": "f60c7baf-ec78-4bee-8690-e5bead9bc938",
-              "modification_link": "https://www.exploretock.com/cornerstone/receipt?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwdXJjaGFzZUlkIjoiMzI1MzA3NjcxIiwiZXhwIjoxNzU0MDkyODAwLCJ0eXBlIjoicHVyY2hhc2UiLCJpYXQiOjE3NTE0NTgxMTh9.0HHiJzkFC8RRJoohHxoluFSbPRh4gGrlaCXiO2dtXxM",
-              "booking_confirmation_ref": "TOCK-R-JB0I701C",
-              "experience": {
-                "id": 381,
-                "name": "TEST_EXPERIENCE_2",
-                "header_image_url": "brands/cuvee-collective-test-two/experience/84ae2a9609b645f6451ecf938.jpg"
-              },
-              "ConciergeReservationBookingGuests": [
-                {}
-              ]
-            }
-          },
-          {
-            "id": 9494,
-            "date": "2026-01-31",
-            "requested_times": [
-              "17:00"
-            ],
-            "status": "booking_confirmed",
-            "customer_slug": "5b523d64-2998-4ec2-b4e3-c843cd6244e2",
-            "brand": {
-              "id": 113,
-              "name": "Cornerstone Cellars",
-              "logo_image_url": "https://assets.cuveecollective.com/brands/cornerstone-cellars/61b0fdcef76180ad43d679612.jpg"
-            },
-            "experience": {
-              "id": 295,
-              "name": "Taste of Cornerstone Flight",
-              "header_image_url": "https://assets.cuveecollective.com/brands/cornerstone-cellars/experience/complimentary%20tasting%20cover%20photo%201.jpg"
-            },
-            "ConciergeReservationRequestGuests": [
-              {
-                "concierge_reservation_request": 9494,
-                "experience_price_id": 506,
-                "quantity": 2,
-                "ExperiencePrice": {
-                  "experience_pr": 506,
-                  "experience_id": 295,
-                  "price_type": "adult",
-                  "price": 0,
-                  "min_count": 1,
-                  "max_count": 2,
-                  "guest_increme": 1,
-                  "partner_ref": 0,
-                  "age_range": "21+",
-                  "stripe_produc": "price_1RGnd6I3TXWMhy8uYnlkW4pt",
-                  "active": true,
-                  "experience_ec": null,
-                  "experience_ti": null,
-                  "list_price": 0,
-                  "incentive_typ": null
-                }
-              }
-            ],
-            "ConciergeReservationBooking": {
-              "id": 4763,
-              "experience_id": 295,
-              "brand_id": 113,
-              "request_id": 9494,
-              "account_id": "996150a9-135e-41b7-a33a-8cef56e2e09b",
-              "date": "2026-01-31",
-              "confirmed_time": "17:00:00",
-              "specific_requests": null,
-              "payment_method_id": "EXTERNAL",
-              "status": "booking_cancelled",
-              "booking_type": null,
-              "created_on": "2026-01-20T20:04:16.033Z",
-              "updated_on": "2026-01-20T20:04:43.623Z",
-              "customer_slug": "36b19dd4-1e50-4a23-9608-3016cefa7ab2",
-              "modification_link": "https://www.exploretock.com/cornerstone/receipt?purchaseId=349804360",
-              "booking_confirmation_ref": "TOCK-R-EHO2MI82",
-              "experience": {
-                "id": 295,
-                "name": "Taste of Cornerstone Flight",
-                "header_image_url": "brands/cornerstone-cellars/experience/complimentary%20tasting%20cover%20photo%201.jpg"
-              },
-              "ConciergeReservationBookingGuests": [
-                {}
-              ]
-            }
-          },
-          {
-            "id": 9884,
-            "date": "2026-05-22",
-            "requested_times": [
-              "12:00"
-            ],
-            "status": "booking_confirmed",
-            "customer_slug": "ea976900-c6ed-4451-8f08-907c84e55e8c",
-            "brand": {
-              "id": 484,
-              "name": "No Love Lost Wine Co.",
-              "logo_image_url": "https://assets.cuveecollective.com/brands/no-love-lost-wine-co/b8f88933641ea8919ced4ec03.jpg"
-            },
-            "experience": {
-              "id": 643,
-              "name": "2 for 1 Tasting",
-              "header_image_url": "https://assets.cuveecollective.com/brands/no-love-lost-wine-co/experience/NoLoveLostEx.jpg"
-            },
-            "ConciergeReservationRequestGuests": [
-              {
-                "concierge_reservation_request": 9884,
-                "experience_price_id": 683,
-                "quantity": 2,
-                "ExperiencePrice": {
-                  "experience_pr": 683,
-                  "experience_id": 643,
-                  "price_type": "adult",
-                  "price": 18,
-                  "min_count": 1,
-                  "max_count": 6,
-                  "guest_increme": 1,
-                  "partner_ref": 5,
-                  "age_range": "21+",
-                  "stripe_produc": "price_1SNdsQI3TXWMhy8uEhcvxw8L",
-                  "active": true,
-                  "experience_ec": "incentivized",
-                  "experience_ti": "tier_1",
-                  "list_price": 0,
-                  "incentive_typ": null
-                }
-              }
-            ],
-            "ConciergeReservationBooking": {
-              "id": 5072,
-              "experience_id": 643,
-              "brand_id": 484,
-              "request_id": 9884,
-              "account_id": "996150a9-135e-41b7-a33a-8cef56e2e09b",
-              "date": "2026-05-22",
-              "confirmed_time": "12:00:00",
-              "specific_requests": null,
-              "payment_method_id": "EXTERNAL",
-              "status": "booking_confirmed",
-              "booking_type": null,
-              "created_on": "2026-04-02T15:23:05.035Z",
-              "updated_on": "2026-04-02T15:23:05.067Z",
-              "customer_slug": "fcfbbb54-7a04-43c9-9056-e5b864a20438",
-              "modification_link": "https://www.exploretock.com/nolovelost/receipt?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3ODAwODEyMDAsImlhdCI6MTc3NTE0MzM4MiwicHVyY2hhc2VJZCI6IjM1ODIzNDcwMyIsInR5cGUiOiJwdXJjaGFzZSJ9.5FMMcxb2XNvHDduKIQEHdu_FYviCcAqIs10_bngV9Kk",
-              "booking_confirmation_ref": "TOCK-R-182VYW2N",
-              "experience": {
-                "id": 643,
-                "name": "2 for 1 Tasting",
-                "header_image_url": "brands/no-love-lost-wine-co/experience/NoLoveLostEx.jpg"
-              },
-              "ConciergeReservationBookingGuests": [
-                {}
-              ]
-            }
-          },
-          {
-            "id": 9886,
-            "date": "2026-05-30",
-            "requested_times": [
-              "12:00"
-            ],
-            "status": "booking_confirmed",
-            "customer_slug": "14da6036-f7a9-4b05-846b-75b70b51fd3e",
-            "brand": {
-              "id": 484,
-              "name": "No Love Lost Wine Co.",
-              "logo_image_url": "https://assets.cuveecollective.com/brands/no-love-lost-wine-co/b8f88933641ea8919ced4ec03.jpg"
-            },
-            "experience": {
-              "id": 643,
-              "name": "2 for 1 Tasting",
-              "header_image_url": "https://assets.cuveecollective.com/brands/no-love-lost-wine-co/experience/NoLoveLostEx.jpg"
-            },
-            "ConciergeReservationRequestGuests": [
-              {
-                "concierge_reservation_request": 9886,
-                "experience_price_id": 683,
-                "quantity": 2,
-                "ExperiencePrice": {
-                  "experience_pr": 683,
-                  "experience_id": 643,
-                  "price_type": "adult",
-                  "price": 18,
-                  "min_count": 1,
-                  "max_count": 6,
-                  "guest_increme": 1,
-                  "partner_ref": 5,
-                  "age_range": "21+",
-                  "stripe_produc": "price_1SNdsQI3TXWMhy8uEhcvxw8L",
-                  "active": true,
-                  "experience_ec": "incentivized",
-                  "experience_ti": "tier_1",
-                  "list_price": 0,
-                  "incentive_typ": null
-                }
-              }
-            ],
-            "ConciergeReservationBooking": {
-              "id": 5074,
-              "experience_id": 643,
-              "brand_id": 484,
-              "request_id": 9886,
-              "account_id": "996150a9-135e-41b7-a33a-8cef56e2e09b",
-              "date": "2026-05-30",
-              "confirmed_time": "12:00:00",
-              "specific_requests": null,
-              "payment_method_id": "EXTERNAL",
-              "status": "booking_confirmed",
-              "booking_type": null,
-              "created_on": "2026-04-02T15:36:33.545Z",
-              "updated_on": "2026-04-02T15:36:33.578Z",
-              "customer_slug": "0c6c3865-4443-4911-aad3-60b67820b7a7",
-              "modification_link": "https://www.exploretock.com/nolovelost/receipt?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3ODA3NzI0MDAsImlhdCI6MTc3NTE0NDE5MCwidHlwZSI6InB1cmNoYXNlIiwicHVyY2hhc2VJZCI6IjM1ODIzNjIxMSJ9.Z2Q7jPBTF37DGZgqPhMYBkNxgXFgrp-jsZRdIxrv7Qk",
-              "booking_confirmation_ref": "TOCK-R-8V1Z6BEL",
-              "experience": {
-                "id": 643,
-                "name": "2 for 1 Tasting",
-                "header_image_url": "brands/no-love-lost-wine-co/experience/NoLoveLostEx.jpg"
-              },
-              "ConciergeReservationBookingGuests": [
-                {}
-              ]
-            }
-          },
-          {
-            "id": 9885,
-            "date": "2026-05-15",
-            "requested_times": [
-              "12:30"
-            ],
-            "status": "booking_confirmed",
-            "customer_slug": "be7989b5-f671-43d7-b89b-5290a4eb39da",
-            "brand": {
-              "id": 484,
-              "name": "No Love Lost Wine Co.",
-              "logo_image_url": "https://assets.cuveecollective.com/brands/no-love-lost-wine-co/b8f88933641ea8919ced4ec03.jpg"
-            },
-            "experience": {
-              "id": 643,
-              "name": "2 for 1 Tasting",
-              "header_image_url": "https://assets.cuveecollective.com/brands/no-love-lost-wine-co/experience/NoLoveLostEx.jpg"
-            },
-            "ConciergeReservationRequestGuests": [
-              {
-                "concierge_reservation_request": 9885,
-                "experience_price_id": 683,
-                "quantity": 2,
-                "ExperiencePrice": {
-                  "experience_pr": 683,
-                  "experience_id": 643,
-                  "price_type": "adult",
-                  "price": 18,
-                  "min_count": 1,
-                  "max_count": 6,
-                  "guest_increme": 1,
-                  "partner_ref": 5,
-                  "age_range": "21+",
-                  "stripe_produc": "price_1SNdsQI3TXWMhy8uEhcvxw8L",
-                  "active": true,
-                  "experience_ec": "incentivized",
-                  "experience_ti": "tier_1",
-                  "list_price": 0,
-                  "incentive_typ": null
-                }
-              }
-            ],
-            "ConciergeReservationBooking": {
-              "id": 5073,
-              "experience_id": 643,
-              "brand_id": 484,
-              "request_id": 9885,
-              "account_id": "996150a9-135e-41b7-a33a-8cef56e2e09b",
-              "date": "2026-05-15",
-              "confirmed_time": "12:30:00",
-              "specific_requests": null,
-              "payment_method_id": "EXTERNAL",
-              "status": "booking_cancelled",
-              "booking_type": null,
-              "created_on": "2026-04-02T15:30:19.590Z",
-              "updated_on": "2026-04-02T16:00:04.700Z",
-              "customer_slug": "bf26aeef-1ade-47e5-b287-17dc07dcacaa",
-              "modification_link": "https://www.exploretock.com/nolovelost/receipt?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3Nzk0NzY0MDAsImlhdCI6MTc3NTE0Mzc0MCwicHVyY2hhc2VJZCI6IjM1ODIzNTM4OCIsInR5cGUiOiJwdXJjaGFzZSJ9.LuPkMO5N6UtBzWR2oRxLP45u_VUVw2QHXxiVohccXeo",
-              "booking_confirmation_ref": "TOCK-R-ZIWMQ0IC",
-              "experience": {
-                "id": 643,
-                "name": "2 for 1 Tasting",
-                "header_image_url": "brands/no-love-lost-wine-co/experience/NoLoveLostEx.jpg"
-              },
-              "ConciergeReservationBookingGuests": [
-                {}
-              ]
-            }
-          },
-          {
-            "id": 9936,
-            "date": "2026-06-12",
-            "requested_times": [
-              "13:15"
-            ],
-            "status": "booking_confirmed",
-            "customer_slug": "5ddcd502-a4c2-47e0-af65-f5cf027e56c6",
-            "brand": {
-              "id": 484,
-              "name": "No Love Lost Wine Co.",
-              "logo_image_url": "https://assets.cuveecollective.com/brands/no-love-lost-wine-co/b8f88933641ea8919ced4ec03.jpg"
-            },
-            "experience": {
-              "id": 643,
-              "name": "2 for 1 Tasting",
-              "header_image_url": "https://assets.cuveecollective.com/brands/no-love-lost-wine-co/experience/NoLoveLostEx.jpg"
-            },
-            "ConciergeReservationRequestGuests": [
-              {
-                "concierge_reservation_request": 9936,
-                "experience_price_id": 683,
-                "quantity": 2,
-                "ExperiencePrice": {
-                  "experience_pr": 683,
-                  "experience_id": 643,
-                  "price_type": "adult",
-                  "price": 18,
-                  "min_count": 1,
-                  "max_count": 6,
-                  "guest_increme": 1,
-                  "partner_ref": 5,
-                  "age_range": "21+",
-                  "stripe_produc": "price_1SNdsQI3TXWMhy8uEhcvxw8L",
-                  "active": true,
-                  "experience_ec": "incentivized",
-                  "experience_ti": "tier_1",
-                  "list_price": 0,
-                  "incentive_typ": null
-                }
-              }
-            ],
-            "ConciergeReservationBooking": {
-              "id": 5115,
-              "experience_id": 643,
-              "brand_id": 484,
-              "request_id": 9936,
-              "account_id": "996150a9-135e-41b7-a33a-8cef56e2e09b",
-              "date": "2026-06-12",
-              "confirmed_time": "13:15:00",
-              "specific_requests": null,
-              "payment_method_id": "EXTERNAL",
-              "status": "booking_confirmed",
-              "booking_type": null,
-              "created_on": "2026-04-08T19:56:17.851Z",
-              "updated_on": "2026-04-08T19:56:17.891Z",
-              "customer_slug": "72b65338-75dd-4076-aed6-afcfed65c939",
-              "modification_link": "https://www.exploretock.com/nolovelost/receipt?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3ODE5MDAxMDAsImlhdCI6MTc3NTY3ODE3NSwidHlwZSI6InB1cmNoYXNlIiwicHVyY2hhc2VJZCI6IjM1ODkxMDM0OSJ9.jeGMuD9uNWulP66brW2qcZabLaH6CszVa17A_ruKybQ",
-              "booking_confirmation_ref": "TOCK-R-22O2YCNH",
-              "experience": {
-                "id": 643,
-                "name": "2 for 1 Tasting",
-                "header_image_url": "brands/no-love-lost-wine-co/experience/NoLoveLostEx.jpg"
-              },
-              "ConciergeReservationBookingGuests": [
-                {}
-              ]
-            }
-          },
-        {
-          "ConciergeReservationBooking": {
-            "ConciergeReservationBookingGuests": [
-              {}
-            ],
-            "account_id": "996150a9-135e-41b7-a33a-8cef56e2e09b",
-            "booking_confirmation_ref": "TOCK-R-1FJLKRTG",
-            "booking_type": null,
-            "brand_id": 484,
-            "confirmed_time": "12:00:00",
-            "created_on": "2026-04-09T00:45:37.522Z",
-            "customer_slug": "b4dc80c8-aaab-4934-b1ae-da23770dfeb6",
-            "date": "2026-05-26",
-            "experience": {
-              "header_image_url": "brands/no-love-lost-wine-co/experience/NoLoveLostEx.jpg",
-              "id": 643,
-              "name": "2 for 1 Tasting"
-            },
-            "experience_id": 643,
-            "id": 5116,
-            "modification_link": "https://www.exploretock.com/nolovelost/receipt?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3ODA0MjY4MDAsImlhdCI6MTc3NTY5NTUzNCwidHlwZSI6InB1cmNoYXNlIiwicHVyY2hhc2VJZCI6IjM1ODk1MTU4MiJ9.6By0ZPTlqv3OyiIgDFAL1IJ6ajosvhkXz7GTbXWY5OM",
-            "payment_method_id": "EXTERNAL",
-            "request_id": 9938,
-            "specific_requests": null,
-            "status": "booking_confirmed",
-            "updated_on": "2026-04-09T00:45:37.554Z"
-          },
-          "ConciergeReservationRequestGuests": [
-            {
-              "ExperiencePrice": {
-                "active": true,
-                "age_range": "21+",
-                "experience_ec": "incentivized",
-                "experience_id": 643,
-                "experience_pr": 683,
-                "experience_ti": "tier_1",
-                "guest_increme": 1,
-                "incentive_typ": null,
-                "list_price": 0,
-                "max_count": 6,
-                "min_count": 1,
-                "partner_ref": 5,
-                "price": 18,
-                "price_type": "adult",
-                "stripe_produc": "price_1SNdsQI3TXWMhy8uEhcvxw8L"
-              },
-              "concierge_reservation_request": 9938,
-              "experience_price_id": 683,
-              "quantity": 2
-            }
-          ],
-          "brand": {
-            "id": 484,
-            "logo_image_url": "https://assets.cuveecollective.com/brands/no-love-lost-wine-co/b8f88933641ea8919ced4ec03.jpg",
-            "name": "No Love Lost Wine Co."
-          },
-          "customer_slug": "c699d9f9-6a99-4aa8-b3a5-dbe462ba52e7",
-          "date": "2026-05-26",
-          "experience": {
-            "header_image_url": "https://assets.cuveecollective.com/brands/no-love-lost-wine-co/experience/NoLoveLostEx.jpg",
-            "id": 643,
-            "name": "2 for 1 Tasting"
-          },
-          "id": 9938,
-          "requested_times": [
-            "12:00"
-          ],
-          "status": "booking_confirmed"
-        },
-        {
-          "ConciergeReservationBooking": {
-            "ConciergeReservationBookingGuests": [
-              {}
-            ],
-            "account_id": "996150a9-135e-41b7-a33a-8cef56e2e09b",
-            "booking_confirmation_ref": "TOCK-R-GURDYSVW",
-            "booking_type": null,
-            "brand_id": 484,
-            "confirmed_time": "12:15:00",
-            "created_on": "2026-04-09T01:28:27.355Z",
-            "customer_slug": "301aa4e3-0a0d-41b6-aca2-88bdafc2a7c9",
-            "date": "2026-07-09",
-            "experience": {
-              "header_image_url": "brands/no-love-lost-wine-co/experience/NoLoveLostEx.jpg",
-              "id": 643,
-              "name": "2 for 1 Tasting"
-            },
-            "experience_id": 643,
-            "id": 5117,
-            "modification_link": "https://www.exploretock.com/nolovelost/receipt?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3ODQyMjkzMDAsImlhdCI6MTc3NTY5ODEwNCwicHVyY2hhc2VJZCI6IjM1ODk1NjIyOCIsInR5cGUiOiJwdXJjaGFzZSJ9.0W2k2v03Av68lOW1VxgFGtIRK0IMMZlWJNZEevlJ5Rk",
-            "payment_method_id": "EXTERNAL",
-            "request_id": 9939,
-            "specific_requests": null,
-            "status": "booking_confirmed",
-            "updated_on": "2026-04-09T01:28:27.389Z"
-          },
-          "ConciergeReservationRequestGuests": [
-            {
-              "ExperiencePrice": {
-                "active": true,
-                "age_range": "21+",
-                "experience_ec": "incentivized",
-                "experience_id": 643,
-                "experience_pr": 683,
-                "experience_ti": "tier_1",
-                "guest_increme": 1,
-                "incentive_typ": null,
-                "list_price": 0,
-                "max_count": 6,
-                "min_count": 1,
-                "partner_ref": 5,
-                "price": 18,
-                "price_type": "adult",
-                "stripe_produc": "price_1SNdsQI3TXWMhy8uEhcvxw8L"
-              },
-              "concierge_reservation_request": 9939,
-              "experience_price_id": 683,
-              "quantity": 2
-            }
-          ],
-          "brand": {
-            "id": 484,
-            "logo_image_url": "https://assets.cuveecollective.com/brands/no-love-lost-wine-co/b8f88933641ea8919ced4ec03.jpg",
-            "name": "No Love Lost Wine Co."
-          },
-          "customer_slug": "b8e014f2-d828-4c10-988b-20e8ec169c64",
-          "date": "2026-07-09",
-          "experience": {
-            "header_image_url": "https://assets.cuveecollective.com/brands/no-love-lost-wine-co/experience/NoLoveLostEx.jpg",
-            "id": 643,
-            "name": "2 for 1 Tasting"
-          },
-          "id": 9939,
-          "requested_times": [
-            "12:15"
-          ],
-          "status": "booking_confirmed"
-        },
-        {
-          "ConciergeReservationBooking": {
-            "ConciergeReservationBookingGuests": [
-              {}
-            ],
-            "account_id": "996150a9-135e-41b7-a33a-8cef56e2e09b",
-            "booking_confirmation_ref": "VVNACFHP",
-            "booking_type": null,
-            "brand_id": 591,
-            "confirmed_time": "14:00:00",
-            "created_on": "2026-04-09T12:36:39.823Z",
-            "customer_slug": "04b15a72-6a86-4819-a6d3-f4e85f10a6b5",
-            "date": "2026-05-16",
-            "experience": {
-              "header_image_url": "brands/duttonestatewinery/experience/Dutton%20Estate%202%20for%201.jpg",
-              "id": 893,
-              "name": "2 for 1 Vineyard Garden Wine Tasting"
-            },
-            "experience_id": 893,
-            "id": 5118,
-            "modification_link": "https://www.cellarpass.com/rsvp-confirmation/5b4a807c-6e45-4989-9a70-7a9bb6fe6acb?mid=7017&sh=true&isguest=1&access=tasteful1c0d3",
-            "payment_method_id": "EXTERNAL",
-            "request_id": 9941,
-            "specific_requests": null,
-            "status": "booking_confirmed",
-            "updated_on": "2026-04-09T12:36:39.861Z"
-          },
-          "ConciergeReservationRequestGuests": [
-            {
-              "ExperiencePrice": {
-                "active": true,
-                "age_range": "21+",
-                "experience_ec": "incentivized",
-                "experience_id": 893,
-                "experience_pr": 1049,
-                "experience_ti": "tier_1",
-                "guest_increme": 1,
-                "incentive_typ": 2,
-                "list_price": 40,
-                "max_count": 10,
-                "min_count": 1,
-                "partner_ref": 6,
-                "price": 20,
-                "price_type": "adult",
-                "stripe_produc": "price_1T6yXaI3TXWMhy8us06x5npA"
-              },
-              "concierge_reservation_request": 9941,
-              "experience_price_id": 1049,
-              "quantity": 1
-            }
-          ],
-          "brand": {
-            "id": 591,
-            "logo_image_url": "https://assets.cuveecollective.com/brands/duttonestatewinery/b99d42f5f4dbaceef9e33c541.jpg",
-            "name": "Dutton Estate Winery"
-          },
-          "customer_slug": "9899a2b7-b781-4473-96ae-a215cd014ca4",
-          "date": "2026-05-16",
-          "experience": {
-            "header_image_url": "https://assets.cuveecollective.com/brands/duttonestatewinery/experience/Dutton%20Estate%202%20for%201.jpg",
-            "id": 893,
-            "name": "2 for 1 Vineyard Garden Wine Tasting"
-          },
-          "id": 9941,
-          "requested_times": [
-            "14:00"
-          ],
-          "status": "booking_confirmed"
-        },
-        {
-          "ConciergeReservationBooking": null,
-          "ConciergeReservationRequestGuests": [
-            {
-              "ExperiencePrice": {
-                "active": true,
-                "age_range": "21+",
-                "experience_ec": "complimentary",
-                "experience_id": 293,
-                "experience_pr": 672,
-                "experience_ti": "tier_1",
-                "guest_increme": 1,
-                "incentive_typ": null,
-                "list_price": 0,
-                "max_count": 4,
-                "min_count": 1,
-                "partner_ref": 20,
-                "price": 0,
-                "price_type": "adult",
-                "stripe_produc": "price_1SGkoRI3TXWMhy8ud8KrkJTK"
-              },
-              "concierge_reservation_request": 9942,
-              "experience_price_id": 672,
-              "quantity": 1
-            }
-          ],
-          "brand": {
-            "id": 6,
-            "logo_image_url": "https://assets.cuveecollective.com/brands/robert-craig-winery/ee200b5191780f283fe5da534.jpg",
-            "name": "Robert Craig Tasting Salon"
-          },
-          "customer_slug": "d3fe22cb-b7f9-462c-926b-ebdff86e9f75",
-          "date": "2026-05-21",
-          "experience": {
-            "header_image_url": "https://assets.cuveecollective.com/brands/robert-craig-winery/experience/complimentary%20tasting%20image%20with%20banner.jpg",
-            "id": 293,
-            "name": "Salon Select Experience"
-          },
-          "id": 9942,
-          "requested_times": [
-            "14:00"
-          ],
-          "times_available": [
-            "14:00", "16:00", "18:00"
-          ],
-          "status": "availability_provided"
+
+    /// User-initiated logout API.
+    /// Still serialized through PreferabliTools.withLogout.
+    public func logout() async throws {
+        try await PreferabliTools.withLogout {
+            await self.performLogoutCleanupLocked()
         }
-        ]
-        """#
-        
-        let data = Data(json.utf8)
-        
+    }
+
+    /// Called by networking when refresh fails.
+    /// App handler is responsible for UI teardown first, then calling logout cleanup.
+    internal func handleRefreshFailureLogout() async {
+        let handler = await MainActor.run { Preferabli.forcedLogoutHandler }
+        if let handler {
+            let shouldRun = await MainActor.run { () -> Bool in
+                if Preferabli.isRunningForcedLogoutHandler { return false }
+                Preferabli.isRunningForcedLogoutHandler = true
+                return true
+            }
+
+            guard shouldRun else { return }
+
+            defer {
+                Task { @MainActor in
+                    Preferabli.isRunningForcedLogoutHandler = false
+                }
+            }
+
+            await handler()
+            return
+        }
+
+        // Fallback only if app forgot to register a handler.
+        // This is less ideal because UI teardown may not have happened.
+        try? await logout()
+    }
+
+    /// Call this only after the app has removed the old SwiftUI tree.
+    public func logoutAfterUITeardown() async throws {
+        try await PreferabliTools.withLogout {
+            await self.performLogoutCleanupLocked()
+        }
+    }
+
+    /// Actual shared cleanup implementation.
+    /// Assumes caller has already entered the logout gate.
+    private func performLogoutCleanupLocked() async {
+        await Storage.beginLogoutCancellation()
+        defer { Task { await Storage.endLogoutCancellation() } }
+
+        await PreferabliTools.cancelAllInflight()
+
         do {
-            _ = try JSONSerialization.jsonObject(with: data)
-            
-            let decoder = JSONDecoder()
-            return try decoder.decode([ReservationDTO].self, from: data)
-        } catch let error as DecodingError {
-            print("Reservation decode failed: \(error)")
-            throw error
+            try await clearAllData()
         } catch {
-            print("Reservation JSON parse failed: \(error)")
-            throw error
+            print("performLogoutCleanupLocked clearAllData error: \(error)")
         }
-    }
-    
-    static func decodeStubBallooonJSON() throws -> BalloonResponseDTO {
-        let json = #"""
-        {
-          "data": {
-            "balloon_brand": {
-              "logo_image_url": "/app/partners/blank.png",
-              "meet_location_landmark_address": "6525 Washington St\nYountville, CA 94599",
-              "meet_location_landmark_coordinates": "38.3944, -122.3543",
-              "meet_location_landmark_name": ""
-            },
-            "booking": {
-              "customer_email": "oliviagbeeson@gmail.com",
-              "customer_name": "Olivia Beeson",
-              "customer_phone": "+16144041996",
-              "id": "E4TDERV9",
-              "items": [
-                {
-                  "meeting_point": "6525 Washington St\nYountville, CA 94599",
-                  "meeting_point_coordinates": "38.3944, -122.3543",
-                  "qty": 4,
-                  "sku": "32d9889f-369e-452a-bde8-f3a19b9f2172",
-                  "start_date": 1775135700
-                }
-              ]
-            }
-          },
-          "message": "Successfully.",
-          "status": 1,
-          "statusCode": 200
-        }
-        """#
-        
-        let data = Data(json.utf8)
-        let decoder = JSONDecoder()
-        return try decoder.decode(BalloonResponseDTO.self, from: data)
+
+        await sessionBootstrapper.reset(preferabli: self)
     }
 }

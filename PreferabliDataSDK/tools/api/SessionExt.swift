@@ -400,6 +400,13 @@ extension Session {
     }
     
     @discardableResult
+    internal func requestRaw(_ request: URLRequest) async -> AFDataResponse<Data?> {
+        await performDataRequest {
+            self.request(request)
+        }
+    }
+    
+    @discardableResult
     private func postNoBodyRaw(_ url: URLConvertible) async -> AFDataResponse<Data?> {
         await performDataRequest {
             request(url, method: .post)

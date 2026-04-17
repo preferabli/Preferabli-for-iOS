@@ -23,6 +23,7 @@ public final class Reservation: HasIntID {
     // MARK: - Brand snapshot
 
     public var brand_id: Int?
+    public var venue_id: Int?
     public var brand_name: String?
     public var brand_logo_image_url: String?
 
@@ -39,6 +40,7 @@ public final class Reservation: HasIntID {
     public var booking_confirmation_ref: String?
     public var booking_type: String?
     public var booking_brand_id: Int?
+    public var booking_venue_id: Int?
     public var booking_confirmed_time: String?
     public var booking_created_on: Date?
     public var booking_customer_slug: String?

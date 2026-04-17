@@ -17,6 +17,7 @@ private enum APILog {
 }
 
 private let debugLogIDHeader = "X-Preferabli-Debug-Log-ID"
+private let authRetryHeader = "X-Preferabli-Auth-Retry"
 
 private func safeEndpointHint(_ endpoint: String, maxLen: Int = 50) -> String {
     let raw = (URL(string: endpoint)?.path.isEmpty == false) ? (URL(string: endpoint)?.path ?? endpoint) : endpoint
@@ -43,7 +44,6 @@ private func safeEndpointHint(_ endpoint: String, maxLen: Int = 50) -> String {
 /// - correlation ID
 /// - status / endpoint / sizes
 /// - sandbox tmp path
-/// - (simulator only) a copy/paste Terminal command to open the file via simctl
 private func writeJSONToTempAndLog(
     _ json: String,
     endpoint: String,
@@ -76,6 +76,12 @@ internal actor APIService {
     private var alamo: Session?
     private var urlCache: URLCache?
 
+    /// Coalesces concurrent token refreshes.
+    private var refreshTask: Task<Void, Error>?
+
+    /// Coalesces forced logout work after refresh failure.
+    private var forcedLogoutTask: Task<Void, Never>?
+
     internal func createAlamo() async {
         let logging = await MainActor.run { Preferabli.main.loggingEnabled }
         let clientInterface = Storage.getKeyStore().string(forKey: "CLIENT_INTERFACE") ?? ""
@@ -86,7 +92,8 @@ internal actor APIService {
             "client_interface_version": String(version)
         ]
 
-        if let accessToken = Storage.getKeyStore().string(forKey: "access_token") {
+        if let accessToken = Storage.getKeyStore().string(forKey: "access_token"),
+           !accessToken.isEmptyOrWhitespace() {
             headers.update(name: "Authorization", value: "Bearer " + accessToken)
         }
 
@@ -130,12 +137,91 @@ internal actor APIService {
         if alamo == nil {
             await createAlamo()
         }
-        // Force unwrap is safe after create
+
         return alamo!
     }
 
     internal func refreshDefaults() {
         alamo = nil
+    }
+
+    /// Performs a single shared refresh no matter how many 401s arrive at once.
+    internal func refreshSessionIfNeeded() async throws {
+        if let refreshTask {
+            return try await refreshTask.value
+        }
+
+        let task = Task<Void, Error> {
+            let refreshToken = Storage.getKeyStore().string(forKey: "refresh_token") ?? ""
+            if refreshToken.isEmptyOrWhitespace() {
+                throw PreferabliException(
+                    type: .InvalidAccessToken,
+                    message: "Missing refresh token; cannot refresh session."
+                )
+            }
+
+            let params: SParams = [
+                "user_id": PreferabliTools.getPreferabliUserId(),
+                "token_refresh": refreshToken
+            ]
+
+            let session = try await self.getAlamo(requiresAccessToken: false)
+            let sessionResponse = try await session.post(APIEndpoints.sessions, json: params)
+
+            if sessionResponse.error == nil,
+               let http = sessionResponse.response,
+               (200..<300).contains(http.statusCode),
+               let data = sessionResponse.data {
+
+                let obj = try APIService.continueOrThrowJSONException(data: data)
+                guard let dict = obj as? [String: Any] else {
+                    throw PreferabliException(
+                        type: .JSONError,
+                        message: "[\(APIEndpoints.sessions)] Session refresh JSON root was not a dictionary.",
+                        code: http.statusCode
+                    )
+                }
+
+                let sessionData = SessionData(map: dict)
+                await sessionData.saveSession()
+                return
+            }
+
+            let status = sessionResponse.response?.statusCode ?? 0
+            var msg = "[\(APIEndpoints.sessions)] Token refresh failed with status \(status)."
+            if let raw = sessionResponse.data, !raw.isEmpty {
+                let snippet = String(decoding: raw.prefix(1000), as: UTF8.self)
+                msg += "\n── Refresh Raw (first 1000 bytes) ──\n\(snippet)\n────────"
+            }
+
+            throw PreferabliException(type: .InvalidAccessToken, message: msg, code: status)
+        }
+
+        refreshTask = task
+
+        do {
+            try await task.value
+            refreshTask = nil
+        } catch {
+            refreshTask = nil
+            throw error
+        }
+    }
+
+    /// Ensures we only run the forced-logout cleanup once even if many requests fail together.
+    internal func forceLogoutAfterRefreshFailureIfNeeded() async {
+        if let forcedLogoutTask {
+            await forcedLogoutTask.value
+            return
+        }
+
+        let task = Task<Void, Never> {
+            await Preferabli.main.handleRefreshFailureLogout()
+        }
+
+        forcedLogoutTask = task
+        await task.value
+        forcedLogoutTask = nil
     }
 }
 
@@ -146,7 +232,6 @@ private final class RequestRetry: RequestRetrier {
         dueTo error: any Error,
         completion: @escaping @Sendable (Alamofire.RetryResult) -> Void
     ) {
-        // no automatic retry behavior today
         completion(.doNotRetry)
     }
 }
@@ -186,13 +271,31 @@ private final class LoggingAdapter: RequestAdapter {
     }
 }
 
-import Alamofire
-import Foundation
-
 extension APIService {
 
+    private static func buildReplayRequest(from original: URLRequest) async -> URLRequest {
+        var replay = original
+
+        replay.setValue("1", forHTTPHeaderField: authRetryHeader)
+
+        if let accessToken = Storage.getKeyStore().string(forKey: "access_token"),
+           !accessToken.isEmptyOrWhitespace() {
+            replay.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        } else {
+            replay.setValue(nil, forHTTPHeaderField: "Authorization")
+        }
+
+        let clientInterface = Storage.getKeyStore().string(forKey: "CLIENT_INTERFACE") ?? ""
+        let version = await MainActor.run { Preferabli.versionCode }
+
+        replay.setValue(clientInterface, forHTTPHeaderField: "client_interface")
+        replay.setValue(String(version), forHTTPHeaderField: "client_interface_version")
+
+        return replay
+    }
+
     /// Returns `response` on 2xx, else throws `PreferabliException`.
-    /// Handles 401 by attempting a token refresh and retrying the original request.
+    /// Handles 401 by attempting a token refresh and retrying the original request once.
     internal static func continueOrThrowPreferabliException(
         response: AFDataResponse<Data?>
     ) async throws -> AFDataResponse<Data?> {
@@ -201,11 +304,12 @@ extension APIService {
         let status   = response.response?.statusCode
         let raw      = response.data
 
-        // Helper to build a context-rich exception
-        func makeErr(_ type: PreferabliExceptionType,
-                     code: Int = (status ?? 0),
-                     message: String? = nil,
-                     attachRaw: Bool = true) -> PreferabliException {
+        func makeErr(
+            _ type: PreferabliExceptionType,
+            code: Int = (status ?? 0),
+            message: String? = nil,
+            attachRaw: Bool = true
+        ) -> PreferabliException {
             var msg = "[\(endpoint)] \(message ?? type.getMessage())"
             if attachRaw, let raw, !raw.isEmpty {
                 let snippet = String(decoding: raw.prefix(1000), as: UTF8.self)
@@ -221,7 +325,6 @@ extension APIService {
 
             let logging = await MainActor.run { Preferabli.main.loggingEnabled }
             if logging, let data = response.data {
-
                 let s = prettyJSONString(from: data)
                 let logID = response.request?.value(forHTTPHeaderField: debugLogIDHeader) ?? "-"
 
@@ -233,96 +336,59 @@ extension APIService {
                     logID: logID
                 )
             }
+
             return response
         }
 
-        // Error path with HTTP + data
+        // HTTP error path
         if let http = response.response, let data = response.data {
 
-            // 401: try refresh, then replay the original request
             if http.statusCode == 401 {
-                let params: SParams = [
-                    "user_id": PreferabliTools.getPreferabliUserId(),
-                    "token_refresh": Storage.getKeyStore().string(forKey: "refresh_token") ?? ""
-                ]
+                let api = await Preferabli.main.api
+
+                // Already retried once after refresh -> session is dead.
+                if response.request?.value(forHTTPHeaderField: authRetryHeader) == "1" {
+                    await api.forceLogoutAfterRefreshFailureIfNeeded()
+                    throw makeErr(
+                        .InvalidAccessToken,
+                        code: http.statusCode,
+                        message: "Request remained unauthorized after token refresh and retry."
+                    )
+                }
 
                 do {
-                    // Hop to main actor to get the service handle, then hop to the service actor
-                    let api = await Preferabli.main.api
+                    try await api.refreshSessionIfNeeded()
+
+                    guard let originalRequest = response.request else {
+                        throw makeErr(
+                            .APIError,
+                            code: http.statusCode,
+                            message: "Unable to replay original request (missing URLRequest)."
+                        )
+                    }
+
+                    let replayRequest = await buildReplayRequest(from: originalRequest)
                     let session = try await api.getAlamo()
+                    let replayResponse = await session.requestRaw(replayRequest)
 
-                    let sessionResponse = try await session.post(APIEndpoints.sessions, json: params)
-
-                    if sessionResponse.error == nil,
-                       let http2 = sessionResponse.response,
-                       http2.statusCode < 400 {
-
-                        let sessionData: SessionData
-                        do {
-                            let sessionDict = try continueOrThrowJSONException(data: sessionResponse.data!)
-                            guard let dict = sessionDict as? [String: Any] else {
-                                throw makeErr(.JSONError, code: http2.statusCode, message: "Session refresh JSON root was not a dictionary.")
-                            }
-                            sessionData = SessionData(map: dict)
-                        } catch let e as PreferabliException {
-                            var msg = "[\(APIEndpoints.sessions)] \(e.getMessage())"
-                            if let raw2 = sessionResponse.data, !raw2.isEmpty {
-                                let snippet = String(decoding: raw2.prefix(1000), as: UTF8.self)
-                                msg += "\n── Raw (first 1000 bytes) ──\n\(snippet)\n────────"
-                            }
-                            throw PreferabliException(type: e.type, message: msg, code: e.getCode())
-                        }
-
-                        await sessionData.saveSession()
-
-                        guard let req = response.request,
-                              let method = req.httpMethod?.lowercased()
-                        else {
-                            throw makeErr(.APIError, code: http.statusCode, message: "Unable to replay original request (missing method/URL).")
-                        }
-
-                        let s = try await api.getAlamo()
-                        if method == "get" || method == "delete" {
-                            return await s.requestData(
-                                url: req.url!,
-                                method: HTTPMethod(rawValue: req.httpMethod!),
-                                parameters: nil,
-                                encoding: URLEncoding.default,
-                                headers: nil
-                            )
-                        } else if let body = req.httpBody {
-                            return await s.requestJSON(
-                                urlString: req.url!.absoluteString,
-                                method: HTTPMethod(rawValue: req.httpMethod!),
-                                json: body
-                            )
-                        } else {
-                            return await s.requestData(
-                                url: req.url!,
-                                method: HTTPMethod(rawValue: req.httpMethod!),
-                                parameters: nil,
-                                encoding: URLEncoding.default,
-                                headers: nil
-                            )
-                        }
-                    }
-
-                    var msg = "[\(endpoint)] Token refresh failed with status \(http.statusCode)."
-                    if let raw2 = sessionResponse.data, !raw2.isEmpty {
-                        let snippet = String(decoding: raw2.prefix(1000), as: UTF8.self)
-                        msg += "\n── Refresh Raw (first 1000 bytes) ──\n\(snippet)\n────────"
-                    }
-                    throw PreferabliException(type: .APIError, message: msg, code: http.statusCode)
-
+                    return try await continueOrThrowPreferabliException(response: replayResponse)
                 } catch let e as PreferabliException {
+                    await api.forceLogoutAfterRefreshFailureIfNeeded()
+
                     var msg = "[\(endpoint)] \(e.getMessage())"
                     if let raw, !raw.isEmpty {
                         let snippet = String(decoding: raw.prefix(1000), as: UTF8.self)
                         msg += "\n── Original Raw (first 1000 bytes) ──\n\(snippet)\n────────"
                     }
+
                     throw PreferabliException(type: e.type, message: msg, code: e.getCode())
                 } catch {
-                    throw makeErr(.APIError, code: http.statusCode, message: "Token refresh/replay failed: \(error.localizedDescription)")
+                    await api.forceLogoutAfterRefreshFailureIfNeeded()
+                    throw makeErr(
+                        .APIError,
+                        code: http.statusCode,
+                        message: "Token refresh/replay failed: \(error.localizedDescription)"
+                    )
                 }
             }
 
@@ -331,6 +397,7 @@ extension APIService {
                 guard let dict = obj as? [String: Any] else {
                     throw makeErr(.APIError, code: http.statusCode, message: "API error body was not a dictionary.")
                 }
+
                 let apiError = APIError(map: dict)
                 if apiError.message != nil {
                     var msg = "[\(endpoint)] \(PreferabliException(error: apiError).getMessage())"
@@ -346,6 +413,7 @@ extension APIService {
             }
         }
 
+        // Non-HTTP AF error path
         if let af = response.error {
             if af.isExplicitlyCancelledError {
                 throw PreferabliException(
@@ -359,26 +427,35 @@ extension APIService {
                 throw PreferabliException(
                     type: .Cancelled,
                     message: "[\(endpoint)] Request cancelled.",
-                    code: urlErr.errorCode
+                    code: 0
                 )
             }
+
+            throw PreferabliException(
+                type: .APIError,
+                message: "[\(endpoint)] Alamofire error: \(af.localizedDescription)",
+                code: 0
+            )
         }
 
-        let af = response.error
-        let underlying = (af?.underlyingError as? URLError)
-        let ucode = underlying?.code.rawValue ?? 0
-        let udesc = underlying?.localizedDescription ?? af?.localizedDescription ?? "Unknown network error"
-
-        throw PreferabliException(
-            type: .NetworkError,
-            message: "[\(endpoint)] No HTTP response or data. Underlying: \(udesc)",
-            code: ucode
-        )
+        throw makeErr(.APIError, code: status ?? 0, message: "Unknown API error.", attachRaw: true)
     }
 
-    internal static func prettyJSONString(from data: Data) -> String {
+    internal static func continueOrThrowJSONException(data: Data) throws -> Any {
+        do {
+            return try JSONSerialization.jsonObject(with: data, options: [])
+        } catch {
+            let snippet = String(decoding: data.prefix(1000), as: UTF8.self)
+            throw PreferabliException(
+                type: .JSONError,
+                message: "JSON parse failed: \(error.localizedDescription)\n── Raw (first 1000 bytes) ──\n\(snippet)\n────────"
+            )
+        }
+    }
+
+    private static func prettyJSONString(from data: Data) -> String {
         guard
-            let obj = try? JSONSerialization.jsonObject(with: data),
+            let obj = try? JSONSerialization.jsonObject(with: data, options: []),
             let pretty = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted]),
             let s = String(data: pretty, encoding: .utf8)
         else {
@@ -386,23 +463,13 @@ extension APIService {
         }
         return s
     }
-
-    internal static func continueOrThrowJSONException(data: Data) throws -> Any {
-        do {
-            return try JSONSerialization.jsonObject(with: data, options: [])
-        } catch {
-            Analytics.track(["event": "error", "type": "JSON", "data": data.base64EncodedString()])
-            let snippet = String(decoding: data.prefix(1000), as: UTF8.self)
-            let msg = "JSON parse failed.\n── Raw (first 1000 bytes) ──\n\(snippet)\n────────"
-            throw PreferabliException(type: .JSONError, message: msg, code: 0)
-        }
-    }
 }
 
 // MARK: - API Endpoints
 
 internal struct APIEndpoints {
-    internal static let baseUrl = "https://api.preferabli.com/api/6.2/"
+    internal static let baseUrl = "https://api.preferabli.com/api/en/7.0/"
+
     internal static let sessions = baseUrl + "sessions"
     internal static let getRec = baseUrl + "recs"
     internal static let styles = baseUrl + "styles"
@@ -434,8 +501,13 @@ internal struct APIEndpoints {
     internal static let recipes = baseUrl + "integrations/1/recipes?limit=9999"
     internal static let recipeGroups = baseUrl + "integrations/1/recipe-groups?limit=9999"
     internal static let recipesForProducts = baseUrl + "integrations/1/recipes-for-products?limit=20"
+    internal static let hubspotDeal = baseUrl + "tastefuli/hubspot/deals"
+    internal static let stripePaymentIntent = baseUrl + "tastefuli/stripe/payment-intent"
+    internal static let reservations = baseUrl + "tastefuli/reservations?offset=0&limit=9999"
+    internal static let balloonBooking = baseUrl + "tastefuli/balloon-booking"
 
     internal static func venues(id: Int) -> String { baseUrl + "markets/\(id)/venues" }
+    internal static func experiences(marketId: Int) -> String { baseUrl + "tastefuli/markets/\(marketId)/experiences" }
     internal static func integration(id: Int) -> String { baseUrl + "integrations/\(id)" }
     internal static func lookupConversion(id: Int) -> String { baseUrl + "integrations/\(id)/lookups" }
     internal static func lttt(id: Int) -> String { baseUrl + "integration/\(id)/lttt" }
@@ -448,8 +520,13 @@ internal struct APIEndpoints {
     internal static func collection(id: Int) -> String { baseUrl + "collections/\(id)" }
     internal static func product(id: Int) -> String { baseUrl + "products/\(id)" }
     internal static func venue(id: Int) -> String { baseUrl + "venues/\(id)" }
-    internal static func experiences(id: Int) -> String { baseUrl + "venues/\(id)/experiences" }
-    internal static func reservations(id: Int) -> String { baseUrl + "users/\(id)/reservations" }
+    internal static func experiences(id: Int) -> String { baseUrl + "tastefuli/venues/\(id)/experiences" }
+    internal static func externalReservations(id: Int) -> String { baseUrl + "tastefuli/experiences/\(id)/external-reservation" }
+    internal static func externalReservation(id: Int) -> String { baseUrl + "tastefuli/reservations/\(id)" }
+    internal static func alternativeTimes(id: Int) -> String { baseUrl + "tastefuli/reservations/\(id)/alternative-times" }
+    internal static func internalReservations(id: Int) -> String { baseUrl + "tastefuli/experiences/\(id)/internal-reservation" }
+    internal static func searchExperiences(query : String) -> String { baseUrl + "tastefuli/experiences?search=\(query)&offset=0&limit=20" }
+    internal static func experience(id: Int, experienceId : Int) -> String { baseUrl + "venues/\(id)/experiences/\(experienceId)" }
     internal static func user(id: Int) -> String { baseUrl + "users/\(id)" }
     internal static func favoriteVenue(id: Int, venueId : Int) -> String { baseUrl + "users/\(id)/favorite-venues/\(venueId)" }
     internal static func tags(id: Int) -> String { baseUrl + "collections/\(id)/tags" }

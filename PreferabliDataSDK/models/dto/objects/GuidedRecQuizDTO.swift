@@ -47,4 +47,5 @@ public struct GuidedRecChoiceDTO : Decodable, Sendable, Identifiable, Hashable {
     public var number : Int?
     public var requires_choice_ids : [Int]?
     public var text : String?
+    public var description : String?
 }

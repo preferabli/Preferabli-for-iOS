@@ -26,7 +26,7 @@ public struct BalloonReservationDTO: Decodable, Sendable {
 public struct BalloonReservationItemDTO: Decodable, Sendable {
     public let meeting_point: String?
     public let meeting_point_coordinates: String?
-    public let qty: Int?
+    public let qty: String?
     public let sku: String?
     public let start_date: Int?
 
