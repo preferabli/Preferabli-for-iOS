@@ -52,6 +52,7 @@ public struct ReservationBrandDTO: Decodable, Sendable {
 public struct ReservationExperienceDTO: Decodable, Sendable {
     public let id: Int
     public let header_image_url: String?
+    public let preferabli_image_url: String?
     public let name: String?
 }
 

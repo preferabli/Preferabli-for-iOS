@@ -360,6 +360,7 @@ extension Storage {
         experience.badge_color = dto.badge_color ?? experience.badge_color
         experience.badge_text_color = dto.badge_text_color ?? experience.badge_text_color
         experience.primary_inventory_id = dto.primary_inventory_id ?? experience.primary_inventory_id
+        experience.preferabli_image_url = dto.preferabli_image_url ?? experience.preferabli_image_url
 
         try checkCancelledBeforeRelationshipWrite()
         if experience.venue.id != venue.id {
@@ -545,7 +546,7 @@ extension Storage {
         guard let name = dto.name else {
             return nil
         }
-        
+
         let v = try fetchOrInsert(Venue.self, id: dto.id, in: ctx) {
             Venue(id: dto.id, name: name)
         }
@@ -573,12 +574,55 @@ extension Storage {
         v.notes = dto.notes ?? v.notes
         v.is_partner = dto.is_partner ?? v.is_partner
 
-        // MARK: - Market edge (Venue <-> Market) is source-of-truth handled at the CALL LEVEL.
-        // Here we only ensure association when a market is provided.
-        if let m = market {
-            try checkCancelledBeforeRelationshipWrite()
-            if !v.markets.contains(where: { $0.id == m.id }) {
-                v.markets.append(m)
+        // MARK: - Market edges
+        // Attach to:
+        // - the queried parent market
+        // - every market listed in dto.market_ids
+        //
+        // When market is provided, treat this as the source-of-truth for the queried scope:
+        // parent + its submarkets.
+        if let parentMarket = market {
+            try checkCancelled()
+
+            let scopedMarketIDs = Set([parentMarket.id] + parentMarket.submarkets.map(\.id))
+            let dtoMarketIDs = Set(dto.market_ids ?? [])
+            let desiredMarketIDs = dtoMarketIDs.union([parentMarket.id])
+
+            // Remove stale scoped market links
+            if !v.markets.isEmpty {
+                try checkCancelledBeforeRelationshipWrite()
+                v.markets.removeAll { existing in
+                    scopedMarketIDs.contains(existing.id) && !desiredMarketIDs.contains(existing.id)
+                }
+            }
+
+            // Add missing scoped links
+            for desiredID in desiredMarketIDs {
+                try checkCancelled()
+
+                guard let resolvedMarket = try Storage.fetchById(Market.self, id: desiredID, in: ctx) else {
+                    continue
+                }
+
+                try checkCancelledBeforeRelationshipWrite()
+                if !v.markets.contains(where: { $0.id == resolvedMarket.id }) {
+                    v.markets.append(resolvedMarket)
+                }
+            }
+        } else if let dtoMarketIDs = dto.market_ids {
+            // Fallback when no parent scope is provided:
+            // only add listed markets, do not remove anything.
+            for mid in dtoMarketIDs {
+                try checkCancelled()
+
+                guard let resolvedMarket = try Storage.fetchById(Market.self, id: mid, in: ctx) else {
+                    continue
+                }
+
+                try checkCancelledBeforeRelationshipWrite()
+                if !v.markets.contains(where: { $0.id == resolvedMarket.id }) {
+                    v.markets.append(resolvedMarket)
+                }
             }
         }
 
@@ -750,15 +794,16 @@ extension Storage {
     ) throws {
         try checkCancelled()
 
+        let scopedMarketIDs = Set([market.id] + market.submarkets.map(\.id))
         let allVenues = try ctx.fetch(FetchDescriptor<Venue>())
 
         for v in allVenues {
             try checkCancelled()
 
-            let isInMarket = v.markets.contains(where: { $0.id == market.id })
-            if isInMarket && !keepVenueIDs.contains(v.id) {
+            let isInScopedMarket = v.markets.contains(where: { scopedMarketIDs.contains($0.id) })
+            if isInScopedMarket && !keepVenueIDs.contains(v.id) {
                 try checkCancelledBeforeRelationshipWrite()
-                v.markets.removeAll(where: { $0.id == market.id })
+                v.markets.removeAll(where: { scopedMarketIDs.contains($0.id) })
             }
         }
     }
@@ -1164,6 +1209,7 @@ extension Storage {
             r.experience_id = experienceDTO.id
             r.experience_name = experienceDTO.name ?? r.experience_name
             r.experience_header_image_url = experienceDTO.header_image_url ?? r.experience_header_image_url
+            r.experience_preferabli_image_url = experienceDTO.preferabli_image_url ?? r.experience_preferabli_image_url
         }
 
         // MARK: - Booking snapshot
@@ -1190,6 +1236,7 @@ extension Storage {
                 r.experience_id = bookingExperienceDTO.id
                 r.experience_name = bookingExperienceDTO.name ?? r.experience_name
                 r.experience_header_image_url = bookingExperienceDTO.header_image_url ?? r.experience_header_image_url
+                r.experience_preferabli_image_url = bookingExperienceDTO.preferabli_image_url ?? r.experience_preferabli_image_url
             }
         }
 
@@ -1642,11 +1689,12 @@ extension Storage {
         market.name = dto.name ?? market.name
         market.desc = dto.description ?? market.desc
         market.image_url = dto.image_url ?? market.image_url
-        market.order = dto.order ?? market.order
+        market.order = dto.top_level_order ?? market.order
         market.country_code = dto.country_code ?? market.country_code
         market.latitude = dto.latitude ?? market.latitude
         market.longitude = dto.longitude ?? market.longitude
-        market.top_level = dto.top_level ?? market.top_level
+        market.top_level = dto.top_level_order != nil
+        market.display_appellations = dto.display_appellations ?? market.display_appellations
         market.created_at = dto.created_at ?? market.created_at
         market.updated_at = dto.updated_at ?? market.updated_at
         market.default_span_delta = dto.default_span_delta ?? market.default_span_delta

@@ -32,6 +32,7 @@ public final class Reservation: HasIntID {
     public var experience_id: Int?
     public var experience_name: String?
     public var experience_header_image_url: String?
+    public var experience_preferabli_image_url: String?
 
     // MARK: - Booking snapshot
 

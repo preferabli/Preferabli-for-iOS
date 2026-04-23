@@ -51,6 +51,7 @@ public final class Experience: HasIntID, HasImage {
     public var cancellation_fee: String?
     public var primary_inventory_id: Int?
     public var reservations_provider: String?
+    public var preferabli_image_url: String?
 
     
     // MARK: - Relationships
@@ -81,7 +82,7 @@ public final class Experience: HasIntID, HasImage {
     }
     
     public func getImage(width: Int, height: Int, quality: Int = 80) -> URL? {
-        PreferabliTools.getImageUrl(image: header_image_url, width: width, height: height, quality: quality)
+        PreferabliTools.getImageUrl(image: preferabli_image_url ?? header_image_url ?? benefits.first?.image_url, width: width, height: height, quality: quality)
     }
 
     public func getPlaceholderImage() -> String? {

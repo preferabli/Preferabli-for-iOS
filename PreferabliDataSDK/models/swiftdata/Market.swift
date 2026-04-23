@@ -17,6 +17,7 @@ public final class Market: Identifiable, HasIntID, HasTimestamps, HasImage {
     public var order: Int?
     public var country_code: String?
     public var top_level: Bool?
+    public var display_appellations: Bool?
     public var default_span_delta: Double?
 
     // ✅ Tree

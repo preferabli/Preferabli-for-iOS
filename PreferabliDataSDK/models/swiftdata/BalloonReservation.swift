@@ -16,6 +16,7 @@ public final class BalloonReservation: HasStringID {
     public var customer_email: String?
     public var customer_name: String?
     public var customer_phone: String?
+    public var completed_safety_brief: Bool?
 
     @Relationship(deleteRule: .cascade)
     public var items: [BalloonReservationItem] = []

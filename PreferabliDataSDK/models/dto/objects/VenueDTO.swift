@@ -58,6 +58,7 @@ public struct VenueDTO: Decodable, Sendable {
     public let logo: MediaDTO?
     public let primary_image: MediaDTO?
     public let is_partner: Bool?
+    public let market_ids: [Int]?
 }
 
 public struct VenueMarketTraitDTO: Decodable, Sendable {

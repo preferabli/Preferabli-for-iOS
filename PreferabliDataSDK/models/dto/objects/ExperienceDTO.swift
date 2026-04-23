@@ -46,6 +46,7 @@ public struct ExperienceDTO: Decodable, Sendable {
     public let cancellation_fee: String?
     public let primary_inventory_id: Int?
     public let reservations_provider: String?
+    public let preferabli_image_url: String?
 
     public let experience_benefits: [ExperienceBenefitDTO]?
     public let operation_hours_normal: [ExperienceOperationHoursNormalDTO]?
@@ -91,6 +92,7 @@ public struct ExperienceDTO: Decodable, Sendable {
         case badge_subtitle
         case badge_color
         case badge_text_color
+        case preferabli_image_url
         
         case experience_benefits = "benefits"
         case operation_hours_normal

@@ -505,6 +505,7 @@ internal struct APIEndpoints {
     internal static let stripePaymentIntent = baseUrl + "tastefuli/stripe/payment-intent"
     internal static let reservations = baseUrl + "tastefuli/reservations?offset=0&limit=9999"
     internal static let balloonBooking = baseUrl + "tastefuli/balloon-booking"
+    internal static let completeSafetyBrief = baseUrl + "tastefuli/balloon-booking/safety-brief"
 
     internal static func venues(id: Int) -> String { baseUrl + "markets/\(id)/venues" }
     internal static func experiences(marketId: Int) -> String { baseUrl + "tastefuli/markets/\(marketId)/experiences" }
@@ -512,6 +513,7 @@ internal struct APIEndpoints {
     internal static func lookupConversion(id: Int) -> String { baseUrl + "integrations/\(id)/lookups" }
     internal static func lttt(id: Int) -> String { baseUrl + "integration/\(id)/lttt" }
     internal static func customer(id: Int, customerId: Int) -> String { baseUrl + "channels/\(id)/customers/\(customerId)" }
+    internal static func stripePaymentMethod(id: String) -> String { baseUrl + "tastefuli/stripe/payment-intent/\(id)" }
     internal static func guidedRec(id: Int) -> String { baseUrl + "questionnaire/\(id)" }
     internal static func guidedRecResults() -> String { baseUrl + "query" }
     internal static func guidedRecResults(id: Int) -> String { baseUrl + "query?override_collection_ids[]=\(id)" }
@@ -522,7 +524,7 @@ internal struct APIEndpoints {
     internal static func venue(id: Int) -> String { baseUrl + "venues/\(id)" }
     internal static func experiences(id: Int) -> String { baseUrl + "tastefuli/venues/\(id)/experiences" }
     internal static func externalReservations(id: Int) -> String { baseUrl + "tastefuli/experiences/\(id)/external-reservation" }
-    internal static func externalReservation(id: Int) -> String { baseUrl + "tastefuli/reservations/\(id)" }
+    internal static func reservation(id: Int) -> String { baseUrl + "tastefuli/reservations/\(id)" }
     internal static func alternativeTimes(id: Int) -> String { baseUrl + "tastefuli/reservations/\(id)/alternative-times" }
     internal static func internalReservations(id: Int) -> String { baseUrl + "tastefuli/experiences/\(id)/internal-reservation" }
     internal static func searchExperiences(query : String) -> String { baseUrl + "tastefuli/experiences?search=\(query)&offset=0&limit=20" }

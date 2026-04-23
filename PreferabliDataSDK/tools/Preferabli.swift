@@ -530,7 +530,7 @@ public class Preferabli {
             try await canWeContinue(needsToBeLoggedIn: true)
             Analytics.track( ["event" : "cancel_reservation"])
 
-            let response = try await api.getAlamo().delete(APIEndpoints.externalReservation(id: reservation_id) + "?cancellation_reason=Customer%20requested%20cancellation")
+            let response = try await api.getAlamo().delete(APIEndpoints.reservation(id: reservation_id) + "?cancellation_reason=Customer%20requested%20cancellation")
             
             let body: ReservationsResponseDTO = try await api.getAlamo().get(APIEndpoints.reservations)
             
@@ -560,7 +560,7 @@ public class Preferabli {
                 "time": time
             ]
 
-            let response : ReservationResponseDTO = try await api.getAlamo().put(APIEndpoints.alternativeTimes(id: reservation_id), sjson: dictionary)
+            let response = try await api.getAlamo().put(APIEndpoints.alternativeTimes(id: reservation_id), sjson: dictionary)
             
             let body: ReservationsResponseDTO = try await api.getAlamo().get(APIEndpoints.reservations)
             
@@ -579,7 +579,6 @@ public class Preferabli {
     }
     
     public func updateReservation(
-        external : Bool,
         reservation_id: Int,
         date : String?,
         time : String?,
@@ -610,13 +609,8 @@ public class Preferabli {
                 dictionary["specific_requests"] = specific_requests
             }
 
-            let response : ReservationResponseDTO
-            if (external) {
-                response = try await api.getAlamo().post(APIEndpoints.externalReservation(id: reservation_id), sjson: dictionary)
-            } else {
-                response = try await api.getAlamo().post(APIEndpoints.externalReservation(id: reservation_id), sjson: dictionary)
-            }
-            
+            try await api.getAlamo().put(APIEndpoints.reservation(id: reservation_id), sjson: dictionary)
+
             let body: ReservationsResponseDTO = try await api.getAlamo().get(APIEndpoints.reservations)
             
             try await Storage.withBackgroundContext { ctx in
@@ -639,7 +633,7 @@ public class Preferabli {
         date: String,
         requested_times: [String],
         guests: [[String: Any]],
-        reservation_source: String = "website"
+        payment_method_id: String? = nil
     ) async throws -> Int {
         do {
             try await canWeContinue(needsToBeLoggedIn: true)
@@ -647,19 +641,24 @@ public class Preferabli {
             
             var guestParams = [SParams]()
             for guest in guests {
-                var guestParam: SParams = [
+                let guestParam: SParams = [
                     "price_id": guest["price_id"] as! Int,
                     "quantity": guest["quantity"] as! Int
                 ]
+                guestParams.append(guestParam)
             }
 
-            let dictionary: SParams = [
+            var dictionary: SParams = [
                 "date": date,
                 "requested_times": requested_times,
                 "guests": guestParams,
-                "reservation_source": reservation_source,
+                "reservation_source": "v3_ios_app",
                 "hubspot_deal_id": hubspot_deal_id
             ]
+            
+            if let payment_method_id {
+                dictionary["payment_method_id"] = payment_method_id
+            }
 
             let response: InternalReservationResponseDTO = try await api
                 .getAlamo()
@@ -764,7 +763,7 @@ public class Preferabli {
         experience_id : Int
     ) async throws -> String {
         do {
-            try await canWeContinue(needsToBeLoggedIn: false)
+            try await canWeContinue(needsToBeLoggedIn: true)
             Analytics.track( ["event" : "create_hubspot_deal"])
             
             var dictionary: SParams = ["experience_id" : experience_id]
@@ -785,7 +784,7 @@ public class Preferabli {
         email: String
     ) async throws -> StripeResponseDTO {
         do {
-            try await canWeContinue(needsToBeLoggedIn: false)
+            try await canWeContinue(needsToBeLoggedIn: true)
             Analytics.track(["event": "create_stripe_payment_intent"])
 
             let dictionary: SParams = [
@@ -797,6 +796,26 @@ public class Preferabli {
             let response: StripeResponseDTO = try await api
                 .getAlamo()
                 .post(APIEndpoints.stripePaymentIntent, sjson: dictionary)
+
+            return response
+
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    
+    public func getStripePaymentMethod(
+        intent_id: String
+    ) async throws -> StripeMethodResponseDTO {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            Analytics.track(["event": "get_stripe_payment_method"])
+
+            let response: StripeMethodResponseDTO = try await api
+                .getAlamo()
+                .get(APIEndpoints.stripePaymentMethod(id: intent_id))
 
             return response
 
@@ -1783,7 +1802,7 @@ public class Preferabli {
             
             Analytics.track(["event": "get_venues"])
             
-            let params: SParams = ["limit": 9999, "offset": 0]
+            let params: SParams = ["limit": 9999, "offset": 0, "include_submarket_venues": true]
             let body: [VenueDTO] = try await api.getAlamo().get(APIEndpoints.venues(id: market_id), sparams: params)
             
             let venueIds: [Int] = try await Storage.withBackgroundContext { ctx in
@@ -2284,6 +2303,53 @@ public class Preferabli {
             
             return reservationId
             
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func completeSafetyBrief(
+        email: String,
+        firstname: String,
+        lastname: String,
+        phone: String,
+        marketing_sign_up_requested: String,
+        booking_id: String,
+        date_of_birth: String
+    ) async throws {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+
+            Analytics.track([
+                "event": "complete_safety_brief",
+                "booking_id": booking_id
+            ])
+
+            let params: SParams = [
+                "email": email,
+                "firstname": firstname,
+                "lastname": lastname,
+                "phone": phone,
+                "completed_safety_brief": true,
+                "marketing_sign_up_requested": marketing_sign_up_requested,
+                "completed_safety_brief_platform": "v3_ios_app",
+                "booking_id": booking_id,
+                "date_of_birth": date_of_birth
+            ]
+
+            try await api.getAlamo().post(APIEndpoints.completeSafetyBrief, sjson: params)
+
+            try await Storage.withBackgroundContext { ctx in
+                guard let reservation = try Storage.fetchById(BalloonReservation.self, id: booking_id, in: ctx) else {
+                    return
+                }
+                
+                reservation.completed_safety_brief = true
+                
+                try ctx.save()
+            }
+
         } catch {
             handleError(error: error)
             throw error

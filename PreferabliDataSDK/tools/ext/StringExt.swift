@@ -17,6 +17,11 @@ extension NSAttributedString {
 
 extension String {
     
+    public var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+    
     public var flagEmoji: String {
         let upper = self.uppercased()
         guard upper.count == 2, upper.unicodeScalars.allSatisfy({ ("A"..."Z").contains(Character($0)) }) else {

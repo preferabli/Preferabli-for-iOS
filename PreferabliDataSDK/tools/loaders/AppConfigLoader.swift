@@ -42,6 +42,19 @@ final class AppConfigLoader {
             return
         }
 
+        do {
+            // Keep config loading aligned with the rest of the SDK API surface.
+            // This waits until startup has created the anonymous session and loaded
+            // integration/channel state before the config request is allowed to run.
+            try await preferabli.canWeContinue(needsToBeLoggedIn: false)
+        } catch {
+            await MainActor.run {
+                preferabli.handleError(error: error)
+            }
+            await loadCached()
+            return
+        }
+
         await refresh()
     }
 

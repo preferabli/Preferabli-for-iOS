@@ -65,8 +65,6 @@ public extension ProfileProductKind {
     }
 
     /// Total number of styles per type (from legacy `getTotalStyleCount`).
-    ///
-    /// NOTE: Beer includes legacy RTD total here (111 + 103 = 214).
     var totalStyleCount: Int {
         switch self {
         case .red:        return 213
@@ -76,42 +74,31 @@ public extension ProfileProductKind {
         case .fortified:  return 24
         case .whiskey:    return 72
         case .mezcal:     return 45
-        case .beer:       return 214
+        case .beer:       return 197
         case .cheese:     return 132
         case .vodka:      return 37
         case .gin:        return 40
         case .rum:        return 50
         case .sake:       return 93
-        case .cocktail:   return 218
+        case .cocktail:   return 219
         }
     }
 
+    /// Total styles across all kinds.
+    static var totalStyleCountAcrossAllKinds: Int {
+        allCases.reduce(0) { $0 + $1.totalStyleCount }
+    }
+
     /// Highest score per type (from legacy `getHighestScore`).
-    ///
-    /// NOTE: Beer includes legacy RTD highest score here (152 + 10 = 162).
     var highestScore: Int {
         return totalStyleCount * 4
     }
 
-    /// Multipliers used in Andrew's "top score" formula.
-    /// (Same as legacy, with RTD folded into Beer.)
+    /// Multiplier based on this kind's share of total styles across all kinds.
     var topScoreMultiplier: CGFloat {
-        switch self {
-        case .red:        return 0.1249125
-        case .white:      return 0.1163348
-        case .rose:       return 0.0685858
-        case .sparkling:  return 0.0862457
-        case .fortified:  return 0.0796469
-        case .whiskey:    return 0.1025299
-        case .mezcal:     return 0.0897207
-        case .beer:       return 0.1067362
-        case .cheese:     return 0.1152489
-        case .vodka:      return 0
-        case .gin:        return 0
-        case .rum:        return 0
-        case .sake:       return 0
-        case .cocktail:   return 0
-        }
+        let total = Self.totalStyleCountAcrossAllKinds
+        guard total > 0 else { return 0 }
+        return CGFloat(totalStyleCount) / CGFloat(total)
     }
 
     /// All wine kinds as a convenience.
