@@ -8,6 +8,7 @@
 
 import Foundation
 import UIKit
+import SwiftUI
 
 extension NSAttributedString {
     public func isEmptyOrWhitespace() -> Bool {
@@ -103,3 +104,73 @@ extension Optional where Wrapped: Swift.Collection {
     }
 }
 
+extension String {
+    public func formattedHTMLString(
+        baseColor: Color = .black
+    ) -> AttributedString {
+        var html = trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if html.hasPrefix("\""), html.hasSuffix("\"") {
+            html.removeFirst()
+            html.removeLast()
+        }
+
+        html = html
+            .replacingOccurrences(of: "\\/", with: "/")
+            .replacingOccurrences(of: "\\\"", with: "\"")
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+
+        var result = AttributedString()
+        var isBold = false
+
+        let pattern = #"(<[^>]+>|[^<]+)"#
+        let regex = try? NSRegularExpression(pattern: pattern)
+
+        let nsRange = NSRange(html.startIndex..<html.endIndex, in: html)
+
+        regex?.enumerateMatches(in: html, range: nsRange) { match, _, _ in
+            guard
+                let match,
+                let range = Range(match.range, in: html)
+            else { return }
+
+            let token = String(html[range])
+            let lower = token.lowercased()
+
+            switch lower {
+            case "<strong>", "<b>":
+                isBold = true
+
+            case "</strong>", "</b>":
+                isBold = false
+
+            case "<br>", "<br/>", "<br />", "</p>":
+                result.append(AttributedString("\n\n"))
+
+            default:
+                guard !token.hasPrefix("<") else { return }
+
+                var piece = AttributedString(token.htmlEntityDecoded)
+                piece.foregroundColor = baseColor
+
+                if isBold {
+                    piece.font = .system(.body).bold()
+                }
+
+                result.append(piece)
+            }
+        }
+
+        return result
+    }
+
+    private var htmlEntityDecoded: String {
+        self
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&apos;", with: "'")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+    }
+}

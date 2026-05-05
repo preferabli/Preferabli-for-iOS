@@ -59,17 +59,21 @@ public final class Experience: HasIntID, HasImage {
     @Relationship(deleteRule: .nullify)
     public var venue: Venue
 
-    @Relationship(deleteRule: .cascade)
+
+    @Relationship(deleteRule: .cascade, inverse: \ExperienceBenefit.experience)
     public var benefits: [ExperienceBenefit] = []
 
-    @Relationship(deleteRule: .cascade)
+    @Relationship(deleteRule: .cascade, inverse: \ExperienceOperationHoursNormal.experience)
     public var operation_hours_normals: [ExperienceOperationHoursNormal] = []
 
-    @Relationship(deleteRule: .nullify)
+    @Relationship(deleteRule: .nullify, inverse: \ExperiencePrice.experience)
     public var prices: [ExperiencePrice] = []
 
-    @Relationship
+    @Relationship(inverse: \ExperienceType.experiences)
     public var experience_types: [ExperienceType] = []
+    
+    @Relationship
+    public var affiliates: [Affiliate] = []
 
     public init(id: Int, name: String, venue: Venue) {
         self.id = id
@@ -99,6 +103,8 @@ public final class ExperienceBenefit: HasIntID {
     public var image_url: String?
     public var subtitle: String?
     public var title: String?
+    
+    public var experience: Experience?
 
     public init(id: Int) {
         self.id = id
@@ -118,6 +124,8 @@ public final class ExperienceOperationHoursNormal: HasIntID {
     public var experience_id: Int?
     public var increment: Int?
     public var start_times: [String] = []
+    
+    public var experience: Experience?
 
     public init(id: Int) {
         self.id = id
@@ -146,6 +154,8 @@ public final class ExperiencePrice: HasIntID {
     public var price: Double?
     public var price_type: String?
     public var stripe_product_price_id: String?
+    
+    public var experience: Experience?
 
     public init(id: Int) {
         self.id = id
@@ -170,6 +180,8 @@ public final class ExperienceType: HasIntID {
     public var market_id: Int?
     public var preferabli_market_trait_id: Int?
     public var name: String?
+    
+    public var experiences: [Experience] = []
 
     public init(id: Int) {
         self.id = id

@@ -24,3 +24,26 @@ extension Array {
         return self[idx]
     }
 }
+
+extension Sequence where Element: Hashable {
+    public func uniqued() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
+    }
+}
+
+extension Array where Element == String {
+    public func uniquedCaseInsensitive() -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+
+        for value in self {
+            let key = value.lowercased()
+            if seen.insert(key).inserted {
+                result.append(value)
+            }
+        }
+
+        return result
+    }
+}

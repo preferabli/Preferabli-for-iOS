@@ -506,6 +506,8 @@ internal struct APIEndpoints {
     internal static let reservations = baseUrl + "tastefuli/reservations?offset=0&limit=9999"
     internal static let balloonBooking = baseUrl + "tastefuli/balloon-booking"
     internal static let completeSafetyBrief = baseUrl + "tastefuli/balloon-booking/safety-brief"
+    internal static let affiliates = baseUrl + "tastefuli/affiliates"
+    internal static let affiliateCodes = baseUrl + "tastefuli/affiliates-for-codes"
 
     internal static func venues(id: Int) -> String { baseUrl + "markets/\(id)/venues" }
     internal static func experiences(marketId: Int) -> String { baseUrl + "tastefuli/markets/\(marketId)/experiences" }

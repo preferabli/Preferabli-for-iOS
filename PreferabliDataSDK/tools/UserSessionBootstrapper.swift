@@ -79,6 +79,11 @@ final class UserSessionBootstrapper {
                 await preferabli.profileHelper.recomputeHasTasteProfileGateIfPossible()
 
                 _ = try await preferabli.getProfile()
+                
+                await refreshAffiliatesIfNeeded(
+                    preferabli: preferabli,
+                    force: force
+                )
 
                 await preferabli.profileStatsCoordinator.ensureStatsReady(
                     forceRefreshProfile: false,
@@ -104,9 +109,24 @@ final class UserSessionBootstrapper {
         await t.value
         self.sessionBootstrapTask = nil
     }
+    
+    private func refreshAffiliatesIfNeeded(
+        preferabli: Preferabli,
+        force: Bool
+    ) async {
+        guard AffiliateRefreshGate.shouldRefresh(force: force) else { return }
+
+        do {
+            _ = try await preferabli.getAffiliates()
+            AffiliateRefreshGate.markRefreshed()
+        } catch {
+            // Silent by design — do NOT block bootstrap or show errors
+        }
+    }
 
     /// Call on logout / user switch.
     func reset(preferabli: Preferabli) {
+        AffiliateRefreshGate.reset()
         sessionBootstrappedOnce = false
         sessionBootstrapTask?.cancel()
         sessionBootstrapTask = nil
@@ -183,5 +203,27 @@ public enum CellarWarmup {
             // Silent by design (warmup)
             await MainActor.run { preferabli.handleError(error: error) } // optional
         }
+    }
+}
+
+private enum AffiliateRefreshGate {
+    static let key = "affiliates.lastRefreshDate"
+    static let maxDays = 60
+
+    static func shouldRefresh(force: Bool) -> Bool {
+        if force { return true }
+
+        let ts = Storage.getKeyStore().double(forKey: key)
+        let date = ts > 0 ? Date(timeIntervalSince1970: ts) : nil
+
+        return PreferabliTools.hasDaysPassed(days: maxDays, startDate: date)
+    }
+
+    static func markRefreshed() {
+        Storage.getKeyStore().set(Date().timeIntervalSince1970, forKey: key)
+    }
+
+    static func reset() {
+        Storage.getKeyStore().removeObject(forKey: key)
     }
 }

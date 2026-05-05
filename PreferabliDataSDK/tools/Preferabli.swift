@@ -118,21 +118,21 @@ public class Preferabli {
             
             // 2) Only after startup work completes, do maintenance (background).
             // Serialize prune -> reindex to avoid concurrent graph churn.
-            //            Task.detached(priority: .background) {
-            //                await Storage.pruneTombstones(batchSize: 150, log: log)
-            //
-            //                // Gate expensive reindex so it only runs when needed.
-            //                // Tie it to versionCode (or schema hash) so upgrades trigger it.
-            //                let ks = Storage.getKeyStore()
-            //                let reindexKey = "didReindexSearchableContent_v\(await Preferabli.versionCode)"
-            //
-            //                if !ks.bool(forKey: reindexKey) {
-            //                    await Storage.reindexSearchableContent(batchSize: 250, log: log)
-            //                    ks.set(true, forKey: reindexKey)
-            //                } else {
-            //                    log("Skipping reindex (already completed for \(reindexKey))")
-            //                }
-            //            }
+            PreferabliTools.detachedCancellableTask(priority: .background) {
+                            await Storage.pruneTombstones(batchSize: 150, log: log)
+            
+                            // Gate expensive reindex so it only runs when needed.
+                            // Tie it to versionCode (or schema hash) so upgrades trigger it.
+                            let ks = Storage.getKeyStore()
+                            let reindexKey = "didReindexSearchableContent_v\(await Preferabli.versionCode)"
+            
+                            if !ks.bool(forKey: reindexKey) {
+                                await Storage.reindexSearchableContent(batchSize: 250, log: log)
+                                ks.set(true, forKey: reindexKey)
+                            } else {
+                                log("Skipping reindex (already completed for \(reindexKey))")
+                            }
+                        }
         }
     }
     
@@ -627,6 +627,50 @@ public class Preferabli {
         }
     }
     
+    public func updateInternalReservation(
+        reservation_id: Int,
+        date: String,
+        requested_times: [String],
+        guests: [[String: Any]]
+    ) async throws {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            Analytics.track(["event": "update_internal_reservation"])
+            
+            var guestParams = [SParams]()
+            for guest in guests {
+                let guestParam: SParams = [
+                    "price_id": guest["price_id"] as! Int,
+                    "quantity": guest["quantity"] as! Int
+                ]
+                guestParams.append(guestParam)
+            }
+
+            var dictionary: SParams = [
+                "date": date,
+                "requested_times": requested_times,
+                "guests": guestParams,
+            ]
+
+            try await api.getAlamo().put(APIEndpoints.reservation(id: reservation_id), sjson: dictionary)
+
+            let body: ReservationsResponseDTO = try await api
+                .getAlamo()
+                .get(APIEndpoints.reservations)
+
+            try await Storage.withBackgroundContext { ctx in
+                for dto in body.data {
+                    try Storage.upsertReservation(from: dto, in: ctx)
+                }
+                try ctx.save()
+            }
+
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
     public func createInternalReservation(
         experience_id: Int,
         hubspot_deal_id: String,
@@ -772,6 +816,86 @@ public class Preferabli {
             
             return response.hubspot_deal_id
             
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func unlockAffiliates(
+        codes: [String]
+    ) async throws -> [Int] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "unlock_affiliate"])
+
+            let dictionary: SParams = ["codes": codes]
+            
+            let affiliateArray: [AffiliateDTO]
+
+            if Preferabli.isPreferabliUserLoggedIn() {
+                affiliateArray = try await api.getAlamo().post(
+                    APIEndpoints.affiliates,
+                    sjson: dictionary
+                )
+            } else {
+                let response: AffiliatesResponseDTO = try await api.getAlamo().get(
+                    APIEndpoints.affiliateCodes,
+                    sparams: dictionary
+                )
+                affiliateArray = response.data
+            }
+            
+            
+
+            
+            let ids : [Int] = try await Storage.withBackgroundContext { ctx in
+                var idsToReturn = [Int]()
+                for affiliateDTO in affiliateArray {
+                    try Storage.upsertAffiliate(from: affiliateDTO, in: ctx)
+                    idsToReturn.append(Int(affiliateDTO.id))
+                }
+
+                try ctx.save()
+                return idsToReturn
+            }
+
+            if affiliateArray.isEmpty {
+                throw PreferabliException.init(type: .BadData, message: "No affiliate(s) found.", code: 404)
+            }
+            
+            return ids
+
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func getAffiliates() async throws -> [Int] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            Analytics.track(["event": "get_affiliates"])
+
+            let response: AffiliatesResponseDTO = try await api.getAlamo().get(APIEndpoints.affiliates)
+
+            let ids : [Int] = try await Storage.withBackgroundContext { ctx in
+                var idsToReturn = [Int]()
+                for affiliateDTO in response.data {
+                    try Storage.upsertAffiliate(from: affiliateDTO, in: ctx)
+                    idsToReturn.append(Int(affiliateDTO.id))
+                }
+
+                try ctx.save()
+                return idsToReturn
+            }
+
+            if response.data.isEmpty {
+                throw PreferabliException.init(type: .BadData, message: "No affiliate(s) found.", code: 404)
+            }
+            
+            return ids
+
         } catch {
             handleError(error: error)
             throw error
@@ -1799,39 +1923,50 @@ public class Preferabli {
     public func getVenues(market_id: Int) async throws -> [Int] {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
-            
+
             Analytics.track(["event": "get_venues"])
-            
-            let params: SParams = ["limit": 9999, "offset": 0, "include_submarket_venues": true]
-            let body: [VenueDTO] = try await api.getAlamo().get(APIEndpoints.venues(id: market_id), sparams: params)
-            
+
+            let params: SParams = [
+                "limit": 9999,
+                "offset": 0,
+                "include_submarket_venues": true
+            ]
+
+            let body: [VenueDTO] = try await api.getAlamo().get(
+                APIEndpoints.venues(id: market_id),
+                sparams: params
+            )
+
             let venueIds: [Int] = try await Storage.withBackgroundContext { ctx in
+                guard let market = try Storage.fetchById(Market.self, id: market_id, in: ctx) else {
+                    throw PreferabliException(
+                        type: .BadSwiftData,
+                        message: "Could not get venues due to lack of a market. This should never happen.",
+                        code: 659
+                    )
+                }
+
+                let batch = try Storage.VenueUpsertBatch(
+                    venueDTOs: body,
+                    market: market,
+                    in: ctx
+                )
+
                 var venueIds: [Int] = []
                 venueIds.reserveCapacity(body.count)
-                
-                guard let market = try Storage.fetchById(Market.self, id: market_id, in: ctx) else {
-                    throw PreferabliException.init(type: .BadSwiftData, message: "Could not get venues due to lack of a market. This should never happen.", code: 659)
-                }
-                
-                // 1) Keep set from API
-                let keepIDs = Set(body.map(\.id))
-                
-                // 2) Upsert returned venues + ensure they're linked to this market
-                for venueDTO in body {
-                    if let venue = try Storage.upsertVenue(from: venueDTO, market: market, in: ctx) {
+
+                for dto in body {
+                    if let venue = try Storage.upsertVenue(from: dto, market: market, batch: batch, in: ctx) {
                         venueIds.append(venue.id)
                     }
                 }
-                
-                // 3) Source-of-truth for Market<->Venue: remove market from venues not in response
-                try Storage.disassociateVenuesNotInSet(keepVenueIDs: keepIDs, from: market, in: ctx)
-                
+
                 try ctx.save()
                 return venueIds
             }
-            
+
             return venueIds
-            
+
         } catch {
             handleError(error: error)
             throw error

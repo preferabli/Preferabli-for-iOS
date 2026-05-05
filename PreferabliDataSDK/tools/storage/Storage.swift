@@ -331,6 +331,7 @@ private enum ModelRegistry {
         add(ExperienceOperationHoursNormal.self)
         add(ExperienceBenefit.self)
         add(Experience.self)
+        add(Affiliate.self)
         
         add(BalloonReservationItem.self)
         add(BalloonReservation.self)

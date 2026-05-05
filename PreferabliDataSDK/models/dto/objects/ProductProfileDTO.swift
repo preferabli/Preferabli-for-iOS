@@ -73,7 +73,9 @@ public struct ProductProfileDTO: Decodable, Sendable {
             // cheese
             "aromatic_percent":  (2, "aromatic"),
             "savouriness_percent": (3, "savouriness"),
-            "firmness_percent":  (4, "firmness")
+            "firmness_percent":  (4, "firmness"),
+            // cocktail
+            "complexity_percent":  (3, "complexity")
         ]
 
         // Temp arrays so we can address by index easily

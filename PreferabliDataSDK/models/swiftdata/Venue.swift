@@ -23,6 +23,7 @@ import SwiftData
 public final class Venue: HasIntID, HasTimestamps, HasImage {
     
     @Attribute(.unique) public var id: Int
+    @Attribute public var market_ids_cache: [Int] = []
     public var created_at: Date = Foundation.Date.now
     public var updated_at: Date = Foundation.Date.now
     public var address_l1: String?

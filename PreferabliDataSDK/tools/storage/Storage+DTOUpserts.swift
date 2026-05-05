@@ -301,10 +301,63 @@ extension Storage {
         let m = try fetchOrInsert(Media.self, id: dto.id, in: ctx) { Media(id: dto.id) }
         m.id = dto.id
         m.path = dto.path ?? m.path
-        m.created_at = dto.created_at ?? m.created_at
-        m.updated_at = dto.updated_at ?? m.updated_at
         m.type = dto.type ?? m.type
         return m
+    }
+    
+    @discardableResult
+    nonisolated static func upsertAffiliate(
+        from dto: AffiliateDTO,
+        in ctx: ModelContext
+    ) throws -> Affiliate? {
+
+        try checkCancelled()
+
+        let affiliate = try fetchOrInsert(Affiliate.self, id: dto.id, in: ctx) {
+            Affiliate(id: dto.id)
+        }
+
+        affiliate.affiliate_code = dto.affiliate_code ?? affiliate.affiliate_code
+        affiliate.affiliate_param = dto.affiliate_param ?? affiliate.affiliate_param
+        affiliate.affiliate_description = dto.description ?? affiliate.affiliate_description
+        affiliate.filter_visible = dto.filter_visible ?? affiliate.filter_visible
+        affiliate.header_image_url = dto.header_image_url ?? affiliate.header_image_url
+        affiliate.logo_image_url = dto.logo_image_url ?? affiliate.logo_image_url
+        affiliate.market_id = dto.market_id ?? affiliate.market_id
+        affiliate.name = dto.name ?? affiliate.name
+        affiliate.order = dto.order ?? affiliate.order
+        affiliate.slug = dto.slug ?? affiliate.slug
+        affiliate.title = dto.title ?? affiliate.title
+        affiliate.visible = dto.visible ?? affiliate.visible
+
+        if let experienceDTOs = dto.experiences {
+            var newExperiences: [Experience] = []
+            newExperiences.reserveCapacity(experienceDTOs.count)
+
+            for experienceDTO in experienceDTOs {
+                try checkCancelled()
+
+                guard
+                    let venueID = experienceDTO.preferabli_venue_id,
+                    let venue = try Storage.fetchById(Venue.self, id: venueID, in: ctx)
+                else {
+                    continue
+                }
+
+                let experience = try upsertExperience(
+                    from: experienceDTO,
+                    venue: venue,
+                    in: ctx
+                )
+
+                newExperiences.append(experience)
+            }
+
+            try checkCancelledBeforeRelationshipWrite()
+            affiliate.experiences = newExperiences
+        }
+
+        return affiliate
     }
 
     @discardableResult
@@ -539,7 +592,7 @@ extension Storage {
     // MARK: Venue
 
     @discardableResult
-    nonisolated static func upsertVenue(from dto: VenueDTO, market: Market? = nil, in ctx: ModelContext) throws -> Venue? {
+    nonisolated static func upsertVenue(from dto: VenueDTO, in ctx: ModelContext) throws -> Venue? {
 
         try checkCancelled()
 
@@ -551,81 +604,37 @@ extension Storage {
             Venue(id: dto.id, name: name)
         }
 
-        // MARK: - Fields
-        v.address_l1 = dto.address_l1 ?? v.address_l1
-        v.address_l2 = dto.address_l2 ?? v.address_l2
-        v.city = dto.city ?? v.city
-        v.country = dto.country ?? v.country
-        v.display_name = dto.display_name ?? v.display_name
-        v.lat = dto.lat ?? v.lat
-        v.lon = dto.lon ?? v.lon
-        v.primary_inventory_id = dto.primary_inventory_id ?? v.primary_inventory_id
-        v.featured_collection_id = dto.featured_collection_id ?? v.featured_collection_id
-        v.is_virtual = dto.is_virtual ?? v.is_virtual
-        v.phone = dto.phone ?? v.phone
-        v.email_address = dto.email_address ?? v.email_address
-        v.state = dto.state ?? v.state
-        v.url = dto.url ?? v.url
-        v.url_facebook = dto.url_facebook ?? v.url_facebook
-        v.url_instagram = dto.url_instagram ?? v.url_instagram
-        v.url_twitter = dto.url_twitter ?? v.url_twitter
-        v.url_youtube = dto.url_youtube ?? v.url_youtube
-        v.zip_code = dto.zip_code ?? v.zip_code
-        v.notes = dto.notes ?? v.notes
-        v.is_partner = dto.is_partner ?? v.is_partner
+        // MARK: - Fields (nil means clear; write only if changed)
 
-        // MARK: - Market edges
-        // Attach to:
-        // - the queried parent market
-        // - every market listed in dto.market_ids
-        //
-        // When market is provided, treat this as the source-of-truth for the queried scope:
-        // parent + its submarkets.
-        if let parentMarket = market {
-            try checkCancelled()
+        if v.address_l1 != dto.address_l1 { v.address_l1 = dto.address_l1 }
+        if v.address_l2 != dto.address_l2 { v.address_l2 = dto.address_l2 }
+        if v.city != dto.city { v.city = dto.city }
+        if v.country != dto.country { v.country = dto.country }
+        if v.display_name != dto.display_name { v.display_name = dto.display_name }
 
-            let scopedMarketIDs = Set([parentMarket.id] + parentMarket.submarkets.map(\.id))
-            let dtoMarketIDs = Set(dto.market_ids ?? [])
-            let desiredMarketIDs = dtoMarketIDs.union([parentMarket.id])
+        if v.lat != dto.lat { v.lat = dto.lat }
+        if v.lon != dto.lon { v.lon = dto.lon }
 
-            // Remove stale scoped market links
-            if !v.markets.isEmpty {
-                try checkCancelledBeforeRelationshipWrite()
-                v.markets.removeAll { existing in
-                    scopedMarketIDs.contains(existing.id) && !desiredMarketIDs.contains(existing.id)
-                }
-            }
+        if v.primary_inventory_id != dto.primary_inventory_id { v.primary_inventory_id = dto.primary_inventory_id }
+        if v.featured_collection_id != dto.featured_collection_id { v.featured_collection_id = dto.featured_collection_id }
 
-            // Add missing scoped links
-            for desiredID in desiredMarketIDs {
-                try checkCancelled()
+        if v.is_virtual != dto.is_virtual { v.is_virtual = dto.is_virtual }
 
-                guard let resolvedMarket = try Storage.fetchById(Market.self, id: desiredID, in: ctx) else {
-                    continue
-                }
+        if v.phone != dto.phone { v.phone = dto.phone }
+        if v.email_address != dto.email_address { v.email_address = dto.email_address }
+        if v.state != dto.state { v.state = dto.state }
+        if v.url != dto.url { v.url = dto.url }
 
-                try checkCancelledBeforeRelationshipWrite()
-                if !v.markets.contains(where: { $0.id == resolvedMarket.id }) {
-                    v.markets.append(resolvedMarket)
-                }
-            }
-        } else if let dtoMarketIDs = dto.market_ids {
-            // Fallback when no parent scope is provided:
-            // only add listed markets, do not remove anything.
-            for mid in dtoMarketIDs {
-                try checkCancelled()
+        if v.url_facebook != dto.url_facebook { v.url_facebook = dto.url_facebook }
+        if v.url_instagram != dto.url_instagram { v.url_instagram = dto.url_instagram }
+        if v.url_twitter != dto.url_twitter { v.url_twitter = dto.url_twitter }
+        if v.url_youtube != dto.url_youtube { v.url_youtube = dto.url_youtube }
 
-                guard let resolvedMarket = try Storage.fetchById(Market.self, id: mid, in: ctx) else {
-                    continue
-                }
+        if v.zip_code != dto.zip_code { v.zip_code = dto.zip_code }
+        if v.notes != dto.notes { v.notes = dto.notes }
 
-                try checkCancelledBeforeRelationshipWrite()
-                if !v.markets.contains(where: { $0.id == resolvedMarket.id }) {
-                    v.markets.append(resolvedMarket)
-                }
-            }
-        }
-
+        if v.is_partner != dto.is_partner { v.is_partner = dto.is_partner }
+        
         // MARK: - Media pointers
         if let video = dto.video {
             try checkCancelled()
@@ -660,89 +669,6 @@ extension Storage {
             v.primary_image = nil
         }
 
-        // MARK: - Venue <-> MarketTrait (per-venue order) via VenueMarketTrait join rows
-        // Source-of-truth for this venue within the provided market scope:
-        // - nil: endpoint didn't include market_traits -> leave as-is
-        // - [] : explicitly none -> clear join rows for this venue+market scope
-        if let venueTraitDTOs = dto.market_trait_associations {
-
-            let resolved: [(order: Int?, trait: MarketTraitDTO)] = venueTraitDTOs.compactMap { row in
-                guard let t = row.market_trait else { return nil }
-                return (row.order, t)
-            }
-
-            let keepTraitIDs = Set(resolved.map { $0.trait.id })
-            let scopeMarketID = market?.id
-
-            // 1) Delete missing join rows for this venue+market scope
-            if !v.venue_market_traits.isEmpty {
-                for link in v.venue_market_traits {
-                    try checkCancelled()
-
-                    // Scope filtering
-                    if let mid = scopeMarketID {
-                        guard link.market_id == mid else { continue }
-                    } else {
-                        guard link.market_id == nil else { continue }
-                    }
-
-                    if !keepTraitIDs.contains(link.trait_id) {
-                        try checkCancelledBeforeRelationshipWrite()
-                        ctx.delete(link)
-                    }
-                }
-            }
-
-            // 2) Upsert joins + build new ordered list for this scope
-            var newScopedLinks: [VenueMarketTrait] = []
-            newScopedLinks.reserveCapacity(resolved.count)
-
-            for (order, traitDTO) in resolved {
-                try checkCancelled()
-
-                // Hydrate the trait
-                let trait = try fetchOrInsert(MarketTrait.self, id: traitDTO.id, in: ctx) { MarketTrait(id: traitDTO.id) }
-                trait.type = traitDTO.type ?? trait.type
-                trait.name = traitDTO.name ?? trait.name
-                trait.icon_url = traitDTO.icon_url ?? trait.icon_url
-                trait.created_at = traitDTO.created_at ?? trait.created_at
-                trait.updated_at = traitDTO.updated_at ?? trait.updated_at
-
-                let key = VenueMarketTrait.makeKey(venueID: v.id, marketID: scopeMarketID, traitID: trait.id)
-
-                let link: VenueMarketTrait
-                if let existing = try Storage.fetchByKey(VenueMarketTrait.self, key: key, in: ctx) {
-                    link = existing
-                } else {
-                    let created = VenueMarketTrait(key: key, venue: v, trait: trait, market_id: scopeMarketID)
-                    ctx.insert(created)
-                    link = created
-                }
-
-                // Keep denorm + order consistent
-                link.order = order
-                link.venue_id = v.id
-                link.trait_id = trait.id
-                link.market_id = scopeMarketID
-
-                // Relationship pointers (non-optional in model)
-                try checkCancelledBeforeRelationshipWrite()
-                if link.venue.id != v.id { link.venue = v }
-                if link.trait.id != trait.id { link.trait = trait }
-
-                newScopedLinks.append(link)
-            }
-
-            // 3) Replace v.venue_market_traits for this scope only (preserve other scopes)
-            try checkCancelledBeforeRelationshipWrite()
-            if let mid = scopeMarketID {
-                let preserved = v.venue_market_traits.filter { $0.market_id != mid }
-                v.venue_market_traits = preserved + newScopedLinks
-            } else {
-                let preserved = v.venue_market_traits.filter { $0.market_id != nil }
-                v.venue_market_traits = preserved + newScopedLinks
-            }
-        }
 
         // MARK: - Relationship lists (source-of-truth as provided by venue DTO)
         if let imgs = dto.images {
@@ -787,25 +713,225 @@ extension Storage {
         return v
     }
     
-    nonisolated static func disassociateVenuesNotInSet(
-        keepVenueIDs: Set<Int>,
-        from market: Market,
+    @discardableResult
+    nonisolated static func upsertVenue(
+        from dto: VenueDTO,
+        market: Market?,
+        batch: VenueUpsertBatch,
         in ctx: ModelContext
-    ) throws {
+    ) throws -> Venue? {
         try checkCancelled()
 
-        let scopedMarketIDs = Set([market.id] + market.submarkets.map(\.id))
-        let allVenues = try ctx.fetch(FetchDescriptor<Venue>())
+        guard let name = dto.name else {
+            return nil
+        }
 
-        for v in allVenues {
-            try checkCancelled()
+        let v = try cachedVenue(
+            id: dto.id,
+            name: name,
+            batch: batch,
+            in: ctx
+        )
 
-            let isInScopedMarket = v.markets.contains(where: { scopedMarketIDs.contains($0.id) })
-            if isInScopedMarket && !keepVenueIDs.contains(v.id) {
+        if v.name != name { v.name = name }
+
+        // MARK: - Fields
+
+        if v.address_l1 != dto.address_l1 { v.address_l1 = dto.address_l1 }
+        if v.address_l2 != dto.address_l2 { v.address_l2 = dto.address_l2 }
+        if v.city != dto.city { v.city = dto.city }
+        if v.country != dto.country { v.country = dto.country }
+        if v.display_name != dto.display_name { v.display_name = dto.display_name }
+
+        if v.lat != dto.lat { v.lat = dto.lat }
+        if v.lon != dto.lon { v.lon = dto.lon }
+
+        if v.primary_inventory_id != dto.primary_inventory_id { v.primary_inventory_id = dto.primary_inventory_id }
+        if v.featured_collection_id != dto.featured_collection_id { v.featured_collection_id = dto.featured_collection_id }
+
+        if v.is_virtual != dto.is_virtual { v.is_virtual = dto.is_virtual }
+
+        if v.phone != dto.phone { v.phone = dto.phone }
+        if v.email_address != dto.email_address { v.email_address = dto.email_address }
+        if v.state != dto.state { v.state = dto.state }
+        if v.url != dto.url { v.url = dto.url }
+
+        if v.url_facebook != dto.url_facebook { v.url_facebook = dto.url_facebook }
+        if v.url_instagram != dto.url_instagram { v.url_instagram = dto.url_instagram }
+        if v.url_twitter != dto.url_twitter { v.url_twitter = dto.url_twitter }
+        if v.url_youtube != dto.url_youtube { v.url_youtube = dto.url_youtube }
+
+        if v.zip_code != dto.zip_code { v.zip_code = dto.zip_code }
+        if v.notes != dto.notes { v.notes = dto.notes }
+
+        if v.is_partner != dto.is_partner { v.is_partner = dto.is_partner }
+
+        // MARK: - Market cache
+
+        let dtoMarketIDs = dto.market_ids ?? []
+        let newMarketIDs = Array(
+            Set(dtoMarketIDs).union([market?.id].compactMap { $0 })
+        ).sorted()
+
+        if v.market_ids_cache != newMarketIDs {
+            v.market_ids_cache = newMarketIDs
+        }
+
+        // MARK: - Media pointers
+
+        if let video = dto.video {
+            let media = try cachedMedia(from: video, batch: batch, in: ctx)
+
+            try checkCancelledBeforeRelationshipWrite()
+            if v.video !== media { v.video = media }
+        } else if v.video != nil {
+            try checkCancelledBeforeRelationshipWrite()
+            v.video = nil
+        }
+
+        if let logo = dto.logo {
+            let media = try cachedMedia(from: logo, batch: batch, in: ctx)
+
+            try checkCancelledBeforeRelationshipWrite()
+            if v.logo !== media { v.logo = media }
+        } else if v.logo != nil {
+            try checkCancelledBeforeRelationshipWrite()
+            v.logo = nil
+        }
+
+        if let primary = dto.primary_image {
+            let media = try cachedMedia(from: primary, batch: batch, in: ctx)
+
+            try checkCancelledBeforeRelationshipWrite()
+            if v.primary_image !== media { v.primary_image = media }
+        } else if v.primary_image != nil {
+            try checkCancelledBeforeRelationshipWrite()
+            v.primary_image = nil
+        }
+
+        // MARK: - Venue <-> MarketTrait
+
+        if let venueTraitDTOs = dto.market_trait_associations {
+            let scopeMarketID = market?.id
+
+            let resolved: [(order: Int?, trait: MarketTraitDTO)] = venueTraitDTOs.compactMap { row in
+                guard let trait = row.market_trait else { return nil }
+                return (row.order, trait)
+            }
+
+            let keepKeys = Set(
+                resolved.map {
+                    VenueMarketTrait.makeKey(
+                        venueID: v.id,
+                        marketID: scopeMarketID,
+                        traitID: $0.trait.id
+                    )
+                }
+            )
+
+            if !v.venue_market_traits.isEmpty {
+                for link in v.venue_market_traits {
+                    try checkCancelled()
+
+                    guard link.market_id == scopeMarketID else { continue }
+
+                    if !keepKeys.contains(link.key) {
+                        try checkCancelledBeforeRelationshipWrite()
+                        ctx.delete(link)
+                        batch.venueMarketTraitsByKey[link.key] = nil
+                    }
+                }
+            }
+
+            var newScopedLinks: [VenueMarketTrait] = []
+            newScopedLinks.reserveCapacity(resolved.count)
+
+            for (order, traitDTO) in resolved {
+                try checkCancelled()
+
+                let trait = try cachedMarketTrait(
+                    from: traitDTO,
+                    batch: batch,
+                    in: ctx
+                )
+
+                let key = VenueMarketTrait.makeKey(
+                    venueID: v.id,
+                    marketID: scopeMarketID,
+                    traitID: trait.id
+                )
+
+                let link = try cachedVenueMarketTrait(
+                    key: key,
+                    venue: v,
+                    trait: trait,
+                    marketID: scopeMarketID,
+                    batch: batch,
+                    in: ctx
+                )
+
+                if link.order != order { link.order = order }
+
+                newScopedLinks.append(link)
+            }
+
+            let preserved = v.venue_market_traits.filter { $0.market_id != scopeMarketID }
+            let currentScoped = v.venue_market_traits.filter { $0.market_id == scopeMarketID }
+
+            if !sameVenueMarketTraitKeys(currentScoped, newScopedLinks) {
                 try checkCancelledBeforeRelationshipWrite()
-                v.markets.removeAll(where: { scopedMarketIDs.contains($0.id) })
+                v.venue_market_traits = preserved + newScopedLinks
             }
         }
+
+        // MARK: - Relationship lists
+
+        if let imgs = dto.images {
+            var newImages: [Media] = []
+            newImages.reserveCapacity(imgs.count)
+
+            for img in imgs {
+                try checkCancelled()
+                newImages.append(try cachedMedia(from: img, batch: batch, in: ctx))
+            }
+
+            if !sameIntIDs(v.images, newImages) {
+                try checkCancelledBeforeRelationshipWrite()
+                v.images = newImages
+            }
+        }
+
+        if let hrs = dto.hours {
+            var newHours: [VenueHour] = []
+            newHours.reserveCapacity(hrs.count)
+
+            for h in hrs {
+                try checkCancelled()
+                newHours.append(try cachedVenueHour(from: h, batch: batch, in: ctx))
+            }
+
+            if !sameIntIDs(v.hours, newHours) {
+                try checkCancelledBeforeRelationshipWrite()
+                v.hours = newHours
+            }
+        }
+
+        if let dms = dto.active_delivery_methods {
+            var newDms: [DeliveryMethod] = []
+            newDms.reserveCapacity(dms.count)
+
+            for dm in dms {
+                try checkCancelled()
+                newDms.append(try cachedDeliveryMethod(from: dm, batch: batch, in: ctx))
+            }
+
+            if !sameIntIDs(v.active_delivery_methods, newDms) {
+                try checkCancelledBeforeRelationshipWrite()
+                v.active_delivery_methods = newDms
+            }
+        }
+
+        return v
     }
 
     @discardableResult
@@ -2133,5 +2259,479 @@ private final class CellarIDCacheStore: @unchecked Sendable {
     func isEmpty() -> Bool {
         lock.lock(); defer { lock.unlock() }
         return set.isEmpty
+    }
+}
+
+extension Storage {
+    nonisolated final class VenueUpsertBatch: @unchecked Sendable {
+        var venuesByID: [Int: Venue]
+        var mediaByID: [Int: Media]
+        var venueHoursByID: [Int: VenueHour]
+        var deliveryMethodsByID: [Int: DeliveryMethod]
+        var marketTraitsByID: [Int: MarketTrait]
+        var venueMarketTraitsByKey: [String: VenueMarketTrait]
+
+        init(
+            venueDTOs: [VenueDTO],
+            market: Market?,
+            in ctx: ModelContext
+        ) throws {
+            try Storage.checkCancelled()
+
+            var venueIDs = Set<Int>()
+            var mediaIDs = Set<Int>()
+            var hourIDs = Set<Int>()
+            var deliveryMethodIDs = Set<Int>()
+            var marketTraitIDs = Set<Int>()
+            var venueMarketTraitKeys = Set<String>()
+
+            let scopeMarketID = market?.id
+
+            for dto in venueDTOs {
+                venueIDs.insert(dto.id)
+
+                if let id = dto.video?.id { mediaIDs.insert(id) }
+                if let id = dto.logo?.id { mediaIDs.insert(id) }
+                if let id = dto.primary_image?.id { mediaIDs.insert(id) }
+
+                for image in dto.images ?? [] {
+                    mediaIDs.insert(image.id)
+                }
+
+                for hour in dto.hours ?? [] {
+                    hourIDs.insert(hour.id)
+                }
+
+                for method in dto.active_delivery_methods ?? [] {
+                    deliveryMethodIDs.insert(method.id)
+                }
+
+                for row in dto.market_trait_associations ?? [] {
+                    guard let trait = row.market_trait else { continue }
+
+                    marketTraitIDs.insert(trait.id)
+
+                    let key = VenueMarketTrait.makeKey(
+                        venueID: dto.id,
+                        marketID: scopeMarketID,
+                        traitID: trait.id
+                    )
+
+                    venueMarketTraitKeys.insert(key)
+                }
+            }
+
+            self.venuesByID = try Storage.fetchExistingVenues(
+                ids: Array(venueIDs),
+                in: ctx
+            )
+
+            self.mediaByID = try Storage.fetchExistingMedia(
+                ids: Array(mediaIDs),
+                in: ctx
+            )
+
+            self.venueHoursByID = try Storage.fetchExistingVenueHours(
+                ids: Array(hourIDs),
+                in: ctx
+            )
+
+            self.deliveryMethodsByID = try Storage.fetchExistingDeliveryMethods(
+                ids: Array(deliveryMethodIDs),
+                in: ctx
+            )
+
+            self.marketTraitsByID = try Storage.fetchExistingMarketTraits(
+                ids: Array(marketTraitIDs),
+                in: ctx
+            )
+
+            self.venueMarketTraitsByKey = try Storage.fetchExistingVenueMarketTraits(
+                keys: Array(venueMarketTraitKeys),
+                in: ctx
+            )
+        }
+    }
+
+    nonisolated static func fetchExistingVenueMarketTraits(
+        keys: [String],
+        in ctx: ModelContext
+    ) throws -> [String: VenueMarketTrait] {
+        let keys = Array(Set(keys))
+        guard !keys.isEmpty else { return [:] }
+
+        var result: [String: VenueMarketTrait] = [:]
+        result.reserveCapacity(keys.count)
+
+        let chunkSize = 500
+
+        for start in stride(from: 0, to: keys.count, by: chunkSize) {
+            try checkCancelled()
+
+            let end = min(start + chunkSize, keys.count)
+            let chunk = Array(keys[start..<end])
+
+            let fd = FetchDescriptor<VenueMarketTrait>(
+                predicate: #Predicate<VenueMarketTrait> { link in
+                    chunk.contains(link.key)
+                }
+            )
+
+            let links = try ctx.fetch(fd)
+
+            for link in links {
+                result[link.key] = link
+            }
+        }
+
+        return result
+    }
+    
+    @discardableResult
+    nonisolated static func cachedVenue(
+        id: Int,
+        name: String,
+        batch: VenueUpsertBatch,
+        in ctx: ModelContext
+    ) throws -> Venue {
+        if let existing = batch.venuesByID[id] {
+            return existing
+        }
+
+        let created = Venue(id: id, name: name)
+        created.id = id
+        ctx.insert(created)
+        batch.venuesByID[id] = created
+        return created
+    }
+
+    @discardableResult
+    nonisolated static func cachedMedia(
+        from dto: MediaDTO,
+        batch: VenueUpsertBatch,
+        in ctx: ModelContext
+    ) throws -> Media {
+        let media: Media
+
+        if let existing = batch.mediaByID[dto.id] {
+            media = existing
+        } else {
+            let created = Media(id: dto.id)
+            created.id = dto.id
+            ctx.insert(created)
+            batch.mediaByID[dto.id] = created
+            media = created
+        }
+
+        if media.path != dto.path { media.path = dto.path }
+        if media.type != dto.type { media.type = dto.type }
+
+        return media
+    }
+
+    @discardableResult
+    nonisolated static func cachedVenueHour(
+        from dto: VenueHourDTO,
+        batch: VenueUpsertBatch,
+        in ctx: ModelContext
+    ) throws -> VenueHour {
+        let hour: VenueHour
+
+        if let existing = batch.venueHoursByID[dto.id] {
+            hour = existing
+        } else {
+            let created = VenueHour(id: dto.id)
+            created.id = dto.id
+            ctx.insert(created)
+            batch.venueHoursByID[dto.id] = created
+            hour = created
+        }
+
+        if hour.weekday != dto.weekday { hour.weekday = dto.weekday }
+        if hour.open_time != dto.open_time { hour.open_time = dto.open_time }
+        if hour.close_time != dto.close_time { hour.close_time = dto.close_time }
+        if hour.is_closed != dto.is_closed { hour.is_closed = dto.is_closed }
+
+        return hour
+    }
+
+    @discardableResult
+    nonisolated static func cachedDeliveryMethod(
+        from dto: DeliveryMethodDTO,
+        batch: VenueUpsertBatch,
+        in ctx: ModelContext
+    ) throws -> DeliveryMethod {
+        let method: DeliveryMethod
+
+        if let existing = batch.deliveryMethodsByID[dto.id] {
+            method = existing
+        } else {
+            let created = DeliveryMethod(id: dto.id)
+            created.id = dto.id
+            ctx.insert(created)
+            batch.deliveryMethodsByID[dto.id] = created
+            method = created
+        }
+
+        if method.shipping_type != dto.shipping_type { method.shipping_type = dto.shipping_type }
+        if method.state_abbreviation != dto.state_abbreviation { method.state_abbreviation = dto.state_abbreviation }
+        if method.state_display_name != dto.state_display_name { method.state_display_name = dto.state_display_name }
+        if method.country != dto.country { method.country = dto.country }
+        if method.shipping_cost_note != dto.shipping_cost_note { method.shipping_cost_note = dto.shipping_cost_note }
+        if method.shipping_speed_note != dto.shipping_speed_note { method.shipping_speed_note = dto.shipping_speed_note }
+
+        return method
+    }
+
+    @discardableResult
+    nonisolated static func cachedMarketTrait(
+        from dto: MarketTraitDTO,
+        batch: VenueUpsertBatch,
+        in ctx: ModelContext
+    ) throws -> MarketTrait {
+        let trait: MarketTrait
+
+        if let existing = batch.marketTraitsByID[dto.id] {
+            trait = existing
+        } else {
+            let created = MarketTrait(id: dto.id)
+            created.id = dto.id
+            ctx.insert(created)
+            batch.marketTraitsByID[dto.id] = created
+            trait = created
+        }
+
+        if trait.type != dto.type { trait.type = dto.type }
+        if trait.name != dto.name { trait.name = dto.name }
+        if trait.icon_url != dto.icon_url { trait.icon_url = dto.icon_url }
+        if trait.created_at != dto.created_at { trait.created_at = dto.created_at }
+        if trait.updated_at != dto.updated_at { trait.updated_at = dto.updated_at }
+
+        return trait
+    }
+
+    @discardableResult
+    nonisolated static func cachedVenueMarketTrait(
+        key: String,
+        venue: Venue,
+        trait: MarketTrait,
+        marketID: Int?,
+        batch: VenueUpsertBatch,
+        in ctx: ModelContext
+    ) throws -> VenueMarketTrait {
+        let link: VenueMarketTrait
+
+        if let existing = batch.venueMarketTraitsByKey[key] {
+            link = existing
+        } else {
+            let created = VenueMarketTrait(
+                key: key,
+                venue: venue,
+                trait: trait,
+                market_id: marketID
+            )
+
+            ctx.insert(created)
+            batch.venueMarketTraitsByKey[key] = created
+            link = created
+        }
+
+        if link.key != key { link.key = key }
+        if link.venue_id != venue.id { link.venue_id = venue.id }
+        if link.trait_id != trait.id { link.trait_id = trait.id }
+        if link.market_id != marketID { link.market_id = marketID }
+
+        try checkCancelledBeforeRelationshipWrite()
+        if link.venue.id != venue.id { link.venue = venue }
+        if link.trait.id != trait.id { link.trait = trait }
+
+        return link
+    }
+
+    @inline(__always)
+    nonisolated private static func sameIntIDs<T: HasIntID>(_ lhs: [T], _ rhs: [T]) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+
+        for (a, b) in zip(lhs, rhs) {
+            if a.id != b.id { return false }
+        }
+
+        return true
+    }
+
+    @inline(__always)
+    nonisolated private static func sameVenueMarketTraitKeys(
+        _ lhs: [VenueMarketTrait],
+        _ rhs: [VenueMarketTrait]
+    ) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+
+        for (a, b) in zip(lhs, rhs) {
+            if a.key != b.key { return false }
+        }
+
+        return true
+    }
+}
+
+extension Storage {
+    nonisolated static func fetchExistingVenues(
+        ids: [Int],
+        in ctx: ModelContext
+    ) throws -> [Int: Venue] {
+        let ids = Array(Set(ids))
+        guard !ids.isEmpty else { return [:] }
+
+        var result: [Int: Venue] = [:]
+        result.reserveCapacity(ids.count)
+
+        let chunkSize = 500
+
+        for start in stride(from: 0, to: ids.count, by: chunkSize) {
+            try checkCancelled()
+
+            let end = min(start + chunkSize, ids.count)
+            let chunk = Array(ids[start..<end])
+
+            let fd = FetchDescriptor<Venue>(
+                predicate: #Predicate<Venue> { venue in
+                    chunk.contains(venue.id)
+                }
+            )
+
+            for venue in try ctx.fetch(fd) {
+                result[venue.id] = venue
+            }
+        }
+
+        return result
+    }
+
+    nonisolated static func fetchExistingMedia(
+        ids: [Int],
+        in ctx: ModelContext
+    ) throws -> [Int: Media] {
+        let ids = Array(Set(ids))
+        guard !ids.isEmpty else { return [:] }
+
+        var result: [Int: Media] = [:]
+        result.reserveCapacity(ids.count)
+
+        let chunkSize = 500
+
+        for start in stride(from: 0, to: ids.count, by: chunkSize) {
+            try checkCancelled()
+
+            let end = min(start + chunkSize, ids.count)
+            let chunk = Array(ids[start..<end])
+
+            let fd = FetchDescriptor<Media>(
+                predicate: #Predicate<Media> { media in
+                    chunk.contains(media.id)
+                }
+            )
+
+            for media in try ctx.fetch(fd) {
+                result[media.id] = media
+            }
+        }
+
+        return result
+    }
+
+    nonisolated static func fetchExistingVenueHours(
+        ids: [Int],
+        in ctx: ModelContext
+    ) throws -> [Int: VenueHour] {
+        let ids = Array(Set(ids))
+        guard !ids.isEmpty else { return [:] }
+
+        var result: [Int: VenueHour] = [:]
+        result.reserveCapacity(ids.count)
+
+        let chunkSize = 500
+
+        for start in stride(from: 0, to: ids.count, by: chunkSize) {
+            try checkCancelled()
+
+            let end = min(start + chunkSize, ids.count)
+            let chunk = Array(ids[start..<end])
+
+            let fd = FetchDescriptor<VenueHour>(
+                predicate: #Predicate<VenueHour> { hour in
+                    chunk.contains(hour.id)
+                }
+            )
+
+            for hour in try ctx.fetch(fd) {
+                result[hour.id] = hour
+            }
+        }
+
+        return result
+    }
+
+    nonisolated static func fetchExistingDeliveryMethods(
+        ids: [Int],
+        in ctx: ModelContext
+    ) throws -> [Int: DeliveryMethod] {
+        let ids = Array(Set(ids))
+        guard !ids.isEmpty else { return [:] }
+
+        var result: [Int: DeliveryMethod] = [:]
+        result.reserveCapacity(ids.count)
+
+        let chunkSize = 500
+
+        for start in stride(from: 0, to: ids.count, by: chunkSize) {
+            try checkCancelled()
+
+            let end = min(start + chunkSize, ids.count)
+            let chunk = Array(ids[start..<end])
+
+            let fd = FetchDescriptor<DeliveryMethod>(
+                predicate: #Predicate<DeliveryMethod> { method in
+                    chunk.contains(method.id)
+                }
+            )
+
+            for method in try ctx.fetch(fd) {
+                result[method.id] = method
+            }
+        }
+
+        return result
+    }
+
+    nonisolated static func fetchExistingMarketTraits(
+        ids: [Int],
+        in ctx: ModelContext
+    ) throws -> [Int: MarketTrait] {
+        let ids = Array(Set(ids))
+        guard !ids.isEmpty else { return [:] }
+
+        var result: [Int: MarketTrait] = [:]
+        result.reserveCapacity(ids.count)
+
+        let chunkSize = 500
+
+        for start in stride(from: 0, to: ids.count, by: chunkSize) {
+            try checkCancelled()
+
+            let end = min(start + chunkSize, ids.count)
+            let chunk = Array(ids[start..<end])
+
+            let fd = FetchDescriptor<MarketTrait>(
+                predicate: #Predicate<MarketTrait> { trait in
+                    chunk.contains(trait.id)
+                }
+            )
+
+            for trait in try ctx.fetch(fd) {
+                result[trait.id] = trait
+            }
+        }
+
+        return result
     }
 }

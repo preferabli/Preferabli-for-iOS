@@ -37,6 +37,6 @@ public struct MarketTraitDTO: Decodable, Sendable {
     public let type: String?
     public let name: String?
     public let icon_url: String?
-    public let created_at: Date?
-    public let updated_at: Date?
+    public let created_at: Date
+    public let updated_at: Date
 }
