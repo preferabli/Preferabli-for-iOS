@@ -8,9 +8,5 @@
 import Foundation
 
 struct BalloonResponseDTO: Decodable {
-    let data: BalloonResponseDataDTO
-    
-    struct BalloonResponseDataDTO: Decodable {
-        let booking: BalloonReservationDTO
-    }
+    let booking: BalloonReservationDTO
 }

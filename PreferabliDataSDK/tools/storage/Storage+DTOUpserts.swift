@@ -349,6 +349,7 @@ extension Storage {
                     venue: venue,
                     in: ctx
                 )
+                experience.isUnlocked = true
 
                 newExperiences.append(experience)
             }
@@ -414,6 +415,11 @@ extension Storage {
         experience.badge_text_color = dto.badge_text_color ?? experience.badge_text_color
         experience.primary_inventory_id = dto.primary_inventory_id ?? experience.primary_inventory_id
         experience.preferabli_image_url = dto.preferabli_image_url ?? experience.preferabli_image_url
+        
+        // inside Storage.upsertExperience(...)
+        if experience.isTombstoned {
+            experience.isTombstoned = false
+        }
 
         try checkCancelledBeforeRelationshipWrite()
         if experience.venue.id != venue.id {
@@ -549,6 +555,7 @@ extension Storage {
         price.experience_id = dto.experience_id ?? experience.id
         price.experience_tier = dto.experience_tier ?? price.experience_tier
         price.guest_increment = dto.guest_increment ?? price.guest_increment
+        price.price_on_request = dto.price_on_request ?? price.price_on_request
         price.incentive_type_id = dto.incentive_type_id ?? price.incentive_type_id
         price.list_price = dto.list_price ?? price.list_price
         price.max_count = dto.max_count ?? price.max_count
@@ -635,6 +642,8 @@ extension Storage {
 
         if v.is_partner != dto.is_partner { v.is_partner = dto.is_partner }
         
+        if v.isTombstoned { v.isTombstoned = false }
+        
         // MARK: - Media pointers
         if let video = dto.video {
             try checkCancelled()
@@ -645,6 +654,17 @@ extension Storage {
         } else {
             try checkCancelledBeforeRelationshipWrite()
             v.video = nil
+        }
+        
+        if let videoPoster = dto.video_poster {
+            try checkCancelled()
+            let media = try upsertMedia(from: videoPoster, in: ctx)
+
+            try checkCancelledBeforeRelationshipWrite()
+            if v.video_poster !== media { v.video_poster = media }
+        } else {
+            try checkCancelledBeforeRelationshipWrite()
+            v.video_poster = nil
         }
 
         if let logo = dto.logo {
@@ -713,6 +733,58 @@ extension Storage {
         return v
     }
     
+    nonisolated static func deleteVenuesNotInBatch(
+        _ keep: Set<Int>,
+        rootMarket: Market,
+        in ctx: ModelContext
+    ) throws {
+        try checkCancelled()
+
+        let hierarchyIDs = collectMarketHierarchyIDs(from: rootMarket)
+
+        guard !hierarchyIDs.isEmpty else { return }
+
+        let existing = try ctx.fetch(FetchDescriptor<Venue>())
+
+        for venue in existing {
+            try checkCancelled()
+
+            if keep.contains(venue.id) {
+                continue
+            }
+
+            let venueMarketIDs = Set(venue.market_ids_cache)
+
+            // If cache is empty, do NOT delete. Safer than nuking unknown legacy rows.
+            if venueMarketIDs.isEmpty {
+                continue
+            }
+
+            let isInThisHierarchy = !venueMarketIDs.isDisjoint(with: hierarchyIDs)
+            let isOnlyInThisHierarchy = venueMarketIDs.isSubset(of: hierarchyIDs)
+
+            if isInThisHierarchy && isOnlyInThisHierarchy {
+                try checkCancelledBeforeRelationshipWrite()
+                venue.isTombstoned = true
+            }
+        }
+    }
+
+    nonisolated private static func collectMarketHierarchyIDs(from market: Market) -> Set<Int> {
+        var ids = Set<Int>()
+
+        func walk(_ market: Market) {
+            ids.insert(market.id)
+
+            for child in market.submarkets {
+                walk(child)
+            }
+        }
+
+        walk(market)
+        return ids
+    }
+    
     @discardableResult
     nonisolated static func upsertVenue(
         from dto: VenueDTO,
@@ -765,6 +837,9 @@ extension Storage {
         if v.notes != dto.notes { v.notes = dto.notes }
 
         if v.is_partner != dto.is_partner { v.is_partner = dto.is_partner }
+        
+        if v.isTombstoned { v.isTombstoned = false }
+
 
         // MARK: - Market cache
 
@@ -787,6 +862,17 @@ extension Storage {
         } else if v.video != nil {
             try checkCancelledBeforeRelationshipWrite()
             v.video = nil
+        }
+        
+        if let videoPoster = dto.video_poster {
+            try checkCancelled()
+            let media = try upsertMedia(from: videoPoster, in: ctx)
+
+            try checkCancelledBeforeRelationshipWrite()
+            if v.video_poster !== media { v.video_poster = media }
+        } else {
+            try checkCancelledBeforeRelationshipWrite()
+            v.video_poster = nil
         }
 
         if let logo = dto.logo {
@@ -1260,6 +1346,13 @@ extension Storage {
         f.keywords = dto.keywords ?? f.keywords
         f.created_at = dto.created_at ?? f.created_at
         f.updated_at = dto.updated_at ?? f.updated_at
+        f.food_category_id = dto.food_category_id ?? f.food_category_id
+        f.food_category_name = dto.food_category_name ?? f.food_category_name
+        f.food_category_icon_svg_url = dto.food_category_icon_svg_url ?? f.food_category_icon_svg_url
+        f.food_category_url = dto.food_category_url ?? f.food_category_url
+        f.primary_image_url = dto.primary_image_url ?? f.primary_image_url
+        f.desc = dto.description ?? f.desc
+
         return f
     }
 
@@ -1295,6 +1388,8 @@ extension Storage {
         if let lat = dto.latitude { l.latitude = lat }
         if let lon = dto.longitude { l.longitude = lon }
         if let zip = dto.zip_code { l.zip_code = zip }
+        if let country_code = dto.country_code { l.country_code = country_code }
+
         return l
     }
 
@@ -1427,6 +1522,7 @@ extension Storage {
             guest.price_experience_id = priceDTO.experience_id ?? guest.price_experience_id
             guest.price_experience_tier = priceDTO.experience_tier ?? guest.price_experience_tier
             guest.price_guest_increment = priceDTO.guest_increment ?? guest.price_guest_increment
+            guest.price_price_on_request = priceDTO.price_on_request ?? guest.price_price_on_request
             guest.price_incentive_type_id = priceDTO.incentive_type_id ?? guest.price_incentive_type_id
             guest.price_list_price = priceDTO.list_price ?? guest.price_list_price
             guest.price_max_count = priceDTO.max_count ?? guest.price_max_count
@@ -1519,6 +1615,8 @@ extension Storage {
         s.type              = dto.type
         s.primary_image_url = dto.primary_image_url
         s.product_category  = dto.product_category
+        s.is_global = dto.is_global
+        s.show_map = dto.show_map
 
         // Relationship pointer write
         if let ps = profile_style {
@@ -2049,27 +2147,62 @@ extension Storage {
 
         return pr
     }
+    
+    @discardableResult
+    nonisolated static func upsertCTABucket(from dto: CTABucketDTO, in ctx: ModelContext) throws -> CTABucket {
+
+        try checkCancelled()
+
+
+        let r = try fetchOrInsert(CTABucket.self, id: dto.id, in: ctx) { CTABucket(id: dto.id) }
+
+        r.created_at = dto.created_at ?? r.created_at
+        r.updated_at = dto.updated_at ?? r.updated_at
+        r.section = dto.section ?? r.section
+        r.name = dto.name ?? r.name
+        r.order = dto.order ?? r.order
+        r.market_id = dto.market_id ?? r.market_id
+        r.affiliate_id = dto.affiliate_id ?? r.affiliate_id
+        r.order = dto.order ?? r.order
+        r.type = dto.type ?? r.type
+        r.item_width = dto.item_width ?? r.item_width
+        r.item_height = dto.item_height ?? r.item_height
+        r.item_corner_radius = dto.item_corner_radius ?? r.item_corner_radius
+        r.isTombstoned = false
+
+        if let items = dto.items {
+            var newItems: [CTABucketItem] = []
+            newItems.reserveCapacity(items.count)
+
+            for item in items {
+                try checkCancelled()
+                newItems.append(try upsertCTABucketItem(from: item, bucket: r, in: ctx))
+            }
+
+            try checkCancelledBeforeRelationshipWrite()
+            r.items = newItems
+        }
+
+        return r
+    }
 
         @discardableResult
-        nonisolated static func upsertCTABucket(
-            from dto: CTABucketDTO,
-            section: String,
-            market_id: Int?,
+        nonisolated static func upsertCTABucketItem(
+            from dto: CTABucketItemDTO,
+            bucket: CTABucket,
             in ctx: ModelContext
-        ) throws -> CTABucket {
+        ) throws -> CTABucketItem {
 
             try checkCancelled()
 
-            let b = try fetchOrInsert(CTABucket.self, id: dto.id, in: ctx) {
-                CTABucket(id: dto.id, section: section)
+            let b = try fetchOrInsert(CTABucketItem.self, id: dto.id, in: ctx) {
+                CTABucketItem(id: dto.id, bucket: bucket)
             }
 
             try checkCancelled()
 
             // Required fields
             b.id = dto.id
-            b.section = section
-            b.market_id = market_id
 
             // Fields
             b.badge_icon = dto.badge_icon
@@ -2097,6 +2230,30 @@ extension Storage {
                 try checkCancelledBeforeRelationshipWrite()
                 b.primary_image = nil
             }
+            
+            // sub image 1
+            if let imgDTO = dto.sub_image_1 {
+                try checkCancelled()
+                let media = try upsertMedia(from: imgDTO, in: ctx)
+
+                try checkCancelledBeforeRelationshipWrite()
+                if b.sub_image_1 !== media { b.sub_image_1 = media }
+            } else {
+                try checkCancelledBeforeRelationshipWrite()
+                b.sub_image_1 = nil
+            }
+            
+            // sub image 2
+            if let imgDTO = dto.sub_image_2 {
+                try checkCancelled()
+                let media = try upsertMedia(from: imgDTO, in: ctx)
+
+                try checkCancelledBeforeRelationshipWrite()
+                if b.sub_image_2 !== media { b.sub_image_2 = media }
+            } else {
+                try checkCancelledBeforeRelationshipWrite()
+                b.sub_image_2 = nil
+            }
 
             return b
         }
@@ -2107,79 +2264,42 @@ extension Storage {
         /// - If either is set => delete only CTAs matching that scope that are not in API response.
         ///
         /// Returns the IDs that exist after the operation (the keep set).
-        @discardableResult
-        nonisolated static func upsertCTABucketsSourceOfTruth(
-            from responseDTOs: [CTABucketResponseDTO],
-            scopeMarketId: Int?,
-            scopeSection: String?,
-            in ctx: ModelContext
-        ) throws -> [Int] {
+    @discardableResult
+    nonisolated static func upsertCTABucketsSourceOfTruth(
+        from responseDTOs: [CTABucketDTO],
+        in ctx: ModelContext
+    ) throws -> [Int] {
+        try checkCancelled()
 
+        for bucketDTO in responseDTOs {
             try checkCancelled()
 
-            // 1) Flatten + resolve section/market_id per group
-            struct Row {
-                let dto: CTABucketDTO
-                let section: String
-                let market_id: Int?
-            }
-
-            var rows: [Row] = []
-            rows.reserveCapacity(responseDTOs.reduce(0) { $0 + $1.items.count })
-
-            for group in responseDTOs {
-                try checkCancelled()
-
-                // Prefer server-provided group values, fall back to scope params, then a safe default
-                let resolvedSection = group.section ?? scopeSection ?? "default"
-                let resolvedMarketId = group.market_id ?? scopeMarketId
-
-                for item in group.items {
-                    rows.append(Row(dto: item, section: resolvedSection, market_id: resolvedMarketId))
-                }
-            }
-
-            let keepIDs = Set(rows.map { $0.dto.id })
-
-            // 2) Delete anything in-scope that isn't in keepIDs
-            try deleteCTABucketsNotInSet(
-                keepIDs,
-                scopeMarketId: scopeMarketId,
-                scopeSection: scopeSection,
+            _ = try upsertCTABucket(
+                from: bucketDTO,
                 in: ctx
             )
-
-            // 3) Upsert all rows
-            for row in rows {
-                try checkCancelled()
-                _ = try upsertCTABucket(from: row.dto, section: row.section, market_id: row.market_id, in: ctx)
-            }
-
-            return Array(keepIDs)
         }
+
+        let keepIDs = Set(responseDTOs.map { $0.id })
+
+        // 3) Then delete old rows
+        try deleteCTABucketsNotInSet(
+            keepIDs,
+            in: ctx
+        )
+
+        return Array(keepIDs)
+    }
 
         nonisolated private static func deleteCTABucketsNotInSet(
             _ keep: Set<Int>,
-            scopeMarketId: Int?,
-            scopeSection: String?,
             in ctx: ModelContext
         ) throws {
 
             try checkCancelled()
 
             // Build fetch descriptor based on scope
-            let fd: FetchDescriptor<CTABucket>
-
-            switch (scopeMarketId, scopeSection) {
-            case (nil, nil):
-                fd = FetchDescriptor<CTABucket>() // global
-            case let (m?, nil):
-                fd = FetchDescriptor(predicate: #Predicate<CTABucket> { $0.market_id == m })
-            case let (nil, s?):
-                fd = FetchDescriptor(predicate: #Predicate<CTABucket> { $0.section == s })
-            case let (m?, s?):
-                fd = FetchDescriptor(predicate: #Predicate<CTABucket> { $0.market_id == m && $0.section == s })
-            }
+            let fd: FetchDescriptor<CTABucket> = FetchDescriptor<CTABucket>() // global
 
             let existing = try ctx.fetch(fd)
 
@@ -2187,7 +2307,7 @@ extension Storage {
                 try checkCancelled()
                 if !keep.contains(b.id) {
                     try checkCancelledBeforeRelationshipWrite()
-                    ctx.delete(b)
+                    b.isTombstoned = true
                 }
             }
         }
@@ -2291,6 +2411,7 @@ extension Storage {
                 venueIDs.insert(dto.id)
 
                 if let id = dto.video?.id { mediaIDs.insert(id) }
+                if let id = dto.video_poster?.id { mediaIDs.insert(id) }
                 if let id = dto.logo?.id { mediaIDs.insert(id) }
                 if let id = dto.primary_image?.id { mediaIDs.insert(id) }
 
@@ -2504,8 +2625,8 @@ extension Storage {
         if trait.type != dto.type { trait.type = dto.type }
         if trait.name != dto.name { trait.name = dto.name }
         if trait.icon_url != dto.icon_url { trait.icon_url = dto.icon_url }
-        if trait.created_at != dto.created_at { trait.created_at = dto.created_at }
-        if trait.updated_at != dto.updated_at { trait.updated_at = dto.updated_at }
+        if trait.created_at != dto.created_at { trait.created_at = dto.created_at ?? Date.now }
+        if trait.updated_at != dto.updated_at { trait.updated_at = dto.updated_at ?? Date.now }
 
         return trait
     }
@@ -2733,5 +2854,306 @@ extension Storage {
         }
 
         return result
+    }
+}
+
+extension Storage {
+    nonisolated static func tombstoneExperiencesNotInSet(
+        _ keep: Set<Int>,
+        rootMarket: Market? = nil,
+        scopeVenueId: Int? = nil,
+        in ctx: ModelContext
+    ) throws {
+        try checkCancelled()
+
+        let hierarchyIDs = rootMarket.map { collectMarketHierarchyIDs(from: $0) }
+
+        let fd: FetchDescriptor<Experience>
+
+        if let venueId = scopeVenueId {
+            fd = FetchDescriptor(
+                predicate: #Predicate<Experience> { experience in
+                    experience.venue.id == venueId && !experience.isUnlocked
+                }
+            )
+        } else {
+            fd = FetchDescriptor(
+                predicate: #Predicate<Experience> { experience in
+                    !experience.isUnlocked
+                }
+            )
+        }
+
+        let existing = try ctx.fetch(fd)
+
+        for experience in existing {
+            try checkCancelled()
+
+            if keep.contains(experience.id) {
+                if experience.isTombstoned {
+                    try checkCancelledBeforeRelationshipWrite()
+                    experience.isTombstoned = false
+                }
+                continue
+            }
+
+            if let hierarchyIDs {
+                let venueMarketIDs = Set(experience.venue.market_ids_cache)
+
+                // Safer: don't tombstone legacy/unknown venue scope.
+                if venueMarketIDs.isEmpty {
+                    continue
+                }
+
+                let isInThisHierarchy = !venueMarketIDs.isDisjoint(with: hierarchyIDs)
+
+                guard isInThisHierarchy else {
+                    continue
+                }
+            }
+
+            try checkCancelledBeforeRelationshipWrite()
+            experience.isTombstoned = true
+        }
+    }
+}
+
+// MARK: - GenAI
+
+extension Storage {
+
+    @discardableResult
+    nonisolated static func upsertGenAIMessage(
+        from dto: GenAIMessageDTO,
+        fallbackSessionId: String? = nil,
+        fallbackTurn: Int? = nil,
+        in ctx: ModelContext
+    ) throws -> GenAIMessage {
+        try checkCancelled()
+
+        let messageId = dto.id
+        let message: GenAIMessage
+
+        let descriptor = FetchDescriptor<GenAIMessage>(
+            predicate: #Predicate<GenAIMessage> { $0.id == messageId }
+        )
+
+        if let existing = try ctx.fetch(descriptor).first {
+            message = existing
+        } else if let matchingLocal = try fetchMatchingLocalGenAIMessage(for: dto, in: ctx) {
+            message = matchingLocal
+            message.id = messageId
+        } else {
+            message = GenAIMessage(id: messageId)
+            ctx.insert(message)
+        }
+
+        message.sessionId = dto.sessionId ?? fallbackSessionId ?? message.sessionId
+        message.transactionId = dto.transactionId ?? message.transactionId
+        message.source = dto.source ?? message.source
+        message.utterance = dto.utterance ?? message.utterance
+        message.turn = dto.turn ?? fallbackTurn ?? message.turn
+        message.created_at = dto.createdAt ?? message.created_at
+        message.updated_at = dto.updatedAt ?? message.updated_at
+        message.userAction = dto.userAction ?? message.userAction
+        message.userOptions = dto.userOptions ?? message.userOptions
+        message.userSelection = dto.userSelection ?? message.userSelection
+        message.reportedIssue = dto.reportedIssue ?? message.reportedIssue
+        message.feedbackId = dto.feedbackId ?? message.feedbackId
+        message.positiveReaction = dto.positiveReaction ?? message.positiveReaction
+        message.isTombstoned = isGenAISelectionActionOnlyMessage(dto)
+
+        message.variantIds = dto.variantIds
+        message.foodIds = dto.foodIds
+
+        // Product IDs are finalized after hydration. Keep any direct entity IDs now.
+        message.productIds = dto.productEntityIds
+
+        if !dto.utteranceObjects.isEmpty {
+            try replaceGenAIUtteranceObjects(on: message, with: dto.utteranceObjects, in: ctx)
+        }
+
+        try applyGenAISelectionActionIfNeeded(from: dto, in: ctx)
+
+        return message
+    }
+    
+    private nonisolated static func isGenAISelectionActionOnlyMessage(
+        _ dto: GenAIMessageDTO
+    ) -> Bool {
+        guard dto.utterance?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true,
+              let action = dto.userAction
+        else { return false }
+
+        return [
+            "btn_food_entity_confirm",
+            "btn_wine_entity_confirm",
+            "btn_food_entity_reject",
+            "btn_wine_entity_reject"
+        ].contains(action)
+    }
+    
+    private struct GenAIParsedSelection {
+        let entityId: Int?
+    }
+
+    private nonisolated static func applyGenAISelectionActionIfNeeded(
+        from dto: GenAIMessageDTO,
+        in ctx: ModelContext
+    ) throws {
+        guard let sessionId = dto.sessionId,
+              let turn = dto.turn,
+              let action = dto.userAction
+        else { return }
+
+        let isFoodConfirm = action == "btn_food_entity_confirm"
+        let isProductConfirm = action == "btn_wine_entity_confirm"
+        let isFoodReject = action == "btn_food_entity_reject"
+        let isProductReject = action == "btn_wine_entity_reject"
+
+        guard isFoodConfirm || isProductConfirm || isFoodReject || isProductReject else { return }
+
+        let descriptor = FetchDescriptor<GenAIMessage>(
+            predicate: #Predicate<GenAIMessage> { message in
+                message.sessionId == sessionId &&
+                message.turn < turn &&
+                message.isTombstoned == false
+            },
+            sortBy: [SortDescriptor(\.turn, order: .reverse)]
+        )
+
+        let previousMessages = try ctx.fetch(descriptor)
+
+        guard let target = previousMessages.first(where: { message in
+            if isFoodConfirm || isFoodReject {
+                return message.hasFoodOptions
+            } else {
+                return message.hasProductOptions
+            }
+        }) else { return }
+
+        if isFoodConfirm {
+            let selection = parseGenAIUserSelection(dto.userSelection)
+            target.selectedFoodId = selection.entityId
+            target.didRejectSelection = false
+            target.updated_at = Date()
+        } else if isProductConfirm {
+            let selection = parseGenAIUserSelection(dto.userSelection)
+            target.selectedProductId = selection.entityId
+            target.didRejectSelection = false
+            target.updated_at = Date()
+        } else {
+            target.didRejectSelection = true
+            target.updated_at = Date()
+        }
+    }
+    
+    private nonisolated static func parseGenAIUserSelection(
+        _ raw: String?
+    ) -> GenAIParsedSelection {
+        guard var raw else {
+            return GenAIParsedSelection(entityId: nil)
+        }
+
+        raw = raw.replacingOccurrences(of: "=>", with: ":")
+
+        guard let data = raw.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return GenAIParsedSelection(entityId: nil)
+        }
+
+        return GenAIParsedSelection(
+            entityId: object["entity_id"] as? Int
+        )
+    }
+
+
+    private nonisolated static func fetchMatchingLocalGenAIMessage(
+        for dto: GenAIMessageDTO,
+        in ctx: ModelContext
+    ) throws -> GenAIMessage? {
+        guard let sessionId = dto.sessionId,
+              let turn = dto.turn
+        else { return nil }
+
+        let descriptor = FetchDescriptor<GenAIMessage>(
+            predicate: #Predicate<GenAIMessage> { message in
+                message.sessionId == sessionId &&
+                message.turn == turn &&
+                message.isTombstoned == false
+            }
+        )
+
+        let candidates = try ctx.fetch(descriptor)
+        return candidates.first { candidate in
+            if let source = dto.source, candidate.source != source { return false }
+
+            if let utterance = dto.utterance,
+               let candidateUtterance = candidate.utterance,
+               candidateUtterance != utterance {
+                return false
+            }
+
+            return true
+        }
+    }
+
+    nonisolated static func updateGenAIMessageProductIds(
+        messageId: Int,
+        productIds: [Int],
+        in ctx: ModelContext
+    ) throws {
+        guard let message = try fetchGenAIMessage(id: messageId, in: ctx) else { return }
+        message.productIds = productIds.uniqued()
+        message.updated_at = Date()
+    }
+
+    nonisolated static func fetchGenAIMessage(id: Int, in ctx: ModelContext) throws -> GenAIMessage? {
+        let descriptor = FetchDescriptor<GenAIMessage>(
+            predicate: #Predicate<GenAIMessage> { $0.id == id }
+        )
+        return try ctx.fetch(descriptor).first
+    }
+
+    private nonisolated static func replaceGenAIUtteranceObjects(
+        on message: GenAIMessage,
+        with utteranceDTOs: [GenAIUtteranceDTO],
+        in ctx: ModelContext
+    ) throws {
+        for utterance in message.utteranceObjects {
+            ctx.delete(utterance)
+        }
+        message.utteranceObjects.removeAll()
+
+        for utteranceDTO in utteranceDTOs {
+            try checkCancelled()
+
+            let utterance = GenAIUtterance(
+                type: utteranceDTO.type ?? "",
+                subType: utteranceDTO.subType ?? "",
+                order: utteranceDTO.order
+            )
+            utterance.message = message
+            ctx.insert(utterance)
+
+            for contentDTO in utteranceDTO.content {
+                let content = GenAIUtteranceContent(
+                    remoteId: contentDTO.remoteId,
+                    entityId: contentDTO.entityId,
+                    order: contentDTO.order,
+                    entityName: contentDTO.entityName,
+                    entityProbability: contentDTO.entityProbability,
+                    name: contentDTO.name,
+                    recognitionType: contentDTO.recognitionType,
+                    displayData: contentDTO.displayData
+                )
+                content.utterance = utterance
+                ctx.insert(content)
+                utterance.content.append(content)
+            }
+
+            message.utteranceObjects.append(utterance)
+        }
     }
 }

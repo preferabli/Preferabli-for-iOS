@@ -214,19 +214,19 @@ public class PreferabliTools {
         let isTeamPreferabli = Storage.getKeyStore().bool(forKey: "isTeamPreferabli")
         
         if (id != 0) {
-            Mixpanel.mainInstance().identify(distinctId: String(id))
-            Mixpanel.mainInstance().people.set(properties: [(Preferabli.isPreferabliUserLoggedIn() ? "user_id" : "customer_id") : id, "is_team_preferabli" : isTeamPreferabli])
+            Mixpanel.getInstance(name: "PreferabliDataSDK")?.identify(distinctId: String(id))
+            Mixpanel.getInstance(name: "PreferabliDataSDK")?.people.set(properties: [(Preferabli.isPreferabliUserLoggedIn() ? "user_id" : "customer_id") : id, "is_team_preferabli" : isTeamPreferabli])
             
             if (!email.isEmptyOrWhitespace) {
-                Mixpanel.mainInstance().people.set(properties: ["$email": email!])
+                Mixpanel.getInstance(name: "PreferabliDataSDK")?.people.set(properties: ["$email": email!])
             }
             
             if (!zip.isEmptyOrWhitespace) {
-                Mixpanel.mainInstance().people.set(properties: ["zip_code": zip!])
+                Mixpanel.getInstance(name: "PreferabliDataSDK")?.people.set(properties: ["zip_code": zip!])
             }
             
             if (!display_name.isEmptyOrWhitespace) {
-                Mixpanel.mainInstance().people.set(properties: ["display_name": display_name!])
+                Mixpanel.getInstance(name: "PreferabliDataSDK")?.people.set(properties: ["display_name": display_name!])
             }
         }
     }
@@ -401,8 +401,12 @@ public class PreferabliTools {
         }
     }
     
+    nonisolated public static func getImageUrl(media: Media?, width: Int, height: Int, quality: Int, scale: Float = Storage.getKeyStore().float(forKey: "mainScale")) -> URL? {
+        return getImageUrl(image: media?.path, width: width, height: height, quality: quality, scale: scale, png: media?.type == "image/png")
+    }
+    
     // Core, nonisolated builder (no main-actor APIs)
-    nonisolated internal static func getImageUrl(image: String?, width: Int, height: Int, quality: Int, scale: Float = Storage.getKeyStore().float(forKey: "mainScale")) -> URL? {
+    nonisolated public static func getImageUrl(image: String?, width: Int, height: Int, quality: Int, scale: Float = Storage.getKeyStore().float(forKey: "mainScale"), png : Bool = false) -> URL? {
         guard let raw = image, !raw.isEmptyOrWhitespace() else { return nil }
         if raw.contains("placeholder") { return nil }
         if raw.contains("winering.com") || raw.contains("preferabli.com") { return URL(string: raw) }
@@ -418,7 +422,7 @@ public class PreferabliTools {
         let cloudfrontAppId = "ios_psdk/fit-in/"
         let sizeString = "\(Int(Float(width) * scale * 1.4))x\(Int(Float(height) * scale * 1.4))/"
         let qualityString = "filters:quality(\(quality))/"
-        let pngString = key.containsIgnoreCase("png") ? "filters:format(png)/" : ""
+        let pngString = key.containsIgnoreCase("png") || png ? "filters:format(png)/" : ""
         let urlString = "https://dxlu3le4zp2pd.cloudfront.net/wineringlabel/" + cloudfrontAppId + sizeString + qualityString + pngString + key
         return URL(string: urlString)
     }

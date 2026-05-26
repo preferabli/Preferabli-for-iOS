@@ -150,9 +150,11 @@ extension Session {
 
     // MARK: - Convenience verbs (GET / DELETE / POST / PUT, legacy)
 
-    @discardableResult
-    internal func deleteActual(_ url: URLConvertible) async -> AFDataResponse<Data?> {
-        await requestData(url: url, method: .delete, parameters: nil, encoding: URLEncoding.default, headers: nil)
+    internal func deleteActual(
+        _ url: URLConvertible,
+        headers: HTTPHeaders? = nil
+    ) async -> AFDataResponse<Data?> {
+        await requestData(url: url, method: .delete, parameters: nil, encoding: URLEncoding.default, headers: headers)
     }
 
     /// POST an Encodable JSON body (preferred).
@@ -370,12 +372,16 @@ extension Session {
 
     /// GET with SParams → query string
     @discardableResult
-    internal func get(_ url: URLConvertible, sparams: SParams? = nil) async throws -> AFDataResponse<Data?> {
+    internal func get(
+        _ url: URLConvertible,
+        sparams: SParams? = nil,
+        headers: HTTPHeaders? = nil
+    ) async throws -> AFDataResponse<Data?> {
         if Task.isCancelled { throw CancellationError() }
 
         let base = try url.asURL().absoluteString
         guard let sparams else {
-            return await requestData(url: base, method: .get, parameters: nil, encoding: URLEncoding.default, headers: nil)
+            return await requestData(url: base, method: .get, parameters: nil, encoding: URLEncoding.default, headers: headers)
         }
 
         guard var comps = URLComponents(string: base) else {
@@ -387,16 +393,20 @@ extension Session {
         comps.queryItems = items
 
         let finalURL = comps.string ?? base
-        return await requestData(url: finalURL, method: .get, parameters: nil, encoding: URLEncoding.default, headers: nil)
+        return await requestData(url: finalURL, method: .get, parameters: nil, encoding: URLEncoding.default, headers: headers)
     }
 
     /// POST with SParams → JSON body
     @discardableResult
-    internal func post(_ url: URLConvertible, sjson: SParams) async throws -> AFDataResponse<Data?> {
+    internal func post(
+        _ url: URLConvertible,
+        sjson: SParams,
+        headers: HTTPHeaders? = nil
+    ) async throws -> AFDataResponse<Data?> {
         if Task.isCancelled { throw CancellationError() }
         let obj = try toJSONAnyDict(sjson)
         let data = try JSONSerialization.data(withJSONObject: obj, options: [])
-        return await requestJSON(urlString: try url.asURL().absoluteString, method: .post, json: data)
+        return await requestJSON(urlString: try url.asURL().absoluteString, method: .post, json: data, headers: headers)
     }
     
     @discardableResult
@@ -423,11 +433,15 @@ extension Session {
 
     /// PUT with SParams → JSON body
     @discardableResult
-    internal func put(_ url: URLConvertible, sjson: SParams) async throws -> AFDataResponse<Data?> {
+    internal func put(
+        _ url: URLConvertible,
+        sjson: SParams,
+        headers: HTTPHeaders? = nil
+    ) async throws -> AFDataResponse<Data?> {
         if Task.isCancelled { throw CancellationError() }
         let obj = try toJSONAnyDict(sjson)
         let data = try JSONSerialization.data(withJSONObject: obj, options: [])
-        return await requestJSON(urlString: try url.asURL().absoluteString, method: .put, json: data)
+        return await requestJSON(urlString: try url.asURL().absoluteString, method: .put, json: data, headers: headers)
     }
 }
 
@@ -439,12 +453,13 @@ extension Session {
     internal func get<T: Decodable>(
         _ url: URLConvertible,
         sparams: SParams? = nil,
+        headers: HTTPHeaders? = nil,
         decoder: JSONDecoder = .preferabli()
-    ) async throws -> T {
+    ) async throws -> T{
         if Task.isCancelled { throw CancellationError() }
 
         let requestCollectionId = collectionIdFromURL(url)
-        let raw = try await get(url, sparams: sparams)
+        let raw = try await get(url, sparams: sparams, headers: headers)
         let validated = try await APIService.continueOrThrowPreferabliException(response: raw)
 
         guard let data = validated.data else { throw PreferabliException(type: .JSONError) }
@@ -500,21 +515,25 @@ extension Session {
     }
 
     @discardableResult
-    internal func delete(_ url: URLConvertible) async throws {
+    internal func delete(
+        _ url: URLConvertible,
+        headers: HTTPHeaders? = nil
+    ) async throws {
         if Task.isCancelled { throw CancellationError() }
-        let raw = await deleteActual(url)
+        let raw = await deleteActual(url, headers: headers)
         _ = try await APIService.continueOrThrowPreferabliException(response: raw)
     }
 
     @discardableResult
     internal func delete<T: Decodable>(
         _ url: URLConvertible,
+        headers: HTTPHeaders? = nil,
         decoder: JSONDecoder = .preferabli()
     ) async throws -> T {
         if Task.isCancelled { throw CancellationError() }
 
         let requestCollectionId = collectionIdFromURL(url)
-        let raw = await deleteActual(url)
+        let raw = await deleteActual(url, headers: headers)
         let validated = try await APIService.continueOrThrowPreferabliException(response: raw)
 
         guard let data = validated.data else {
@@ -550,12 +569,13 @@ extension Session {
     internal func post<T: Decodable>(
         _ url: URLConvertible,
         sjson: SParams,
+        headers: HTTPHeaders? = nil,
         decoder: JSONDecoder = .preferabli()
     ) async throws -> T {
         if Task.isCancelled { throw CancellationError() }
 
         let requestCollectionId = collectionIdFromURL(url)
-        let raw = try await post(url, sjson: sjson)
+        let raw = try await post(url, sjson: sjson, headers: headers)
         let validated = try await APIService.continueOrThrowPreferabliException(response: raw)
 
         guard let data = validated.data else { throw PreferabliException(type: .JSONError) }
@@ -588,12 +608,13 @@ extension Session {
     internal func put<T: Decodable>(
         _ url: URLConvertible,
         sjson: SParams,
+        headers: HTTPHeaders? = nil,
         decoder: JSONDecoder = .preferabli()
     ) async throws -> T {
         if Task.isCancelled { throw CancellationError() }
 
         let requestCollectionId = collectionIdFromURL(url)
-        let raw = try await put(url, sjson: sjson)
+        let raw = try await put(url, sjson: sjson, headers: headers)
         let validated = try await APIService.continueOrThrowPreferabliException(response: raw)
 
         guard let data = validated.data else { throw PreferabliException(type: .JSONError) }

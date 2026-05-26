@@ -85,6 +85,7 @@ public final class ReservationRequestGuest {
     public var price_experience_id: Int?
     public var price_experience_tier: String?
     public var price_guest_increment: Int?
+    public var price_price_on_request: Bool?
     public var price_incentive_type_id: Int?
     public var price_list_price: Double?
     public var price_max_count: Int?

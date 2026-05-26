@@ -27,7 +27,8 @@ public final class PreferabliUser : HasIntID, HasTimestamps, HasImage {
     public var avatar_background_color_hex: String?
     public var avatar_text_color_hex: String?
     public var favorite_venue_ids: [Int]?
-    
+    public var favorite_experience_ids: [Int]?
+
     @Relationship(deleteRule: .nullify) public var avatar: Media?
 
     public init(id: Int) { self.id = id }
@@ -40,7 +41,7 @@ public final class PreferabliUser : HasIntID, HasTimestamps, HasImage {
     /// - Returns: the URL of the requested image.
     public func getImage(width : Int, height : Int, quality : Int = 80) -> URL? {
         let path = avatar?.path
-        return PreferabliTools.getImageUrl(image: avatar?.path, width: width, height: height, quality: quality)
+        return PreferabliTools.getImageUrl(media: avatar, width: width, height: height, quality: quality)
     }
     
     public var isAvatarNotSet: Bool {

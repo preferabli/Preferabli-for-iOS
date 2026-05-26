@@ -235,7 +235,7 @@ public final class Product: HasIntID, HasTimestamps, HasImage {
                 return variant.getImage(width: width, height: height, quality: quality)
             }
         }
-        return PreferabliTools.getImageUrl(image: primary_image?.path, width: width, height: height, quality: quality)
+        return PreferabliTools.getImageUrl(media: primary_image, width: width, height: height, quality: quality)
     }
     
     public func getPlaceholderImage() -> String? {

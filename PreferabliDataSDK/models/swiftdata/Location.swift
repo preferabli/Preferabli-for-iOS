@@ -12,7 +12,7 @@ public final class Location: HasIntID, HasTimestamps {
     public var latitude: Double?
     public var longitude: Double?
     public var zip_code: String?
-    public var country_code: String? = "US"
+    public var country_code: String?
 
     public init(id: Int) { self.id = id }
     

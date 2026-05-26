@@ -14,6 +14,8 @@ public final class Style: HasIntID, HasTimestamps, HasImage {
     public var type: String
     public var primary_image_url: String?
     public var product_category: String?
+    public var is_global: Bool?
+    public var show_map: Bool?
 
     // relationships
     @Relationship(deleteRule: .nullify) public var locations: [Location] = []

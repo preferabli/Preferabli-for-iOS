@@ -50,11 +50,16 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
     public var zip_code: String?
     public var notes: String?
     public var is_partner: Bool?
+    
+    // local only
+    public var isTombstoned: Bool = false
 
     // MARK: - Relationships
     @Relationship(deleteRule: .nullify) public var primary_image: Media?
     @Relationship(deleteRule: .nullify) public var logo: Media?
     @Relationship(deleteRule: .nullify) public var video: Media?
+    @Relationship(deleteRule: .nullify) public var video_poster: Media?
+
     @Relationship(deleteRule: .cascade, inverse: \DeliveryMethod.venue) public var active_delivery_methods: [DeliveryMethod] = []
     @Relationship(deleteRule: .cascade) public var images: [Media] = []
     @Relationship(deleteRule: .cascade, inverse: \VenueHour.venue) public var hours: [VenueHour] = []

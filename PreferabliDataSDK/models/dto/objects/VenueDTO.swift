@@ -55,6 +55,7 @@ public struct VenueDTO: Decodable, Sendable {
     public let lookups: [MerchantProductLink]?
     public let market_trait_associations: [VenueMarketTraitDTO]?
     public let video: MediaDTO?
+    public let video_poster: MediaDTO?
     public let logo: MediaDTO?
     public let primary_image: MediaDTO?
     public let is_partner: Bool?

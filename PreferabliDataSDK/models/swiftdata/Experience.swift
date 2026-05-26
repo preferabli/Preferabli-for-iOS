@@ -52,6 +52,10 @@ public final class Experience: HasIntID, HasImage {
     public var primary_inventory_id: Int?
     public var reservations_provider: String?
     public var preferabli_image_url: String?
+    
+    // local only
+    public var isTombstoned: Bool = false
+    public var isUnlocked: Bool = false
 
     
     // MARK: - Relationships
@@ -154,6 +158,7 @@ public final class ExperiencePrice: HasIntID {
     public var price: Double?
     public var price_type: String?
     public var stripe_product_price_id: String?
+    public var price_on_request: Bool?
     
     public var experience: Experience?
 

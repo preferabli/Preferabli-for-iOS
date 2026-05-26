@@ -40,6 +40,8 @@ public struct StyleDTO: Decodable, Sendable {
     public let type: String
     public let primary_image_url: String?
     public let product_category: String?
+    public let is_global: Bool?
+    public let show_map: Bool?
     public let locations : [LocationDTO]
 }
 

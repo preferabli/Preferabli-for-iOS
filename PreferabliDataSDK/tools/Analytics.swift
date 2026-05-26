@@ -17,7 +17,7 @@ enum Analytics {
 
     static func track(_ event: String, _ properties: [String: Any] = [:]) {
         let props = convertDictionaryToMixpanelProperties(dictionary: properties)
-        Mixpanel.mainInstance().track(event: event, properties: props)
+        Mixpanel.getInstance(name: "PreferabliDataSDK")?.track(event: event, properties: props)
     }
     
     static func convertDictionaryToMixpanelProperties(dictionary : [String : Any]) -> [String : MixpanelType] {

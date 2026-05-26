@@ -144,6 +144,7 @@ public struct ExperiencePriceDTO: Decodable, Sendable {
     public let price: Double?
     public let price_type: String?
     public let stripe_product_price_id: String?
+    public let price_on_request: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id = "experience_price_id"
@@ -161,6 +162,7 @@ public struct ExperiencePriceDTO: Decodable, Sendable {
         case price
         case price_type
         case stripe_product_price_id
+        case price_on_request
     }
 }
 

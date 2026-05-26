@@ -43,7 +43,7 @@ public final class RecipeGroup: HasIntID, HasTimestamps, HasImage {
     }
     
     public func getImage(width: Int, height: Int, quality: Int = 80) -> URL? {
-        PreferabliTools.getImageUrl(image: primary_image?.path, width: width, height: height, quality: quality)
+        PreferabliTools.getImageUrl(media: primary_image, width: width, height: height, quality: quality)
     }
 
     public func getPlaceholderImage() -> String? {

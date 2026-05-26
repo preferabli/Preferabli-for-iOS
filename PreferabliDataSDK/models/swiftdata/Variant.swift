@@ -132,7 +132,7 @@ public final class Variant: HasIntID, HasTimestamps, HasTombstone {
             }
             return product.getImage(width: width, height: height, quality: quality)
         }
-        return PreferabliTools.getImageUrl(image: primary_image?.path, width: width, height: height, quality: quality)
+        return PreferabliTools.getImageUrl(media: primary_image, width: width, height: height, quality: quality)
     }
     
     /// All of the variant tags of type ``TagType/RATING`` for the current user.

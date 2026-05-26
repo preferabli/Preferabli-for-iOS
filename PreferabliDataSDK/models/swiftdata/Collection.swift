@@ -77,7 +77,7 @@ public final class Collection: HasIntID, HasTimestamps, HasImage {
     ///   - quality: returns an image with the specified quality. Scales from 0 - 100.
     /// - Returns: the URL of the requested image.
     public func getImage(width : Int, height : Int, quality : Int = 80) -> URL? {
-        return PreferabliTools.getImageUrl(image: primary_image?.path, width: width, height: height, quality: quality)
+        return PreferabliTools.getImageUrl(media: primary_image, width: width, height: height, quality: quality)
     }
 
     public static func predicate(forID id: Int) -> Predicate<Collection> {

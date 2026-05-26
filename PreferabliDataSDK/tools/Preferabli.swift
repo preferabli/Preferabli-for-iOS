@@ -94,7 +94,7 @@ public class Preferabli {
         _main = Preferabli(logging_enabled: logging_enabled)
         
         Mixpanel.initialize(token: SDKConfig.mixpanelKey, trackAutomaticEvents: false, instanceName: "PreferabliDataSDK")
-        Mixpanel.mainInstance().registerSuperProperties([
+        Mixpanel.getInstance(name: "PreferabliDataSDK")?.registerSuperProperties([
             "CLIENT_INTERFACE": client_interface,
             "INTEGRATION_ID": integration_id
         ])
@@ -532,10 +532,10 @@ public class Preferabli {
 
             let response = try await api.getAlamo().delete(APIEndpoints.reservation(id: reservation_id) + "?cancellation_reason=Customer%20requested%20cancellation")
             
-            let body: ReservationsResponseDTO = try await api.getAlamo().get(APIEndpoints.reservations)
+            let body: [ReservationDTO] = try await api.getAlamo().get(APIEndpoints.reservations)
             
             try await Storage.withBackgroundContext { ctx in
-                for dto in body.data {
+                for dto in body {
                     try Storage.upsertReservation(from: dto, in: ctx)
                 }
                 
@@ -562,10 +562,10 @@ public class Preferabli {
 
             let response = try await api.getAlamo().put(APIEndpoints.alternativeTimes(id: reservation_id), sjson: dictionary)
             
-            let body: ReservationsResponseDTO = try await api.getAlamo().get(APIEndpoints.reservations)
+            let body: [ReservationDTO] = try await api.getAlamo().get(APIEndpoints.reservations)
             
             try await Storage.withBackgroundContext { ctx in
-                for dto in body.data {
+                for dto in body {
                     try Storage.upsertReservation(from: dto, in: ctx)
                 }
                 
@@ -611,10 +611,10 @@ public class Preferabli {
 
             try await api.getAlamo().put(APIEndpoints.reservation(id: reservation_id), sjson: dictionary)
 
-            let body: ReservationsResponseDTO = try await api.getAlamo().get(APIEndpoints.reservations)
+            let body: [ReservationDTO] = try await api.getAlamo().get(APIEndpoints.reservations)
             
             try await Storage.withBackgroundContext { ctx in
-                for dto in body.data {
+                for dto in body {
                     try Storage.upsertReservation(from: dto, in: ctx)
                 }
                 
@@ -654,12 +654,12 @@ public class Preferabli {
 
             try await api.getAlamo().put(APIEndpoints.reservation(id: reservation_id), sjson: dictionary)
 
-            let body: ReservationsResponseDTO = try await api
+            let body: [ReservationDTO] = try await api
                 .getAlamo()
                 .get(APIEndpoints.reservations)
 
             try await Storage.withBackgroundContext { ctx in
-                for dto in body.data {
+                for dto in body {
                     try Storage.upsertReservation(from: dto, in: ctx)
                 }
                 try ctx.save()
@@ -708,12 +708,12 @@ public class Preferabli {
                 .getAlamo()
                 .post(APIEndpoints.internalReservations(id: experience_id), sjson: dictionary)
 
-            let body: ReservationsResponseDTO = try await api
+            let body: [ReservationDTO] = try await api
                 .getAlamo()
                 .get(APIEndpoints.reservations)
 
             try await Storage.withBackgroundContext { ctx in
-                for dto in body.data {
+                for dto in body {
                     try Storage.upsertReservation(from: dto, in: ctx)
                 }
                 try ctx.save()
@@ -731,7 +731,7 @@ public class Preferabli {
         experience_id : Int,
         hubspot_deal_id : String,
         date : String,
-        time : String,
+        time : String?,
         guest_count : Int,
         modification_link : String?,
         booking_confirmation_ref : String?,
@@ -750,13 +750,16 @@ public class Preferabli {
                 "experience_id": experience_id,
                 "hubspot_deal_id": hubspot_deal_id,
                 "date": date,
-                "time": time,
                 "guest_count": guest_count
             ]
 
             // Optional fields
             if let modification_link {
                 dictionary["modification_link"] = modification_link
+            }
+            
+            if let time {
+                dictionary["time"] = time
             }
 
             if let booking_confirmation_ref {
@@ -785,10 +788,10 @@ public class Preferabli {
 
             let response : ReservationResponseDTO = try await api.getAlamo().post(APIEndpoints.externalReservations(id: experience_id), sjson: dictionary)
             
-            let body: ReservationsResponseDTO = try await api.getAlamo().get(APIEndpoints.reservations)
+            let body: [ReservationDTO] = try await api.getAlamo().get(APIEndpoints.reservations)
             
             try await Storage.withBackgroundContext { ctx in
-                for dto in body.data {
+                for dto in body {
                     try Storage.upsertReservation(from: dto, in: ctx)
                 }
                 
@@ -839,11 +842,10 @@ public class Preferabli {
                     sjson: dictionary
                 )
             } else {
-                let response: AffiliatesResponseDTO = try await api.getAlamo().get(
+                affiliateArray = try await api.getAlamo().get(
                     APIEndpoints.affiliateCodes,
                     sparams: dictionary
                 )
-                affiliateArray = response.data
             }
             
             
@@ -877,11 +879,11 @@ public class Preferabli {
             try await canWeContinue(needsToBeLoggedIn: true)
             Analytics.track(["event": "get_affiliates"])
 
-            let response: AffiliatesResponseDTO = try await api.getAlamo().get(APIEndpoints.affiliates)
+            let response: [AffiliateDTO] = try await api.getAlamo().get(APIEndpoints.affiliates)
 
             let ids : [Int] = try await Storage.withBackgroundContext { ctx in
                 var idsToReturn = [Int]()
-                for affiliateDTO in response.data {
+                for affiliateDTO in response {
                     try Storage.upsertAffiliate(from: affiliateDTO, in: ctx)
                     idsToReturn.append(Int(affiliateDTO.id))
                 }
@@ -890,7 +892,7 @@ public class Preferabli {
                 return idsToReturn
             }
 
-            if response.data.isEmpty {
+            if response.isEmpty {
                 throw PreferabliException.init(type: .BadData, message: "No affiliate(s) found.", code: 404)
             }
             
@@ -1052,12 +1054,12 @@ public class Preferabli {
             try await canWeContinue(needsToBeLoggedIn: false)
             Analytics.track( ["event" : "search_experiences"])
             
-            let searchResponse : ExperiencesResponseDTO = try await api.getAlamo().get(APIEndpoints.searchExperiences(query: query))
+            let searchResponse : [ExperienceDTO] = try await api.getAlamo().get(APIEndpoints.searchExperiences(query: query))
             
             let needsVenues = try await Storage.withBackgroundContext { ctx in
                 var needsVenues = [Int]()
                 
-                for expDTO in searchResponse.data {
+                for expDTO in searchResponse {
                     if let venueId = expDTO.preferabli_venue_id {
                         guard let venue = try Storage.fetchById(Venue.self, id: venueId, in: ctx) else {
                             needsVenues.append(venueId)
@@ -1087,7 +1089,7 @@ public class Preferabli {
                 }
                 try ctx.save()
 
-                for expDTO in searchResponse.data {
+                for expDTO in searchResponse {
                     if let venueId = expDTO.preferabli_venue_id {
                         guard let venue = try Storage.fetchById(Venue.self, id: venueId, in: ctx) else {
                             continue
@@ -1863,6 +1865,33 @@ public class Preferabli {
         }
     }
     
+    public func favoriteExperience(experienceId : Int) async throws
+    {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            
+            Analytics.track(["event": "favorite_experience"])
+            
+            _ = try await api.getAlamo().postNoBody(APIEndpoints.favoriteExperience(id: PreferabliTools.getPreferabliUserId(), experienceId: experienceId))
+            
+            try await Storage.withBackgroundContext { ctx in
+                guard let user = try Storage.fetchById(PreferabliUser.self, id: PreferabliTools.getPreferabliUserId(), in: ctx) else {
+                    return
+                }
+                
+                var favorites = user.favorite_experience_ids ?? []
+                favorites.append(experienceId)
+                user.favorite_experience_ids = favorites
+                
+                try ctx.save()
+            }
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
     public func unfavoriteVenue(venueId : Int) async throws
     {
         do {
@@ -1880,6 +1909,33 @@ public class Preferabli {
                 var favorites = user.favorite_venue_ids ?? []
                 favorites.removeAll { $0 == venueId }
                 user.favorite_venue_ids = favorites
+                
+                try ctx.save()
+            }
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func unfavoriteExperience(experienceId : Int) async throws
+    {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            
+            Analytics.track(["event": "unfavorite_experience"])
+            
+            _ = try await api.getAlamo().delete(APIEndpoints.favoriteExperience(id: PreferabliTools.getPreferabliUserId(), experienceId: experienceId))
+            
+            try await Storage.withBackgroundContext { ctx in
+                guard let user = try Storage.fetchById(PreferabliUser.self, id: PreferabliTools.getPreferabliUserId(), in: ctx) else {
+                    return
+                }
+                
+                var favorites = user.favorite_experience_ids ?? []
+                favorites.removeAll { $0 == experienceId }
+                user.favorite_experience_ids = favorites
                 
                 try ctx.save()
             }
@@ -1946,6 +2002,14 @@ public class Preferabli {
                     )
                 }
 
+                let keepVenueIDs = Set(body.map(\.id))
+
+                try Storage.deleteVenuesNotInBatch(
+                    keepVenueIDs,
+                    rootMarket: market,
+                    in: ctx
+                )
+
                 let batch = try Storage.VenueUpsertBatch(
                     venueDTOs: body,
                     market: market,
@@ -1980,20 +2044,30 @@ public class Preferabli {
             Analytics.track(["event": "get_experiences"])
             
             let params: SParams = ["limit": 9999, "offset": 0]
-            let body: ExperiencesResponseDTO = try await api.getAlamo().get(APIEndpoints.experiences(marketId: market_id), sparams: params)
+            let body: [ExperienceDTO] = try await api.getAlamo().get(APIEndpoints.experiences(marketId: market_id), sparams: params)
             
             let experienceIds: [Int] = try await Storage.withBackgroundContext { ctx in
                 var experienceIds: [Int] = []
-                experienceIds.reserveCapacity(body.data.count)
-                
-                for experienceDTO in body.data {
-                    
-                    guard let preferabli_venue_id =  experienceDTO.preferabli_venue_id, let venue = try Storage.fetchById(Venue.self, id: preferabli_venue_id, in: ctx) else {
+                experienceIds.reserveCapacity(body.count)
+
+                for experienceDTO in body {
+                    guard
+                        let preferabli_venue_id = experienceDTO.preferabli_venue_id,
+                        let venue = try Storage.fetchById(Venue.self, id: preferabli_venue_id, in: ctx)
+                    else {
                         continue
                     }
-                    
+
                     let experience = try Storage.upsertExperience(from: experienceDTO, venue: venue, in: ctx)
                     experienceIds.append(experience.id)
+                }
+
+                if let market = try Storage.fetchById(Market.self, id: market_id, in: ctx) {
+                    try Storage.tombstoneExperiencesNotInSet(
+                        Set(experienceIds),
+                        rootMarket: market,
+                        in: ctx
+                    )
                 }
 
                 try ctx.save()
@@ -2009,9 +2083,7 @@ public class Preferabli {
     }
     
     public func getCTABuckets(
-        force_refresh: Bool = false,
-        market_id: Int? = nil,
-        section: String? = nil
+        force_refresh: Bool = false
     ) async throws -> [Int] {
         let api = self.api
         let loggingEnabled = self.loggingEnabled // (unused for now, but left intact)
@@ -2022,12 +2094,9 @@ public class Preferabli {
             do {
                 try await self.canWeContinue(needsToBeLoggedIn: false)
                 Analytics.track(["event": "get_cta_buckets"])
-                
-                let isGeneralCall = (market_id == nil && section == nil)
-                
+                                
                 // Only short-circuit for the *general* (unscoped) load
-                if isGeneralCall,
-                   !force_refresh,
+                if !force_refresh,
                    Storage.getKeyStore().bool(forKey: "hasLoadedBuckets") {
                     
                     let localIds: [Int] = try await Storage.withBackgroundContext { ctx in
@@ -2040,32 +2109,20 @@ public class Preferabli {
                 
                 var params: SParams = ["domain": "tastefuli-v3"]
                 
-                if let market_id {
-                    params["market_ids[]"] = market_id
-                }
-                
-                if let section {
-                    params["section"] = section
-                }
-                
-                let body: [CTABucketResponseDTO] = try await api
+                let body: [CTABucketDTO] = try await api
                     .getAlamo()
                     .get(APIEndpoints.ctaBuckets, sparams: params)
                 
                 let dtoIds: [Int] = try await Storage.withBackgroundContext { ctx in
                     let ids = try Storage.upsertCTABucketsSourceOfTruth(
                         from: body,
-                        scopeMarketId: market_id,
-                        scopeSection: section,
                         in: ctx
                     )
                     try ctx.save()
                     return ids
                 }
                 
-                if isGeneralCall {
-                    Storage.getKeyStore().set(true, forKey: "hasLoadedBuckets")
-                }
+                Storage.getKeyStore().set(true, forKey: "hasLoadedBuckets")
                 
                 return dtoIds
                 
@@ -2275,10 +2332,10 @@ public class Preferabli {
             if needsRefresh {
                 
                 let params: SParams = ["limit": 9999, "offset": 0]
-                let body: ExperiencesResponseDTO = try await api.getAlamo().get(APIEndpoints.experiences(id: venue_id), sparams: params)
+                let body: [ExperienceDTO] = try await api.getAlamo().get(APIEndpoints.experiences(id: venue_id), sparams: params)
                 
                 try await Storage.withBackgroundContext { ctx in
-                    for experienceDTO in body.data {
+                    for experienceDTO in body {
                         
                         guard let preferabli_venue_id =  experienceDTO.preferabli_venue_id, let venue = try Storage.fetchById(Venue.self, id: preferabli_venue_id, in: ctx) else {
                             continue
@@ -2347,11 +2404,11 @@ public class Preferabli {
             var needsRefresh = true
             
             
-            let body: ReservationsResponseDTO = try await api.getAlamo().get(APIEndpoints.reservations)
+            let body: [ReservationDTO] = try await api.getAlamo().get(APIEndpoints.reservations)
             
             let reservationIds = try Storage.withContext { ctx in
                 var ids = [Int]()
-                for dto in body.data {
+                for dto in body {
                     let reservation = try Storage.upsertReservation(from: dto, in: ctx)
                     ids.append(reservation.id)
                 }
@@ -2392,13 +2449,13 @@ public class Preferabli {
             if needsRefresh {
                 
                 let params: SParams = ["limit": 9999, "offset": 0]
-                let body: ExperiencesResponseDTO = try await api.getAlamo().get(APIEndpoints.experiences(id: venue_id), sparams: params)
+                let body: [ExperienceDTO] = try await api.getAlamo().get(APIEndpoints.experiences(id: venue_id), sparams: params)
                 
                 experienceIds = try await Storage.withBackgroundContext { ctx in
                     var experienceIds: [Int] = []
-                    experienceIds.reserveCapacity(body.data.count)
+                    experienceIds.reserveCapacity(body.count)
                     
-                    for experienceDTO in body.data {
+                    for experienceDTO in body {
                         
                         guard let preferabli_venue_id =  experienceDTO.preferabli_venue_id, let venue = try Storage.fetchById(Venue.self, id: preferabli_venue_id, in: ctx) else {
                             continue
@@ -2407,6 +2464,12 @@ public class Preferabli {
                         let experience = try Storage.upsertExperience(from: experienceDTO, venue: venue, in: ctx)
                         experienceIds.append(experience.id)
                     }
+                    
+                    try Storage.tombstoneExperiencesNotInSet(
+                        Set(experienceIds),
+                        scopeVenueId: venue_id,
+                        in: ctx
+                    )
 
                     try ctx.save()
                     return experienceIds
@@ -2431,7 +2494,7 @@ public class Preferabli {
             let body : BalloonResponseDTO = try await api.getAlamo().get(APIEndpoints.balloonBooking, sparams: params)
             
             let reservationId = try Storage.withContext { ctx in
-                let reservation = try Storage.upsertBalloonReservation(from: body.data.booking, in: ctx)
+                let reservation = try Storage.upsertBalloonReservation(from: body.booking, in: ctx)
                 try ctx.save()
                 return reservation.id
             }
@@ -3564,5 +3627,653 @@ extension Preferabli {
         }
 
         await sessionBootstrapper.reset(preferabli: self)
+    }
+}
+
+// Gen AI Calls
+extension Preferabli {
+
+    @discardableResult
+    public func startGenAIConversation() async throws -> String {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            
+            let auth = try await genAIAuthContext()
+            
+            Analytics.track(["event": "gen_ai_start_conversation"])
+
+            let params: SParams = [
+                "source": GenAIMessage.Source.client,
+                "user_id": PreferabliTools.getPreferabliUserId(),
+                "use_wine_utterance_objects": false,
+                "origin_id": auth.originId,
+                "product_category_context": "wine",
+                "integration_id": 13242
+            ]
+
+            let body: GenAIStartConversationDTO = try await api
+                .getAlamo()
+                .post(APIEndpoints.genAIStart, sjson: params, headers: auth.headers)
+
+            return body.sessionId
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    public func getGenAIThinkingTexts() async throws -> [Int: [String]] {
+        do {
+            try await getGenAILambda()
+
+            try await canWeContinue(needsToBeLoggedIn: false)
+                        
+            Analytics.track(["event": "gen_ai_thinking_texts"])
+
+            let auth = try await genAIAuthContext()
+
+            let body: [GenAIThinkingDTO] = try await api
+                .getAlamo()
+                .get(
+                    APIEndpoints.genAIThinking,
+                    sparams: ["origin_id": auth.originId],
+                    headers: auth.headers
+                )
+
+            var result: [Int: [String]] = [:]
+            for item in body {
+                guard let threshold = item.thresholdInSeconds,
+                      let text = item.displayText,
+                      !text.isEmptyOrWhitespace()
+                else { continue }
+
+                result[threshold, default: []].append(text)
+            }
+
+            return result.isEmpty ? [0: ["Thinking…"]] : result
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    public func getGenAIConversationHistory(sessionId: String) async throws -> [GenAIMessage] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "gen_ai_conversation_history"])
+            
+            let auth = try await genAIAuthContext()
+
+            let body: [GenAIMessageDTO] = try await api
+                .getAlamo()
+                .get(
+                    APIEndpoints.genAIConversationHistory(sessionId: sessionId),
+                    sparams: ["origin_id": auth.originId],
+                    headers: auth.headers
+                )
+
+            var messages: [GenAIMessage] = []
+            for dto in body {
+                let message = try await upsertAndHydrateGenAIMessage(dto)
+                messages.append(message)
+            }
+
+            return messages.sorted { $0.turn < $1.turn }
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    public func getGenAIHistory() async throws -> [GenAIHistoryConversationSummary] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "gen_ai_history_viewed"])
+
+            let auth = try await genAIAuthContext()
+
+            let body: GenAIHistoryResponseDTO = try await api
+                .getAlamo()
+                .get(
+                    APIEndpoints.genAIHistory,
+                    sparams: [
+                        "user_id": PreferabliTools.getPreferabliUserId(),
+                        "origin_id": auth.originId
+                    ],
+                    headers: auth.headers
+                )
+
+            var summaries: [GenAIHistoryConversationSummary] = []
+
+            for sessionId in body.keys.sorted() {
+                let maybeDTO = body[sessionId] ?? nil
+
+                if let dto = maybeDTO {
+                    let message = try await upsertAndHydrateGenAIMessage(
+                        dto,
+                        fallbackSessionId: sessionId,
+                        fallbackTurn: dto.turn
+                    )
+
+                    summaries.append(
+                        makeGenAIHistorySummary(
+                            sessionId: sessionId,
+                            messageId: message.id,
+                            turn: message.turn,
+                            previewText: dto.historyPreviewText,
+                            fallbackPreviewText: message.messageText,
+                            createdAt: message.created_at
+                        )
+                    )
+                } else if let localMessage = try fetchRepresentativeGenAIHistoryMessage(sessionId: sessionId) {
+                    summaries.append(
+                        makeGenAIHistorySummary(
+                            sessionId: sessionId,
+                            messageId: localMessage.id,
+                            turn: localMessage.turn,
+                            previewText: localMessage.messageText,
+                            fallbackPreviewText: localMessage.utterance,
+                            createdAt: localMessage.created_at
+                        )
+                    )
+                }
+            }
+
+            return summaries.sorted { lhs, rhs in
+                switch (lhs.createdAt, rhs.createdAt) {
+                case let (left?, right?):
+                    return left > right
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                case (nil, nil):
+                    return lhs.sessionId < rhs.sessionId
+                }
+            }
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    @discardableResult
+    public func sendGenAIMessage(
+        utterance: String,
+        sessionId: String,
+        turn: Int,
+        source: String = GenAIMessage.Source.client,
+        dialogOverride: Bool = false
+    ) async throws -> GenAIMessage {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "gen_ai_send_message"])
+            
+            let auth = try await genAIAuthContext()
+
+            var params: SParams = [
+                "utterance": utterance,
+                "session_id": sessionId,
+                "turn": turn,
+                "source": source,
+                "origin_id": auth.originId
+            ]
+
+            if dialogOverride {
+                params["dialog_override"] = true
+            }
+
+            let dto: GenAIMessageDTO = try await api
+                .getAlamo()
+                .post(APIEndpoints.genAI, sjson: params, headers: auth.headers)
+
+            return try await upsertAndHydrateGenAIMessage(
+                dto,
+                fallbackSessionId: sessionId,
+                fallbackTurn: turn
+            )
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    public func postGenAIDialogOverrideMessage(
+        utterance: String,
+        sessionId: String,
+        turn: Int,
+        source: String
+    ) async throws {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "gen_ai_dialog_override"])
+            
+            let auth = try await genAIAuthContext()
+
+            let params: SParams = [
+                "utterance": utterance,
+                "session_id": sessionId,
+                "turn": turn,
+                "dialog_override": true,
+                "source": source,
+                "origin_id": auth.originId
+            ]
+
+            try await api
+                .getAlamo()
+                .post(APIEndpoints.genAI, sjson: params, headers: auth.headers)
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    public func updateGenAIConversationCategory(
+        category: String,
+        sessionId: String
+    ) async throws {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "gen_ai_category_selected", "category": category])
+            
+            let auth = try await genAIAuthContext()
+
+            let params: SParams = [
+                "product_category_context": category,
+                "origin_id": auth.originId
+            ]
+            
+            try await api
+                .getAlamo()
+                .put(APIEndpoints.genAIConversation(sessionId: sessionId), sjson: params, headers: auth.headers)
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    @discardableResult
+    public func selectGenAIItem(
+        sessionId: String,
+        turn: Int,
+        productId: Int?,
+        productName: String?,
+        foodId: Int?,
+        foodName: String?,
+        entityProbability: Double?,
+        recognitionType: String?,
+        isFood: Bool
+    ) async throws -> GenAIMessage {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "gen_ai_item_selected", "food": isFood])
+            
+            let auth = try await genAIAuthContext()
+
+            var params: SParams = [
+                "session_id": sessionId,
+                "turn": turn,
+                "origin_id": auth.originId
+            ]
+
+            if let productId {
+                var selection: SParams = [
+                    "entity_id": productId,
+                    "entity_type": "product_name"
+                ]
+                if let productName { selection["entity_name"] = productName }
+                if let entityProbability { selection["entity_prob"] = entityProbability }
+
+                params["user_action"] = "btn_wine_entity_confirm"
+                params["user_selection"] = selection
+            } else if let foodId {
+                var selection: SParams = [
+                    "entity_id": foodId,
+                    "entity_type": "food_name"
+                ]
+                if let foodName { selection["food_entity"] = foodName }
+                if let entityProbability { selection["score"] = entityProbability }
+                if let recognitionType { selection["recog_type"] = recognitionType }
+
+                params["user_action"] = "btn_food_entity_confirm"
+                params["user_selection"] = selection
+            } else if isFood {
+                params["user_action"] = "btn_food_entity_reject"
+            } else {
+                params["user_action"] = "btn_wine_entity_reject"
+            }
+
+            let dto: GenAIMessageDTO = try await api
+                .getAlamo()
+                .post(APIEndpoints.genAI, sjson: params, headers: auth.headers)
+
+            return try await upsertAndHydrateGenAIMessage(
+                dto,
+                fallbackSessionId: sessionId,
+                fallbackTurn: turn
+            )
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    @discardableResult
+    public func upsertGenAIFeedback(
+        sessionId: String,
+        transactionId: String,
+        feedbackId: Int?,
+        positiveReaction: Bool,
+        reportedIssue: String?
+    ) async throws -> Int? {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track([
+                "event": "gen_ai_feedback",
+                "positive_reaction": positiveReaction
+            ])
+            
+            let auth = try await genAIAuthContext()
+
+            var params: SParams = [
+                "session_id": sessionId,
+                "transaction_id": transactionId,
+                "positive_reaction": positiveReaction,
+                "origin_id": auth.originId
+            ]
+
+            if let reportedIssue, !reportedIssue.isEmptyOrWhitespace() {
+                params["reported_issue"] = reportedIssue
+            }
+
+            let dto: GenAIFeedbackDTO
+            if let feedbackId, feedbackId > 0 {
+                dto = try await api
+                    .getAlamo()
+                    .put(APIEndpoints.genAIFeedback(id: feedbackId), sjson: params, headers: auth.headers)
+            } else {
+                dto = try await api
+                    .getAlamo()
+                    .post(APIEndpoints.genAIFeedback, sjson: params, headers: auth.headers)
+            }
+
+            return dto.id
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    public func deleteGenAIConversation(sessionId: String) async throws {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "gen_ai_delete_conversation"])
+            
+            let auth = try await genAIAuthContext()
+
+            let url = APIEndpoints.genAIConversation(sessionId: sessionId) + "?origin_id=\(auth.originId)"
+
+            try await api
+                .getAlamo()
+                .delete(url, headers: auth.headers)
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    public func getGenAIVoices() async throws -> [GenAIVoiceOptionDTO] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "gen_ai_voices"])
+            
+            let auth = try await genAIAuthContext()
+
+            return try await api
+                .getAlamo()
+                .get(
+                    APIEndpoints.genAIVoices,
+                    sparams: ["origin_id": auth.originId],
+                    headers: auth.headers
+                )
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    public func updateGenAIVoice(
+        voiceId: Int,
+        sessionId: String
+    ) async throws {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "gen_ai_voice_selected", "voice_option_id": voiceId])
+            
+            let auth = try await genAIAuthContext()
+
+            let params: SParams = [
+                "voice_option_id": voiceId,
+                "session_id": sessionId,
+                "origin_id": auth.originId
+            ]
+
+            try await api
+                .getAlamo()
+                .post(APIEndpoints.updateGenAIVoices, sjson: params, headers: auth.headers)
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    private func makeGenAIHistorySummary(
+        sessionId: String,
+        messageId: Int?,
+        turn: Int?,
+        previewText: String?,
+        fallbackPreviewText: String?,
+        createdAt: Date?
+    ) -> GenAIHistoryConversationSummary {
+        let normalizedPreview = previewText?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedFallback = fallbackPreviewText?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let resolvedPreview = normalizedPreview?.isEmpty == false ? normalizedPreview : nil
+
+        return GenAIHistoryConversationSummary(
+            sessionId: sessionId,
+            messageId: messageId,
+            turn: turn,
+            previewText: resolvedPreview ?? normalizedFallback ?? "",
+            createdAt: createdAt
+        )
+    }
+
+    private func fetchRepresentativeGenAIHistoryMessage(sessionId: String) throws -> GenAIMessage? {
+        try Storage.withContext { ctx in
+            var descriptor = FetchDescriptor<GenAIMessage>(
+                predicate: #Predicate { message in
+                    message.sessionId == sessionId && message.isTombstoned == false
+                },
+                sortBy: [
+                    SortDescriptor(\.created_at, order: .reverse),
+                    SortDescriptor(\.turn, order: .forward)
+                ]
+            )
+            descriptor.fetchLimit = 1
+            return try ctx.fetch(descriptor).first
+        }
+    }
+
+    private func upsertAndHydrateGenAIMessage(
+        _ dto: GenAIMessageDTO,
+        fallbackSessionId: String? = nil,
+        fallbackTurn: Int? = nil
+    ) async throws -> GenAIMessage {
+        let messageId = try Storage.withContext { ctx in
+            let message = try Storage.upsertGenAIMessage(
+                from: dto,
+                fallbackSessionId: fallbackSessionId,
+                fallbackTurn: fallbackTurn,
+                in: ctx
+            )
+            try ctx.save()
+            return message.id
+        }
+
+        try await hydrateGenAIProducts(for: dto, messageId: messageId)
+        try await hydrateGenAIFoodsIfNeeded(foodIds: dto.foodIds)
+
+        return try Storage.withContext { ctx in
+            guard let message = try Storage.fetchGenAIMessage(id: messageId, in: ctx) else {
+                throw PreferabliException(type: .DatabaseError)
+            }
+            return message
+        }
+    }
+
+    private func hydrateGenAIProducts(
+        for dto: GenAIMessageDTO,
+        messageId: Int
+    ) async throws {
+        let directProductIds = dto.productEntityIds.uniqued()
+        let variantIds = dto.variantIds.uniqued()
+
+        guard !directProductIds.isEmpty || !variantIds.isEmpty else { return }
+
+        var productIdsForMessage = directProductIds
+        var productDTOs: [ProductDTO] = []
+
+        if !directProductIds.isEmpty {
+            let directDTOs: [ProductDTO] = try await api
+                .getAlamo()
+                .get(APIEndpoints.products, sparams: ["product_ids": directProductIds])
+            productDTOs.append(contentsOf: directDTOs)
+        }
+
+        if !variantIds.isEmpty {
+            let variantDTOs: [ProductDTO] = try await api
+                .getAlamo()
+                .get(APIEndpoints.products, sparams: ["variant_ids": variantIds])
+            productDTOs.append(contentsOf: variantDTOs)
+
+            var productIdByVariantId: [Int: Int] = [:]
+            for productDTO in variantDTOs {
+                for variantDTO in productDTO.variants ?? [] {
+                    productIdByVariantId[variantDTO.id] = productDTO.id
+                }
+            }
+
+            productIdsForMessage.append(contentsOf: variantIds.compactMap { productIdByVariantId[$0] })
+        }
+
+        productIdsForMessage = productIdsForMessage.uniqued()
+
+        try Storage.withContext { ctx in
+            for productDTO in productDTOs {
+                _ = try Storage.upsertProduct(from: productDTO, in: ctx)
+            }
+            try Storage.updateGenAIMessageProductIds(
+                messageId: messageId,
+                productIds: productIdsForMessage,
+                in: ctx
+            )
+            try ctx.save()
+        }
+    }
+
+    private func hydrateGenAIFoodsIfNeeded(foodIds: [Int]) async throws {
+        let foodIds = foodIds.uniqued()
+        guard !foodIds.isEmpty else { return }
+
+        let missingFoodIds: [Int] = try Storage.withContext { ctx in
+            var missing: [Int] = []
+            for foodId in foodIds {
+                if try Storage.fetchById(Food.self, id: foodId, in: ctx) == nil {
+                    missing.append(foodId)
+                }
+            }
+            return missing
+        }
+
+        guard !missingFoodIds.isEmpty else { return }
+
+        let foodDTOs: [FoodDTO] = try await api
+            .getAlamo()
+            .get(APIEndpoints.foods)
+
+        try Storage.withContext { ctx in
+            for foodDTO in foodDTOs {
+                _ = try Storage.upsertFood(from: foodDTO, in: ctx)
+            }
+            try ctx.save()
+        }
+    }
+    
+    public func getGenAILambda() async throws {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "gen_ai_lambda"])
+            
+            let defaults = Storage.getKeyStore()
+            let lastPiece = "dev"
+
+            let lambdas: [GenAILambdaDTO] = try await api.getAlamo().get(
+                APIEndpoints.genAILambda(lastPiece: lastPiece)
+            )
+            
+            let oldLambda = defaults.string(forKey: "genAILambda")
+
+            if let lambda = lambdas.first(where: { $0.isCurrent }) {
+                defaults.set(lambda.url, forKey: "genAILambda")
+            } else if let lambda = lambdas.first(where: { $0.isStaging }) {
+                defaults.set(lambda.url, forKey: "genAILambda")
+            } else if let lambda = lambdas.first(where: { $0.isDev }) {
+                defaults.set(lambda.url, forKey: "genAILambda")
+            }
+            
+            let newLambda = defaults.string(forKey: "genAILambda")
+            if oldLambda != newLambda {
+                await api.clearGenAIAuthToken()
+            }
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    private func genAIAuthContext() async throws -> (originId: String, headers: HTTPHeaders) {
+        let originId = try await api.genAIOriginId()
+        let headers = try await api.genAIHeaders()
+        return (originId, headers)
+    }
+    
+    public func getGenAIProductDescription(id: Int) async throws -> GenAIProductDescriptionDTO {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+
+            Analytics.track([
+                "event": "gen_ai_product_description",
+                "product_id": id
+            ])
+
+            let auth = try await genAIAuthContext()
+
+            return try await api
+                .getAlamo()
+                .get(
+                    APIEndpoints.genAIProductDescription(id: id),
+                    sparams: ["origin_id": auth.originId],
+                    headers: auth.headers
+                )
+        } catch {
+            handleError(error: error)
+            throw error
+        }
     }
 }

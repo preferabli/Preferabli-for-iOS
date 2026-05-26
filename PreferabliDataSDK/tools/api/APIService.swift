@@ -8,6 +8,8 @@
 import Foundation
 import Alamofire
 import os
+import CryptoKit
+import Security
 
 // MARK: - Logging
 
@@ -468,7 +470,7 @@ extension APIService {
 // MARK: - API Endpoints
 
 internal struct APIEndpoints {
-    internal static let baseUrl = "https://api.preferabli.com/api/en/7.0/"
+    internal static let baseUrl = "https://api.preferabli.com/api/en/7.1/"
 
     internal static let sessions = baseUrl + "sessions"
     internal static let getRec = baseUrl + "recs"
@@ -508,6 +510,86 @@ internal struct APIEndpoints {
     internal static let completeSafetyBrief = baseUrl + "tastefuli/balloon-booking/safety-brief"
     internal static let affiliates = baseUrl + "tastefuli/affiliates"
     internal static let affiliateCodes = baseUrl + "tastefuli/affiliates-for-codes"
+    
+    private static var genAILambda: String {
+        Storage.getKeyStore().string(forKey: "genAILambda") ?? ""
+    }
+
+    private static var genAIBaseURL: String {
+        "https://" + genAILambda + ".lambda-url.us-east-1.on.aws/api/v1"
+    }
+
+    internal static var genAI: String {
+        genAIBaseURL + "/conversation_turns"
+    }
+
+    internal static var genAIThinking: String {
+        genAIBaseURL + "/thinking_messages"
+    }
+
+    internal static var genAIStart: String {
+        genAIBaseURL + "/conversations"
+    }
+
+    internal static var genAIFeedback: String {
+        genAIBaseURL + "/user_feedbacks"
+    }
+
+    internal static var genAIHistory: String {
+        genAIBaseURL + "/conversations/history"
+    }
+
+    internal static var getGenAILearning: String {
+        genAIBaseURL + "/active_learning_examples/assignments?status=[0,1,2,3]"
+    }
+
+    internal static var genAILearning: String {
+        genAIBaseURL + "/active_learning_examples"
+    }
+
+    internal static var genAILabels: String {
+        genAIBaseURL + "/active_learning_labels"
+    }
+
+    internal static var genAIVoices: String {
+        genAIBaseURL + "/voice_options"
+    }
+
+    internal static var updateGenAIVoices: String {
+        genAIBaseURL + "/conversation_voices"
+    }
+
+    internal static var genAIAuthChallenge: String {
+        genAIBaseURL + "/auth/challenge"
+    }
+
+    internal static var genAIAuthHandshake: String {
+        genAIBaseURL + "/auth/handshake"
+    }
+
+    internal static func genAIFeedback(id: Int) -> String {
+        genAIFeedback + "/\(id)"
+    }
+
+    internal static func genAILambda(lastPiece: String) -> String {
+        "https://nqca4sxnxxf5qzqrgnlzog5n5a0pcvoj.lambda-url.us-east-1.on.aws/api/v1/lambda_urls/\(lastPiece)"
+    }
+
+    internal static func genAIConversationHistory(sessionId: String) -> String {
+        genAIStart + "/\(sessionId)/turns"
+    }
+
+    internal static func genAIConversation(sessionId: String) -> String {
+        genAIStart + "/\(sessionId)"
+    }
+
+    internal static func genAIUtteranceUpdate(id: Int) -> String {
+        genAILearning + "/\(id)"
+    }
+    
+    internal static func genAIProductDescription(id: Int) -> String {
+        genAIBaseURL + "/descriptions/\(id)"
+    }
 
     internal static func venues(id: Int) -> String { baseUrl + "markets/\(id)/venues" }
     internal static func experiences(marketId: Int) -> String { baseUrl + "tastefuli/markets/\(marketId)/experiences" }
@@ -533,6 +615,7 @@ internal struct APIEndpoints {
     internal static func experience(id: Int, experienceId : Int) -> String { baseUrl + "venues/\(id)/experiences/\(experienceId)" }
     internal static func user(id: Int) -> String { baseUrl + "users/\(id)" }
     internal static func favoriteVenue(id: Int, venueId : Int) -> String { baseUrl + "users/\(id)/favorite-venues/\(venueId)" }
+    internal static func favoriteExperience(id: Int, experienceId : Int) -> String { baseUrl + "users/\(id)/favorite-experiences/\(experienceId)" }
     internal static func tags(id: Int) -> String { baseUrl + "collections/\(id)/tags" }
     internal static func variants(product_id: Int) -> String { baseUrl + "products/\(product_id)/variants" }
     internal static func style(id: Int) -> String { baseUrl + "styles/\(id)" }
@@ -556,5 +639,198 @@ internal struct APIEndpoints {
 
     internal static func productFoodData(id: Int, year: Int = -1) -> String {
         return baseUrl + "variant-details?keys[]=food_category_1_name&keys[]=food_category_2_name&keys[]=food_category_3_name&keys[]=food_category_4_name&keys[]=food_category_1_icon_png_url&keys[]=food_category_2_icon_png_url&keys[]=food_category_3_icon_png_url&keys[]=food_category_4_icon_png_url&product_id=\(id)&year=\(year)"
+    }
+}
+
+extension APIService {
+
+    private enum GenAIAuth {
+        static let originIdKey = "com.preferabli.genai.origin_id"
+        static let maxDifficulty = 5
+        static let solveTimeoutSeconds: TimeInterval = 60
+        static let tokenRefreshBuffer: TimeInterval = 30
+        static let tokenTTL: TimeInterval = 5 * 60
+    }
+
+    private var genAIAuthTokenKey: String { "genAIAuthToken" }
+    private var genAIAuthTokenExpiresAtKey: String { "genAIAuthTokenExpiresAt" }
+
+    internal func genAIHeaders() async throws -> HTTPHeaders {
+        let token = try await ensureGenAIAuthTokenIfNeeded()
+
+        return HTTPHeaders([
+            "Authorization": "Bearer \(token)"
+        ])
+    }
+
+    @discardableResult
+    internal func ensureGenAIAuthTokenIfNeeded(forceRefresh: Bool = false) async throws -> String {
+        let defaults = Storage.getKeyStore()
+
+        if !forceRefresh,
+           let cachedToken = defaults.string(forKey: genAIAuthTokenKey),
+           !cachedToken.isEmptyOrWhitespace() {
+            let expiresAt = defaults.double(forKey: genAIAuthTokenExpiresAtKey)
+
+            if Date().timeIntervalSince1970 < expiresAt - GenAIAuth.tokenRefreshBuffer {
+                return cachedToken
+            }
+        }
+
+        let originId = try getOrCreateGenAIOriginId()
+        let session = try await getAlamo(requiresAccessToken: false)
+
+        let challenge: GenAIChallengeDTO = try await session.get(
+            APIEndpoints.genAIAuthChallenge,
+            sparams: ["origin_id": originId]
+        )
+
+        guard challenge.difficulty <= GenAIAuth.maxDifficulty else {
+            throw PreferabliException(
+                type: .APIError,
+                message: "GenAI is temporarily busy. Please try again shortly.",
+                code: 429
+            )
+        }
+
+        let solution = try await solveGenAIProofOfWork(
+            powHash: challenge.powHash,
+            difficulty: challenge.difficulty,
+            timeoutSeconds: GenAIAuth.solveTimeoutSeconds
+        )
+        
+        let params: SParams = ["origin_id": originId, "solution" : String(solution), "pow_hash" : challenge.powHash]
+
+        let handshake: GenAIHandshakeDTO = try await session.post(
+            APIEndpoints.genAIAuthHandshake,
+            sjson: params
+        )
+
+        defaults.set(handshake.token, forKey: genAIAuthTokenKey)
+        defaults.set(
+            Date().addingTimeInterval(GenAIAuth.tokenTTL).timeIntervalSince1970,
+            forKey: genAIAuthTokenExpiresAtKey
+        )
+
+        return handshake.token
+    }
+
+    private func solveGenAIProofOfWork(
+        powHash: String,
+        difficulty: Int,
+        timeoutSeconds: TimeInterval
+    ) async throws -> Int {
+        try await Task.detached(priority: .userInitiated) {
+            let prefix = String(repeating: "0", count: difficulty)
+            let startedAt = Date()
+            var solution = 0
+
+            while true {
+                if Task.isCancelled {
+                    throw PreferabliException(type: .Cancelled)
+                }
+
+                if Date().timeIntervalSince(startedAt) > timeoutSeconds {
+                    throw PreferabliException(
+                        type: .APIError,
+                        message: "GenAI verification timed out. Please try again.",
+                        code: 408
+                    )
+                }
+
+                let candidate = powHash + String(solution)
+                let digest = SHA256.hash(data: Data(candidate.utf8))
+                let hex = digest.map { String(format: "%02x", $0) }.joined()
+
+                if hex.hasPrefix(prefix) {
+                    return solution
+                }
+
+                solution += 1
+            }
+        }.value
+    }
+
+    private func getOrCreateGenAIOriginId() throws -> String {
+        if let existing = try readKeychainString(key: GenAIAuth.originIdKey),
+           existing.range(of: #"^[a-f0-9]{32}$"#, options: .regularExpression) != nil {
+            return existing
+        }
+
+        let bytes = (0..<16).map { _ in UInt8.random(in: UInt8.min...UInt8.max) }
+        let originId = bytes.map { String(format: "%02x", $0) }.joined()
+
+        try saveKeychainString(originId, key: GenAIAuth.originIdKey)
+        return originId
+    }
+    
+    internal func genAIOriginId() throws -> String {
+        try getOrCreateGenAIOriginId()
+    }
+
+    private func readKeychainString(key: String) throws -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Bundle.main.bundleIdentifier ?? "com.preferabli.app",
+            kSecAttrAccount as String: key,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+
+        if status == errSecItemNotFound {
+            return nil
+        }
+
+        guard status == errSecSuccess else {
+            throw PreferabliException(type: .APIError, message: "Unable to read GenAI origin id.", code: Int(status))
+        }
+
+        guard let data = item as? Data else {
+            return nil
+        }
+
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func saveKeychainString(_ value: String, key: String) throws {
+        let service = Bundle.main.bundleIdentifier ?? "com.preferabli.app"
+        let data = Data(value.utf8)
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key
+        ]
+
+        let attributes: [String: Any] = [
+            kSecValueData as String: data
+        ]
+
+        let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+
+        if updateStatus == errSecSuccess {
+            return
+        }
+
+        if updateStatus != errSecItemNotFound {
+            throw PreferabliException(type: .APIError, message: "Unable to update GenAI origin id.", code: Int(updateStatus))
+        }
+
+        var insert = query
+        insert[kSecValueData as String] = data
+
+        let insertStatus = SecItemAdd(insert as CFDictionary, nil)
+        guard insertStatus == errSecSuccess else {
+            throw PreferabliException(type: .APIError, message: "Unable to save GenAI origin id.", code: Int(insertStatus))
+        }
+    }
+    
+    internal func clearGenAIAuthToken() {
+        let defaults = Storage.getKeyStore()
+        defaults.removeObject(forKey: genAIAuthTokenKey)
+        defaults.removeObject(forKey: genAIAuthTokenExpiresAtKey)
     }
 }

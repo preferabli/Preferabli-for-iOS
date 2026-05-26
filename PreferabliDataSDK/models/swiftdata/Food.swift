@@ -4,7 +4,7 @@ import SwiftData
 
 /// You can use foods to get pairings within ``Preferabli/getRecs(product_category:product_type:collection_id:price_min:price_max:style_ids:food_ids:include_merchant_links:onCompletion:onFailure:)``.
 @Model
-public final class Food: HasIntID, HasTimestamps {
+public final class Food: HasIntID, HasTimestamps, HasImage {
     
     @Attribute(.unique) public var id: Int
     public var created_at: Date = Foundation.Date.now
@@ -15,19 +15,11 @@ public final class Food: HasIntID, HasTimestamps {
     public var food_category_id: Int?
     public var food_category_name: String?
     public var food_category_url: String?
+    public var primary_image_url: String?
+    public var food_category_icon_svg_url: String?
 
     public init(id: Int) {
         self.id = id
-    }
-
-    init(id: Int, name: String? = nil, desc: String? = nil, keywords: String? = nil, food_category_id: Int? = nil, food_category_name: String? = nil, food_category_url: String? = nil) {
-        self.id = id
-        self.name = name
-        self.desc = desc
-        self.keywords = keywords
-        self.food_category_id = food_category_id
-        self.food_category_name = food_category_name
-        self.food_category_url = food_category_url
     }
     
     public static func predicate(forID id: Int) -> Predicate<Food> {
@@ -76,7 +68,11 @@ public final class Food: HasIntID, HasTimestamps {
     ///   - quality: returns an image with the specified quality. Scales from 0 - 100.
     /// - Returns: the URL of the requested image.
     public func getImage(width : Int, height : Int, quality : Int = 80) -> URL? {
-        return PreferabliTools.getImageUrl(image: food_category_url, width: width, height: height, quality: quality)
+        return PreferabliTools.getImageUrl(image: primary_image_url, width: width, height: height, quality: quality)
+    }
+    
+    public func getPlaceholderImage() -> String? {
+        return nil
     }
     
      internal func filterFood(search_term : String) -> Bool {

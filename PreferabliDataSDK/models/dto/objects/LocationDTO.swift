@@ -14,7 +14,8 @@ public struct LocationDTO: Decodable, Sendable {
     public let latitude: Double?
     public let longitude: Double?
     public let zip_code: String?
-    
+    public let country_code: String?
+
     public init(latitude: Double, longitude: Double) {
         self.id = 0
         self.created_at = nil
@@ -22,5 +23,6 @@ public struct LocationDTO: Decodable, Sendable {
         self.latitude = latitude
         self.longitude = longitude
         self.zip_code = nil
+        self.country_code = nil
     }
 }

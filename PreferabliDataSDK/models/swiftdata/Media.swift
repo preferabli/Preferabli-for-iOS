@@ -21,7 +21,7 @@ public final class Media: HasIntID, HasTimestamps, HasImage {
     ///   - quality: returns an image with the specified quality. Scales from 0 - 100.
     /// - Returns: the URL of the requested image.
     public func getImage(width : Int, height : Int, quality : Int = 80) -> URL? {
-        return PreferabliTools.getImageUrl(image: path, width: width, height: height, quality: quality )
+        return PreferabliTools.getImageUrl(media: self, width: width, height: height, quality: quality )
     }
     
     public func getPlaceholderImage() -> String? {

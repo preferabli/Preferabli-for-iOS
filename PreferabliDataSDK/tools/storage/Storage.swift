@@ -333,6 +333,10 @@ private enum ModelRegistry {
         add(Experience.self)
         add(Affiliate.self)
         
+        add(GenAIUtteranceContent.self)
+        add(GenAIUtterance.self)
+        add(GenAIMessage.self)
+        
         add(BalloonReservationItem.self)
         add(BalloonReservation.self)
 

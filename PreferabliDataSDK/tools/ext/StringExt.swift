@@ -75,6 +75,11 @@ extension String {
         return list.sorted(by: { $0.count < $1.count })
     }
     
+    public var trimmedNonEmpty: String? {
+        let value = trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+    
     public static func alphaSortIgnoreThe(x : String?, y : String?, comparisonResult: ComparisonResult? = ComparisonResult.orderedAscending) -> Bool {
         var x = x
         var y = y
