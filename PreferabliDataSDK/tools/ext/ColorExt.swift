@@ -207,3 +207,33 @@ extension UIColor {
         return String(format: "#%02X%02X%02X%02X", ri, gi, bi, ai)
     }
 }
+
+extension Color {
+    public  func saturated(_ amount: CGFloat = 1.25) -> Color {
+        UIColor(self).saturated(amount).swiftUIColor
+    }
+}
+
+extension UIColor {
+    public func saturated(_ amount: CGFloat = 1.25) -> UIColor {
+        var hue: CGFloat = 0
+        var saturation: CGFloat = 0
+        var brightness: CGFloat = 0
+        var alpha: CGFloat = 0
+
+        guard getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha) else {
+            return self
+        }
+
+        return UIColor(
+            hue: hue,
+            saturation: min(saturation * amount, 1),
+            brightness: brightness,
+            alpha: alpha
+        )
+    }
+
+    public  var swiftUIColor: Color {
+        Color(uiColor: self)
+    }
+}

@@ -402,7 +402,7 @@ public class PreferabliTools {
     }
     
     nonisolated public static func getImageUrl(media: Media?, width: Int, height: Int, quality: Int, scale: Float = Storage.getKeyStore().float(forKey: "mainScale")) -> URL? {
-        return getImageUrl(image: media?.path, width: width, height: height, quality: quality, scale: scale, png: media?.type == "image/png")
+        return getImageUrl(image: media?.path, width: width, height: height, quality: quality, scale: scale, png: media?.mime_type == "image/png")
     }
     
     // Core, nonisolated builder (no main-actor APIs)

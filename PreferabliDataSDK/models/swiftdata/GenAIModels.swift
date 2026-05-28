@@ -53,6 +53,10 @@ public final class GenAIMessage: HasIntID, HasTimestamps {
 
     @Transient public var showTypingAnimation = false
     @Transient public var isLoadingPlaceholder = false
+    @Transient public var showProductOptionsAnimation = false
+    @Transient public var showPostTypingAnimation = false
+    @Transient public var shouldShowPostText = false
+    @Transient public var shouldShowProductOptions = true
     
     // local only
     public var isTombstoned: Bool = false
@@ -293,6 +297,7 @@ public final class GenAIUtteranceContent {
     // Old CoreData property was named `id`. In practice this is often a product variant ID,
     // so keep it distinct from SwiftData identity.
     public var remoteId: Int?
+    public var productId: Int?
     public var entityId: Int?
     public var order: Int?
 
@@ -306,6 +311,7 @@ public final class GenAIUtteranceContent {
 
     public init(
         remoteId: Int? = nil,
+        productId: Int? = nil,
         entityId: Int? = nil,
         order: Int? = nil,
         entityName: String? = nil,
@@ -315,6 +321,7 @@ public final class GenAIUtteranceContent {
         displayData: String? = nil
     ) {
         self.remoteId = remoteId
+        self.productId = productId
         self.entityId = entityId
         self.order = order
         self.entityName = entityName

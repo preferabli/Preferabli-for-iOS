@@ -67,6 +67,7 @@ public struct GenAIHistoryConversationSummary: Identifiable, Hashable, Sendable 
 
 public struct GenAIUtteranceContentDTO: Decodable, Sendable {
     public let remoteId: Int?
+    public let productId: Int?
     public let entityId: Int?
     public let order: Int?
     public let entityName: String?
@@ -77,6 +78,7 @@ public struct GenAIUtteranceContentDTO: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case remoteId = "id"
+        case productId = "product_id"
         case entityId = "entity_id"
         case order
         case entityName = "entity_name"
@@ -183,17 +185,41 @@ public struct GenAIMessageDTO: Decodable, Sendable {
     }
 
     public var productEntityIds: [Int] {
-        utteranceObjects
-            .filter { $0.subType == "products" }
-            .flatMap(\.content)
-            .compactMap(\.entityId)
+        utteranceObjects.flatMap { object -> [Int] in
+            guard ["products", "product_list", "wine_list"].contains(object.subType) else {
+                return []
+            }
+
+            return object.content.compactMap { content in
+                if let productId = content.productId {
+                    return productId
+                }
+
+                if object.subType == "products" {
+                    return content.entityId
+                }
+
+                return content.remoteId
+            }
+        }
+        .uniqued()
     }
 
     public var variantIds: [Int] {
-        utteranceObjects
-            .filter { $0.subType == "product_list" || $0.subType == "wine_list" }
-            .flatMap(\.content)
-            .compactMap(\.remoteId)
+        utteranceObjects.flatMap { object -> [Int] in
+            guard ["product_list", "wine_list"].contains(object.subType) else {
+                return []
+            }
+
+            return object.content.compactMap { content in
+                guard content.productId != nil else {
+                    return nil
+                }
+
+                return content.remoteId
+            }
+        }
+        .uniqued()
     }
 
     public var foodIds: [Int] {

@@ -11,6 +11,9 @@ public final class Media: HasIntID, HasTimestamps, HasImage {
     public var updated_at: Date = Foundation.Date.now
     public var path: String?
     public var type: String?
+    public var mime_type: String?
+    
+    @Relationship(deleteRule: .nullify) public var poster: Media?
 
     public init(id: Int) { self.id = id }
     

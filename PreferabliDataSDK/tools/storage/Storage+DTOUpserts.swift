@@ -302,6 +302,32 @@ extension Storage {
         m.id = dto.id
         m.path = dto.path ?? m.path
         m.type = dto.type ?? m.type
+        m.mime_type = dto.mime_type ?? m.mime_type
+        
+        if let imgDTO = dto.poster {
+            try checkCancelled()
+            let media = try upsertInternalMedia(from: imgDTO, in: ctx)
+
+            try checkCancelledBeforeRelationshipWrite()
+            if m.poster !== media {
+                m.poster = media
+            }
+        }
+        
+        return m
+    }
+    
+    @discardableResult
+    nonisolated static func upsertInternalMedia(from dto: InternalMediaDTO, in ctx: ModelContext) throws -> Media {
+
+        try checkCancelled()
+
+        let m = try fetchOrInsert(Media.self, id: dto.id, in: ctx) { Media(id: dto.id) }
+        m.id = dto.id
+        m.path = dto.path ?? m.path
+        m.type = dto.type ?? m.type
+        m.mime_type = dto.mime_type ?? m.mime_type
+        
         return m
     }
     
@@ -656,17 +682,6 @@ extension Storage {
             v.video = nil
         }
         
-        if let videoPoster = dto.video_poster {
-            try checkCancelled()
-            let media = try upsertMedia(from: videoPoster, in: ctx)
-
-            try checkCancelledBeforeRelationshipWrite()
-            if v.video_poster !== media { v.video_poster = media }
-        } else {
-            try checkCancelledBeforeRelationshipWrite()
-            v.video_poster = nil
-        }
-
         if let logo = dto.logo {
             try checkCancelled()
             let media = try upsertMedia(from: logo, in: ctx)
@@ -862,17 +877,6 @@ extension Storage {
         } else if v.video != nil {
             try checkCancelledBeforeRelationshipWrite()
             v.video = nil
-        }
-        
-        if let videoPoster = dto.video_poster {
-            try checkCancelled()
-            let media = try upsertMedia(from: videoPoster, in: ctx)
-
-            try checkCancelledBeforeRelationshipWrite()
-            if v.video_poster !== media { v.video_poster = media }
-        } else {
-            try checkCancelledBeforeRelationshipWrite()
-            v.video_poster = nil
         }
 
         if let logo = dto.logo {
@@ -3140,6 +3144,7 @@ extension Storage {
             for contentDTO in utteranceDTO.content {
                 let content = GenAIUtteranceContent(
                     remoteId: contentDTO.remoteId,
+                    productId: contentDTO.productId,
                     entityId: contentDTO.entityId,
                     order: contentDTO.order,
                     entityName: contentDTO.entityName,

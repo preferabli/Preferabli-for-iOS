@@ -11,4 +11,13 @@ public struct MediaDTO: Decodable, Sendable {
     public let id: Int
     public let path: String?
     public let type: String?
+    public let mime_type: String?
+    public let poster: InternalMediaDTO?
+}
+
+public struct InternalMediaDTO: Decodable, Sendable {
+    public let id: Int
+    public let path: String?
+    public let type: String?
+    public let mime_type: String?
 }

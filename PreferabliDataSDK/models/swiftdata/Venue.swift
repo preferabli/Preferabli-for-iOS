@@ -58,7 +58,6 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
     @Relationship(deleteRule: .nullify) public var primary_image: Media?
     @Relationship(deleteRule: .nullify) public var logo: Media?
     @Relationship(deleteRule: .nullify) public var video: Media?
-    @Relationship(deleteRule: .nullify) public var video_poster: Media?
 
     @Relationship(deleteRule: .cascade, inverse: \DeliveryMethod.venue) public var active_delivery_methods: [DeliveryMethod] = []
     @Relationship(deleteRule: .cascade) public var images: [Media] = []
