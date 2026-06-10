@@ -237,3 +237,42 @@ extension UIColor {
         Color(uiColor: self)
     }
 }
+
+extension Color {
+    public init?(css: String) {
+        let value = css.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if value.hasPrefix("#") {
+            let hex = value.replacingOccurrences(of: "#", with: "")
+            guard let int = UInt64(hex, radix: 16) else { return nil }
+
+            self.init(
+                red: Double((int >> 16) & 0xff) / 255,
+                green: Double((int >> 8) & 0xff) / 255,
+                blue: Double(int & 0xff) / 255
+            )
+            return
+        }
+
+        if value.hasPrefix("rgba") || value.hasPrefix("rgb") {
+            let nums = value
+                .replacingOccurrences(of: "rgba(", with: "")
+                .replacingOccurrences(of: "rgb(", with: "")
+                .replacingOccurrences(of: ")", with: "")
+                .split(separator: ",")
+                .map { Double($0.trimmingCharacters(in: .whitespaces)) ?? 0 }
+
+            guard nums.count >= 3 else { return nil }
+
+            self.init(
+                red: nums[0] / 255,
+                green: nums[1] / 255,
+                blue: nums[2] / 255,
+                opacity: nums.count >= 4 ? nums[3] : 1
+            )
+            return
+        }
+
+        return nil
+    }
+}

@@ -13,7 +13,11 @@ public final class Media: HasIntID, HasTimestamps, HasImage {
     public var type: String?
     public var mime_type: String?
     
-    @Relationship(deleteRule: .nullify) public var poster: Media?
+    @Relationship(deleteRule: .nullify, inverse: \Media.posterFor)
+    public var poster: Media?
+
+    @Relationship(deleteRule: .nullify)
+    public var posterFor: [Media] = []
 
     public init(id: Int) { self.id = id }
     

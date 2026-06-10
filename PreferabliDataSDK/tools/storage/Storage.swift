@@ -385,7 +385,21 @@ private enum ModelRegistry {
         add(MarketTraitAssociation.self)
         add(Market.self)
         
+        add(CTABucketItem.self)
         add(CTABucket.self)
+        add(CTABucketAssociation.self)
+        add(CTAPage.self)
+        
+        // Content / Personality
+        // Keep association rows before their parent/root models for wipe ordering.
+        add(ContentPersonalityAssociation.self)
+        add(ContentVariantAssociation.self)
+        add(ContentChannelAssociation.self)
+        add(ContentVenueAssociation.self)
+        add(ContentExperienceAssociation.self)
+        add(ContentMarketTraitAssociation.self)
+        add(ContentItem.self)
+        add(Personality.self)
     }
 
     /// Publicly consumed lists—both derived from the single `register` body above.

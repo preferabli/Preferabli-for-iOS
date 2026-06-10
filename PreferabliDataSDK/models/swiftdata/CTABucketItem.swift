@@ -10,11 +10,13 @@ public final class CTABucketItem: Identifiable, HasIntID, HasImage {
     public var updated_at: Date = Foundation.Date.now
 
     public var badge_icon: String?
-    public var badge_color_primary: String?
-    public var badge_color_secondary: String?
+    public var badge_color_hex_primary: String?
+    public var badge_color_hex_secondary: String?
     public var order: Int?
-    public var color_secondary: String?
-    public var color_primary: String?
+    public var color_hex_secondary: String?
+    public var color_hex_primary: String?
+    public var gradient_css: String?
+    public var badge_gradient_css: String?
     public var deeplink_url: String?
     public var badge_title: String?
     public var title: String?

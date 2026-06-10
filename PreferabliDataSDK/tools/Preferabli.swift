@@ -1284,6 +1284,99 @@ public class Preferabli {
         }
     }
     
+    public func getQueryResults(
+        queryItems: [URLQueryItem]
+    ) async throws -> [Int] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "get_query_results"])
+
+            var components = URLComponents(string: APIEndpoints.baseUrl + "query")
+            components?.queryItems = queryItems
+
+            guard let endpoint = components?.url?.absoluteString else {
+                throw PreferabliException(
+                    type: .APIError,
+                    message: "Unable to build query endpoint.",
+                    code: 0
+                )
+            }
+
+            let recResponse: GuidedRecResponseDTO = try await api
+                .getAlamo()
+                .get(endpoint)
+
+            var variantIds = [Int]()
+            var predictedByVariant = [Int: Int]()
+
+            for type in recResponse.types {
+                for r in type.results {
+                    if let vid = r.variant_id {
+                        variantIds.append(vid)
+
+                        if let wili = r.formatted_predict_rating {
+                            predictedByVariant[vid] = wili
+                        }
+                    }
+                }
+            }
+
+            guard !variantIds.isEmpty else { return [] }
+
+            let missingVariantIds: [Int] = try Storage.withContext { ctx in
+                try Storage.missingVariantIds(from: variantIds, in: ctx)
+            }
+
+            let productDTOs: [ProductDTO]
+
+            if missingVariantIds.isEmpty {
+                productDTOs = []
+            } else {
+                productDTOs = try await api.getAlamo().get(
+                    APIEndpoints.products,
+                    sparams: ["variant_ids": missingVariantIds]
+                )
+            }
+
+            let productIds: [Int] = try Storage.withContext { ctx in
+                for pd in productDTOs {
+                    _ = try Storage.upsertProduct(from: pd, in: ctx)
+                }
+
+                var ids: [Int] = []
+                var seen = Set<Int>()
+
+                for vid in variantIds {
+                    guard let variant = try Storage.fetchById(Variant.self, id: vid, in: ctx) else {
+                        continue
+                    }
+
+                    let product = variant.product
+
+                    if let rating = predictedByVariant[vid] {
+                        let preferenceDataDTO = PreferenceDataDTO(
+                            formatted_predict_rating: rating
+                        )
+                        try Storage.upsertPreferenceData(from: preferenceDataDTO, for: product, in: ctx)
+                    }
+
+                    if !seen.contains(product.id) {
+                        seen.insert(product.id)
+                        ids.append(product.id)
+                    }
+                }
+
+                try ctx.save()
+                return ids
+            }
+
+            return productIds
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
     public func getScripts() async throws -> [String : String] {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
@@ -1294,7 +1387,7 @@ public class Preferabli {
             let buildInt = Int(buildNumber)
             
             var params: SParams = [
-                "platform": "ios_tastefuli_app",
+                "platform": Storage.getKeyStore().string(forKey: "CLIENT_INTERFACE"),
                 "version" : buildInt
             ]
             
@@ -2082,7 +2175,7 @@ public class Preferabli {
         }
     }
     
-    public func getCTABuckets(
+    public func getCTAPages(
         force_refresh: Bool = false
     ) async throws -> [Int] {
         let api = self.api
@@ -2093,11 +2186,11 @@ public class Preferabli {
             
             do {
                 try await self.canWeContinue(needsToBeLoggedIn: false)
-                Analytics.track(["event": "get_cta_buckets"])
+                Analytics.track(["event": "get_cta_pages"])
                                 
                 // Only short-circuit for the *general* (unscoped) load
                 if !force_refresh,
-                   Storage.getKeyStore().bool(forKey: "hasLoadedBuckets") {
+                   Storage.getKeyStore().bool(forKey: "hasLoadedCTAPages") {
                     
                     let localIds: [Int] = try await Storage.withBackgroundContext { ctx in
                         let buckets = try ctx.fetch(FetchDescriptor<CTABucket>())
@@ -2109,12 +2202,12 @@ public class Preferabli {
                 
                 var params: SParams = ["domain": "tastefuli-v3"]
                 
-                let body: [CTABucketDTO] = try await api
+                let body: [CTAPageDTO] = try await api
                     .getAlamo()
-                    .get(APIEndpoints.ctaBuckets, sparams: params)
+                    .get(APIEndpoints.ctaPages, sparams: params)
                 
                 let dtoIds: [Int] = try await Storage.withBackgroundContext { ctx in
-                    let ids = try Storage.upsertCTABucketsSourceOfTruth(
+                    let ids = try Storage.upsertCTAPagesSourceOfTruth(
                         from: body,
                         in: ctx
                     )
@@ -2122,7 +2215,7 @@ public class Preferabli {
                     return ids
                 }
                 
-                Storage.getKeyStore().set(true, forKey: "hasLoadedBuckets")
+                Storage.getKeyStore().set(true, forKey: "hasLoadedCTAPages")
                 
                 return dtoIds
                 
@@ -3637,6 +3730,7 @@ extension Preferabli {
     public func startGenAIConversation() async throws -> String {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
+            try await getGenAILambda()
             
             let auth = try await genAIAuthContext()
             
@@ -4012,7 +4106,7 @@ extension Preferabli {
             
             let auth = try await genAIAuthContext()
 
-            let url = APIEndpoints.genAIConversation(sessionId: sessionId) + "?origin_id=\(auth.originId)"
+            let url = try await APIEndpoints.genAIConversation(sessionId: sessionId) + "?origin_id=\(auth.originId)"
 
             try await api
                 .getAlamo()
@@ -4248,9 +4342,32 @@ extension Preferabli {
     }
     
     private func genAIAuthContext() async throws -> (originId: String, headers: HTTPHeaders) {
+        try await ensureGenAILambdaConfigured()
+
         let originId = try await api.genAIOriginId()
         let headers = try await api.genAIHeaders()
         return (originId, headers)
+    }
+    
+    private func ensureGenAILambdaConfigured() async throws {
+        let defaults = Storage.getKeyStore()
+        let existingLambda = defaults.string(forKey: "genAILambda")
+
+        guard existingLambda?.isEmptyOrWhitespace() != false else {
+            return
+        }
+
+        try await getGenAILambda()
+
+        let refreshedLambda = defaults.string(forKey: "genAILambda")
+        guard refreshedLambda?.isEmptyOrWhitespace() == false else {
+            await api.clearGenAIAuthToken()
+            throw PreferabliException(
+                type: .APIError,
+                message: "GenAI is not configured yet. Please try again.",
+                code: 503
+            )
+        }
     }
     
     public func getGenAIProductDescription(id: Int) async throws -> GenAIProductDescriptionDTO {
@@ -4271,6 +4388,87 @@ extension Preferabli {
                     sparams: ["origin_id": auth.originId],
                     headers: auth.headers
                 )
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+}
+
+extension Preferabli {
+
+    /// Fetches and stores a Content record, including children and associations present in the payload.
+    /// - Returns: the content id for use with SwiftData queries.
+    public func getContent(force_refresh: Bool = false, content_id: Int) async throws -> Int {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "content_refresh"])
+
+            var needsRefresh = true
+
+            if !force_refresh {
+                try Storage.withContext { ctx in
+                    if try Storage.fetchById(ContentItem.self, id: content_id, in: ctx) != nil {
+                        needsRefresh = PreferabliTools.hasMinutesPassed(
+                            minutes: 60,
+                            startDate: Storage.getKeyStore().object(forKey: "lastCalledContent\(content_id)") as? Date
+                        )
+                    }
+                }
+            }
+
+            if needsRefresh {
+                let body: ContentDTO = try await api.getAlamo().get(APIEndpoints.content(id: content_id))
+
+                try await Storage.withBackgroundContext { ctx in
+                    _ = try Storage.upsertContent(from: body, in: ctx)
+                    try ctx.save()
+
+                    Storage.getKeyStore().set(Date(), forKey: "lastCalledContent\(content_id)")
+                }
+            }
+
+            return content_id
+
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    /// Fetches and stores a Personality record, including content associations present in the payload.
+    /// - Returns: the personality id for use with SwiftData queries.
+    public func getPersonality(force_refresh: Bool = false, personality_id: Int) async throws -> Int {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "personality_refresh"])
+
+            var needsRefresh = true
+
+            if !force_refresh {
+                try Storage.withContext { ctx in
+                    if try Storage.fetchById(Personality.self, id: personality_id, in: ctx) != nil {
+                        needsRefresh = PreferabliTools.hasMinutesPassed(
+                            minutes: 60,
+                            startDate: Storage.getKeyStore().object(forKey: "lastCalledPersonality\(personality_id)") as? Date
+                        )
+                    }
+                }
+            }
+
+            if needsRefresh {
+                let body: PersonalityDTO = try await api.getAlamo().get(APIEndpoints.personality(id: personality_id))
+
+                try await Storage.withBackgroundContext { ctx in
+                    _ = try Storage.upsertPersonality(from: body, in: ctx)
+                    try ctx.save()
+
+                    Storage.getKeyStore().set(Date(), forKey: "lastCalledPersonality\(personality_id)")
+                }
+            }
+
+            return personality_id
+
         } catch {
             handleError(error: error)
             throw error

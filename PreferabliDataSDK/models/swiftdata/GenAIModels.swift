@@ -15,7 +15,7 @@ public final class GenAIMessage: HasIntID, HasTimestamps {
         public static let system = "dialog_system"
 
         public static var client: String {
-            Bundle.main.object(forInfoDictionaryKey: "clientInterface") as? String ?? "ios_sdk"
+            Storage.getKeyStore().string(forKey: "CLIENT_INTERFACE") ?? "ios_sdk"
         }
     }
 

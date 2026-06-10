@@ -12,19 +12,14 @@ public final class CTABucket: Identifiable, HasIntID {
     public var order: Int?
     public var type: String?
     public var name: String?
-    public var section: String?
-    public var market_id: Int?
-    public var affiliate_id: Int?
     public var item_height: Int?
     public var item_width: Int?
     public var item_corner_radius: Int?
+    public var deeplink_url: String?
 
-    
-    // local only
-    public var isTombstoned: Bool = false
-    
     @Relationship(deleteRule: .cascade) public var items: [CTABucketItem]  = []
-
+    
+    @Relationship(deleteRule: .cascade) public var bucket_associations: [CTABucketAssociation]?
 
     public init(id: Int) {
         self.id = id

@@ -499,7 +499,7 @@ internal struct APIEndpoints {
     internal static let channels = baseUrl + "channels"
     internal static let markets = baseUrl + "markets"
     internal static let scripts = baseUrl + "front-end-scripts"
-    internal static let ctaBuckets = baseUrl + "cta-buckets"
+    internal static let ctaPages = baseUrl + "cta-pages"
     internal static let recipes = baseUrl + "integrations/1/recipes?limit=9999"
     internal static let recipeGroups = baseUrl + "integrations/1/recipe-groups?limit=9999"
     internal static let recipesForProducts = baseUrl + "integrations/1/recipes-for-products?limit=20"
@@ -510,85 +510,130 @@ internal struct APIEndpoints {
     internal static let completeSafetyBrief = baseUrl + "tastefuli/balloon-booking/safety-brief"
     internal static let affiliates = baseUrl + "tastefuli/affiliates"
     internal static let affiliateCodes = baseUrl + "tastefuli/affiliates-for-codes"
+    internal static let contents = baseUrl + "content"
+    internal static let personalities = baseUrl + "personalities"
+
+    internal static func content(id: Int) -> String {
+        contents + "/\(id)"
+    }
+
+    internal static func personality(id: Int) -> String {
+        personalities + "/\(id)"
+    }
     
-    private static var genAILambda: String {
-        Storage.getKeyStore().string(forKey: "genAILambda") ?? ""
+    private static var genAILambda: String? {
+        let value = Storage.getKeyStore().string(forKey: "genAILambda")
+        return value?.isEmptyOrWhitespace() == false ? value : nil
     }
 
     private static var genAIBaseURL: String {
-        "https://" + genAILambda + ".lambda-url.us-east-1.on.aws/api/v1"
+        get throws {
+            guard let genAILambda else {
+                throw PreferabliException(
+                    type: .APIError,
+                    message: "GenAI is not configured yet. Please try again.",
+                    code: 503
+                )
+            }
+
+            return "https://\(genAILambda).lambda-url.us-east-1.on.aws/api/v1"
+        }
     }
 
     internal static var genAI: String {
-        genAIBaseURL + "/conversation_turns"
+        get throws {
+            try genAIBaseURL + "/conversation_turns"
+        }
     }
 
     internal static var genAIThinking: String {
-        genAIBaseURL + "/thinking_messages"
+        get throws {
+            try genAIBaseURL + "/thinking_messages"
+        }
     }
 
     internal static var genAIStart: String {
-        genAIBaseURL + "/conversations"
+        get throws {
+            try genAIBaseURL + "/conversations"
+        }
     }
 
     internal static var genAIFeedback: String {
-        genAIBaseURL + "/user_feedbacks"
+        get throws {
+            try genAIBaseURL + "/user_feedbacks"
+        }
     }
 
     internal static var genAIHistory: String {
-        genAIBaseURL + "/conversations/history"
+        get throws {
+            try genAIBaseURL + "/conversations/history"
+        }
     }
 
     internal static var getGenAILearning: String {
-        genAIBaseURL + "/active_learning_examples/assignments?status=[0,1,2,3]"
+        get throws {
+            try genAIBaseURL + "/active_learning_examples/assignments?status=[0,1,2,3]"
+        }
     }
 
     internal static var genAILearning: String {
-        genAIBaseURL + "/active_learning_examples"
+        get throws {
+            try genAIBaseURL + "/active_learning_examples"
+        }
     }
 
     internal static var genAILabels: String {
-        genAIBaseURL + "/active_learning_labels"
+        get throws {
+            try genAIBaseURL + "/active_learning_labels"
+        }
     }
 
     internal static var genAIVoices: String {
-        genAIBaseURL + "/voice_options"
+        get throws {
+            try genAIBaseURL + "/voice_options"
+        }
     }
 
     internal static var updateGenAIVoices: String {
-        genAIBaseURL + "/conversation_voices"
+        get throws {
+            try genAIBaseURL + "/conversation_voices"
+        }
     }
 
     internal static var genAIAuthChallenge: String {
-        genAIBaseURL + "/auth/challenge"
+        get throws {
+            try genAIBaseURL + "/auth/challenge"
+        }
     }
 
     internal static var genAIAuthHandshake: String {
-        genAIBaseURL + "/auth/handshake"
+        get throws {
+            try genAIBaseURL + "/auth/handshake"
+        }
     }
 
-    internal static func genAIFeedback(id: Int) -> String {
-        genAIFeedback + "/\(id)"
+    internal static func genAIFeedback(id: Int) throws -> String {
+        try genAIFeedback + "/\(id)"
     }
 
     internal static func genAILambda(lastPiece: String) -> String {
         "https://nqca4sxnxxf5qzqrgnlzog5n5a0pcvoj.lambda-url.us-east-1.on.aws/api/v1/lambda_urls/\(lastPiece)"
     }
 
-    internal static func genAIConversationHistory(sessionId: String) -> String {
-        genAIStart + "/\(sessionId)/turns"
+    internal static func genAIConversationHistory(sessionId: String) throws -> String {
+        try genAIStart + "/\(sessionId)/turns"
     }
 
-    internal static func genAIConversation(sessionId: String) -> String {
-        genAIStart + "/\(sessionId)"
+    internal static func genAIConversation(sessionId: String) throws -> String {
+        try genAIStart + "/\(sessionId)"
     }
 
-    internal static func genAIUtteranceUpdate(id: Int) -> String {
-        genAILearning + "/\(id)"
+    internal static func genAIUtteranceUpdate(id: Int) throws -> String {
+        try genAILearning + "/\(id)"
     }
-    
-    internal static func genAIProductDescription(id: Int) -> String {
-        genAIBaseURL + "/descriptions/\(id)"
+
+    internal static func genAIProductDescription(id: Int) throws -> String {
+        try genAIBaseURL + "/descriptions/\(id)"
     }
 
     internal static func venues(id: Int) -> String { baseUrl + "markets/\(id)/venues" }

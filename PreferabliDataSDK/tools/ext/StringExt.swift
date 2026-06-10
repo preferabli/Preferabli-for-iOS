@@ -17,6 +17,19 @@ extension NSAttributedString {
 }
 
 extension String {
+    public func matches(_ pattern: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+
+        let range = NSRange(startIndex..., in: self)
+
+        return regex.matches(in: self, range: range).compactMap {
+            guard let bodyRange = Range($0.range(at: 1), in: self) else { return nil }
+            return String(self[bodyRange])
+        }
+    }
+}
+
+extension String {
     
     public var nilIfBlank: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
