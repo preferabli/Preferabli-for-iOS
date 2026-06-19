@@ -262,8 +262,15 @@ public enum Storage {
     }
 
     internal static func databaseUpgraded() async throws {
-        try await Storage.reset()
+        try nukePersistentStoreFiles(at: Storage.storeURL)
         resetDatabaseKeystore()
+        Storage.rebuildSharedContainer()
+    }
+    
+    public static func logoutReset() async throws {
+        try nukePersistentStoreFiles(at: Storage.storeURL)
+        resetDatabaseKeystore()
+        Storage.rebuildSharedContainer()
     }
     
     internal static func resetDatabaseKeystore() {

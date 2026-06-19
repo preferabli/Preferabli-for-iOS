@@ -12,15 +12,17 @@ import Foundation
 public final class ContentDTO: Decodable, @unchecked Sendable {
     public let id: Int
     public let content_parent: ContentDTO?
-    public let content_children: [ContentDTO]?
+//    public let content_children: [ContentDTO]?
     public let primary_media: MediaDTO?
 
     public let personality_associations: [ContentPersonalityAssociationDTO]?
     public let variant_associations: [ContentVariantAssociationDTO]?
-    public let channel_associations: [ContentChannelAssociationDTO]?
+//    public let channel_associations: [ContentChannelAssociationDTO]?
     public let venue_associations: [ContentVenueAssociationDTO]?
     public let experience_associations: [ContentExperienceAssociationDTO]?
-    public let market_traits_associations: [ContentMarketTraitAssociationDTO]?
+//    public let market_traits_associations: [ContentMarketTraitAssociationDTO]?
+    public let products_cache: [ProductDTO]?
+    public let venues_cache: [VenueDTO]?
 
     public let title: String?
     public let description: String?
@@ -35,7 +37,6 @@ public final class ContentDTO: Decodable, @unchecked Sendable {
 public final class PersonalityDTO: Decodable, @unchecked Sendable {
     public let id: Int
     public let primary_media: MediaDTO?
-    public let content_associations: [ContentPersonalityAssociationDTO]?
     public let name: String?
     public let description: String?
     public let badge_title: String?
@@ -60,7 +61,8 @@ public struct ContentPersonalityAssociationDTO: Decodable, Sendable {
 
 public struct ContentVariantAssociationDTO: Decodable, Sendable {
     public let id: Int
-    public let variant: ContentVariantReferenceDTO?
+    public let variant_id: Int?
+    public let product_id: Int?
     public let order: Int?
     public let created_at: Date?
     public let updated_at: Date?
@@ -91,7 +93,7 @@ public struct ContentChannelAssociationDTO: Decodable, Sendable {
 
 public struct ContentVenueAssociationDTO: Decodable, Sendable {
     public let id: Int
-    public let venue: VenueDTO?
+    public let venue_id: Int?
     public let order: Int?
     public let created_at: Date?
     public let updated_at: Date?
@@ -99,15 +101,10 @@ public struct ContentVenueAssociationDTO: Decodable, Sendable {
 
 public struct ContentExperienceAssociationDTO: Decodable, Sendable {
     public let id: Int
-    public let experience: ContentExperienceReferenceDTO?
+    public let experience: ExperienceDTO?
     public let order: Int?
     public let created_at: Date?
     public let updated_at: Date?
-}
-
-/// The sample payload only includes { "id": ... } for experience.
-public struct ContentExperienceReferenceDTO: Decodable, Sendable {
-    public let id: Int
 }
 
 public struct ContentMarketTraitAssociationDTO: Decodable, Sendable {

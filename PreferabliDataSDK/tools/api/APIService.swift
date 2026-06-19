@@ -346,6 +346,21 @@ extension APIService {
         if let http = response.response, let data = response.data {
 
             if http.statusCode == 401 {
+                let logID = response.request?.value(forHTTPHeaderField: debugLogIDHeader) ?? "-"
+                let url = response.request?.url?.absoluteString ?? endpoint
+                let method = response.request?.httpMethod ?? "?"
+
+                var msg = "[\(logID)]\n🚫 401 \(method) \(url)"
+
+                if let data = response.data, !data.isEmpty {
+                    let rawBody = String(decoding: data, as: UTF8.self)
+                    msg += "\n401 response body:\n\(rawBody)"
+                } else {
+                    msg += "\n401 response body: <empty>"
+                }
+
+                APILog.response.error("\(msg, privacy: .public)")
+
                 let api = await Preferabli.main.api
 
                 // Already retried once after refresh -> session is dead.
@@ -517,123 +532,103 @@ internal struct APIEndpoints {
         contents + "/\(id)"
     }
 
+    internal static func contentChildren(id: Int) -> String {
+        contents + "/\(id)/children"
+    }
+
     internal static func personality(id: Int) -> String {
         personalities + "/\(id)"
     }
+
+    internal static func personalityContentAssociations(id: Int) -> String {
+        personalities + "/\(id)/content-associations"
+    }
     
+    internal static let genAISeedLambda = "law7au2zlfnm6i3tvmebboj6ry0yotlj"
+
     private static var genAILambda: String? {
         let value = Storage.getKeyStore().string(forKey: "genAILambda")
         return value?.isEmptyOrWhitespace() == false ? value : nil
     }
 
-    private static var genAIBaseURL: String {
-        get throws {
-            guard let genAILambda else {
-                throw PreferabliException(
-                    type: .APIError,
-                    message: "GenAI is not configured yet. Please try again.",
-                    code: 503
-                )
-            }
+    private static var resolvedGenAILambda: String {
+        genAILambda ?? genAISeedLambda
+    }
 
-            return "https://\(genAILambda).lambda-url.us-east-1.on.aws/api/v1"
-        }
+    private static func genAIBaseURL(lambda: String = resolvedGenAILambda) -> String {
+        "https://\(lambda).lambda-url.us-east-1.on.aws/api/v1"
     }
 
     internal static var genAI: String {
-        get throws {
-            try genAIBaseURL + "/conversation_turns"
-        }
+        genAIBaseURL() + "/conversation_turns"
     }
 
     internal static var genAIThinking: String {
-        get throws {
-            try genAIBaseURL + "/thinking_messages"
-        }
+        genAIBaseURL() + "/thinking_messages"
     }
 
     internal static var genAIStart: String {
-        get throws {
-            try genAIBaseURL + "/conversations"
-        }
+        genAIBaseURL() + "/conversations"
     }
 
     internal static var genAIFeedback: String {
-        get throws {
-            try genAIBaseURL + "/user_feedbacks"
-        }
+        genAIBaseURL() + "/user_feedbacks"
     }
 
     internal static var genAIHistory: String {
-        get throws {
-            try genAIBaseURL + "/conversations/history"
-        }
+        genAIBaseURL() + "/conversations/history"
     }
 
     internal static var getGenAILearning: String {
-        get throws {
-            try genAIBaseURL + "/active_learning_examples/assignments?status=[0,1,2,3]"
-        }
+        genAIBaseURL() + "/active_learning_examples/assignments?status=[0,1,2,3]"
     }
 
     internal static var genAILearning: String {
-        get throws {
-            try genAIBaseURL + "/active_learning_examples"
-        }
+        genAIBaseURL() + "/active_learning_examples"
     }
 
     internal static var genAILabels: String {
-        get throws {
-            try genAIBaseURL + "/active_learning_labels"
-        }
+        genAIBaseURL() + "/active_learning_labels"
     }
 
     internal static var genAIVoices: String {
-        get throws {
-            try genAIBaseURL + "/voice_options"
-        }
+        genAIBaseURL() + "/voice_options"
     }
 
     internal static var updateGenAIVoices: String {
-        get throws {
-            try genAIBaseURL + "/conversation_voices"
-        }
+        genAIBaseURL() + "/conversation_voices"
     }
 
     internal static var genAIAuthChallenge: String {
-        get throws {
-            try genAIBaseURL + "/auth/challenge"
-        }
+        genAIBaseURL(lambda: genAISeedLambda) + "/auth/challenge"
     }
 
     internal static var genAIAuthHandshake: String {
-        get throws {
-            try genAIBaseURL + "/auth/handshake"
-        }
-    }
-
-    internal static func genAIFeedback(id: Int) throws -> String {
-        try genAIFeedback + "/\(id)"
+        genAIBaseURL(lambda: genAISeedLambda) + "/auth/handshake"
     }
 
     internal static func genAILambda(lastPiece: String) -> String {
-        "https://nqca4sxnxxf5qzqrgnlzog5n5a0pcvoj.lambda-url.us-east-1.on.aws/api/v1/lambda_urls/\(lastPiece)"
+        genAIBaseURL(lambda: genAISeedLambda) + "/lambda_urls/\(lastPiece)"
     }
 
-    internal static func genAIConversationHistory(sessionId: String) throws -> String {
-        try genAIStart + "/\(sessionId)/turns"
+    internal static func genAIProductDescription(id: Int) -> String {
+        genAIBaseURL() + "/descriptions/\(id)"
+    }
+    
+    internal static func genAIFeedback(id: Int) -> String {
+        genAIFeedback + "/\(id)"
     }
 
-    internal static func genAIConversation(sessionId: String) throws -> String {
-        try genAIStart + "/\(sessionId)"
+    internal static func genAIConversationHistory(sessionId: String) -> String {
+        genAIStart + "/\(sessionId)/turns"
     }
 
-    internal static func genAIUtteranceUpdate(id: Int) throws -> String {
-        try genAILearning + "/\(id)"
+    internal static func genAIConversation(sessionId: String) -> String {
+        genAIStart + "/\(sessionId)"
     }
 
-    internal static func genAIProductDescription(id: Int) throws -> String {
-        try genAIBaseURL + "/descriptions/\(id)"
+    internal static func genAIUtteranceUpdate(id: Int) -> String {
+        genAILearning + "/\(id)"
     }
 
     internal static func venues(id: Int) -> String { baseUrl + "markets/\(id)/venues" }

@@ -43,7 +43,7 @@ public class Preferabli {
     public let loadState = PreferabliLoadState()
     private let sessionBootstrapper = UserSessionBootstrapper()
     
-    internal static let versionCode = 12
+    internal static let versionCode = 19
     
     public let loggingEnabled : Bool
     internal let api : APIService
@@ -106,33 +106,16 @@ public class Preferabli {
             if logging_enabled { print(msg) }
         }
         
-        // 1) Do upgrade/startup first (highest value work).
-        // Use Task { } so we keep actor inheritance and don’t “fully detach” unless needed.
-        Task(priority: .high) {
-            do {
-                try await main.handleUpgrade()
-                try await main.handleStartupActions()
-            } catch {
-                await main.handleError(error: error)
-            }
-            
-            // 2) Only after startup work completes, do maintenance (background).
-            // Serialize prune -> reindex to avoid concurrent graph churn.
-            PreferabliTools.detachedCancellableTask(priority: .background) {
-                            await Storage.pruneTombstones(batchSize: 150, log: log)
-            
-                            // Gate expensive reindex so it only runs when needed.
-                            // Tie it to versionCode (or schema hash) so upgrades trigger it.
-                            let ks = Storage.getKeyStore()
-                            let reindexKey = "didReindexSearchableContent_v\(await Preferabli.versionCode)"
-            
-                            if !ks.bool(forKey: reindexKey) {
-                                await Storage.reindexSearchableContent(batchSize: 250, log: log)
-                                ks.set(true, forKey: reindexKey)
-                            } else {
-                                log("Skipping reindex (already completed for \(reindexKey))")
-                            }
-                        }
+        let keyStore = Storage.getKeyStore()
+
+        let savedBuildNumber = keyStore.integer(forKey: "lastDatabaseBuildNumber")
+        let savedVersionCode = keyStore.integer(forKey: "versionCode")
+
+        let isBrandNewInstall = savedBuildNumber == 0 && savedVersionCode == 0
+
+        if isBrandNewInstall {
+            keyStore.set(Preferabli.appBuildNumber, forKey: "lastDatabaseBuildNumber")
+            keyStore.set(Preferabli.versionCode, forKey: "versionCode")
         }
     }
     
@@ -140,19 +123,77 @@ public class Preferabli {
         return Preferabli.INTEGRATION_ID == -1
     }
     
-    private func handleUpgrade() async throws {
-        let versionCode = Preferabli.versionCode
-        let savedVersionCode = Storage.getKeyStore().integer(forKey: "versionCode")
-        
-        if (savedVersionCode != versionCode) {
-            if (savedVersionCode == 0) {
-                // new user do nothing for now
+    public static var appBuildNumber: Int {
+        let raw = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+        return Int(raw) ?? 0
+    }
+
+    public var needsDatabaseUpgrade: Bool {
+        let keyStore = Storage.getKeyStore()
+
+        let savedBuildNumber = keyStore.integer(forKey: "lastDatabaseBuildNumber")
+        let currentBuildNumber = Preferabli.appBuildNumber
+
+        let savedVersionCode = keyStore.integer(forKey: "versionCode")
+        let currentVersionCode = Preferabli.versionCode
+
+        let isExistingInstallMissingBuildNumber = savedBuildNumber == 0 && savedVersionCode != 0
+        let buildNumberIncreased = savedBuildNumber != 0 && currentBuildNumber > savedBuildNumber
+        let sdkVersionChanged = savedVersionCode != 0 && savedVersionCode != currentVersionCode
+
+        return isExistingInstallMissingBuildNumber || buildNumberIncreased || sdkVersionChanged
+    }
+
+    @discardableResult
+    public func performDatabaseUpgradeIfNeeded() async throws -> Bool {
+        let keyStore = Storage.getKeyStore()
+
+        let currentBuildNumber = Preferabli.appBuildNumber
+        let savedBuildNumber = keyStore.integer(forKey: "lastDatabaseBuildNumber")
+
+        let currentVersionCode = Preferabli.versionCode
+        let savedVersionCode = keyStore.integer(forKey: "versionCode")
+
+        let isExistingInstallMissingBuildNumber = savedBuildNumber == 0 && savedVersionCode != 0
+        let buildNumberIncreased = savedBuildNumber != 0 && currentBuildNumber > savedBuildNumber
+        let sdkVersionChanged = savedVersionCode != 0 && savedVersionCode != currentVersionCode
+
+        let shouldUpgrade =
+            isExistingInstallMissingBuildNumber ||
+            buildNumberIncreased ||
+            sdkVersionChanged
+
+        guard shouldUpgrade else {
+            keyStore.set(currentBuildNumber, forKey: "lastDatabaseBuildNumber")
+            keyStore.set(currentVersionCode, forKey: "versionCode")
+            return false
+        }
+
+        try await Storage.databaseUpgraded()
+
+        keyStore.set(currentBuildNumber, forKey: "lastDatabaseBuildNumber")
+        keyStore.set(currentVersionCode, forKey: "versionCode")
+
+        return true
+    }
+
+    public func performStartupActionsAfterStorageReady() async throws {
+        try await handleStartupActions()
+
+        let log: @Sendable (String) -> Void = { msg in
+            if self.loggingEnabled { print(msg) }
+        }
+
+        PreferabliTools.detachedCancellableTask(priority: .background) {
+            let ks = Storage.getKeyStore()
+            let reindexKey = "didReindexSearchableContent_v\(await Preferabli.versionCode)"
+
+            if !ks.bool(forKey: reindexKey) {
+                await Storage.reindexSearchableContent(batchSize: 250, log: log)
+                ks.set(true, forKey: reindexKey)
             } else {
-                // user has upgraded the app always pull new data
-                try await Storage.databaseUpgraded()
+                log("Skipping reindex (already completed for \(reindexKey))")
             }
-            // we handled either possible situation so update the version code to current version
-            Storage.getKeyStore().set(versionCode, forKey: "versionCode")
         }
     }
     
@@ -165,27 +206,28 @@ public class Preferabli {
     }
     
     internal func clearAllData() async throws {
-        do {
-            // delete all from core data
-            try await Storage.reset()
-            
-            // clear HTTP cache
-            await api.clearUrlCache()
-            await api.refreshDefaults()
-            
-            let keyStore = Storage.getKeyStore()
-            let integration_id = keyStore.integer(forKey: "INTEGRATION_ID")
-            let client_interface = keyStore.string(forKey: "CLIENT_INTERFACE")
-            let storeFile = keyStore.string(forKey: "swiftdata_store_filename")
-            
-            keyStore.removePersistentDomain(forName: "Preferabli")
-            
-            keyStore.set(integration_id, forKey: "INTEGRATION_ID")
-            keyStore.set(client_interface, forKey: "CLIENT_INTERFACE")
-            keyStore.set(storeFile, forKey: "swiftdata_store_filename")
-        } catch {
-            print(error)
-        }
+        await api.clearUrlCache()
+        await api.refreshDefaults()
+
+        let keyStore = Storage.getKeyStore()
+
+        let integrationID = keyStore.integer(forKey: "INTEGRATION_ID")
+        let clientInterface = keyStore.string(forKey: "CLIENT_INTERFACE")
+        let storeFile = keyStore.string(forKey: "swiftdata_store_filename")
+        let mainScale = keyStore.double(forKey: "mainScale")
+        let versionCode = keyStore.integer(forKey: "versionCode")
+        let lastDatabaseBuildNumber = keyStore.integer(forKey: "lastDatabaseBuildNumber")
+
+        keyStore.removePersistentDomain(forName: "Preferabli")
+
+        keyStore.set(integrationID, forKey: "INTEGRATION_ID")
+        keyStore.set(clientInterface, forKey: "CLIENT_INTERFACE")
+        keyStore.set(storeFile, forKey: "swiftdata_store_filename")
+        keyStore.set(mainScale, forKey: "mainScale")
+        keyStore.set(versionCode, forKey: "versionCode")
+        keyStore.set(lastDatabaseBuildNumber, forKey: "lastDatabaseBuildNumber")
+
+        try await Storage.logoutReset()
     }
     
     public func bootstrapUserSessionIfNeeded(force: Bool = false) async {
@@ -219,6 +261,24 @@ public class Preferabli {
             
             try await userUpdated(dto: user)
         }
+    }
+    
+    public func refreshCurrentUserFromAPI() async throws {
+        try await canWeContinue(needsToBeLoggedIn: true)
+
+        let userID = PreferabliTools.getPreferabliUserId()
+        guard userID != 0 else {
+            throw PreferabliException(
+                type: .InvalidAccessToken,
+                message: "Cannot refresh current user because user_id is missing."
+            )
+        }
+
+        let dto: PreferabliUserDTO = try await api
+            .getAlamo()
+            .get(APIEndpoints.user(id: userID))
+
+        try userUpdated(dto: dto)
     }
     
     private struct IntegrationDTO: Decodable {} // payload unused; 2xx is all we need
@@ -2193,8 +2253,8 @@ public class Preferabli {
                    Storage.getKeyStore().bool(forKey: "hasLoadedCTAPages") {
                     
                     let localIds: [Int] = try await Storage.withBackgroundContext { ctx in
-                        let buckets = try ctx.fetch(FetchDescriptor<CTABucket>())
-                        return buckets.map { $0.id }
+                        let pages = try ctx.fetch(FetchDescriptor<CTAPage>())
+                        return pages.filter { !$0.isTombstoned }.map { $0.id }
                     }
                     
                     if !localIds.isEmpty { return localIds }
@@ -3266,65 +3326,86 @@ public class Preferabli {
         }
     }
     
+    @discardableResult
     public func submitProduct(
-        name : String? = nil,
-        image : Data? = nil,
-        category : ProductCategory,
-        subcategory : ProductSubcategory? = nil,
-        type : ProductType? = nil,
+        name: String? = nil,
+        image: Data? = nil,
+        category: ProductCategory,
+        subcategory: ProductSubcategory? = nil,
+        type: ProductType? = nil,
         onTempProductSaved: ((Int) -> Void)? = nil
-    ) async throws {
-        
-        Analytics.track( ["event" : "submit_product"])
-        
+    ) async throws -> Int {
+
+        Analytics.track(["event": "submit_product"])
+
         try await canWeContinue(needsToBeLoggedIn: false)
-        
+
         let tempProductId = Storage.generateRandomLongId()
         let tempVariantId = Storage.generateRandomLongId()
-        
+
         try Storage.withContext { ctx in
-            let productDTO = ProductDTO(id: tempProductId, name: name, category: category.getCategoryName(), subcategory: subcategory?.getSubcategoryName(), type: type?.getTypeName())
+            let productDTO = ProductDTO(
+                id: tempProductId,
+                name: name,
+                category: category.getCategoryName(),
+                subcategory: subcategory?.getSubcategoryName(),
+                type: type?.getTypeName()
+            )
+
             let product = try Storage.upsertProduct(from: productDTO, in: ctx)
             product.temporaryImage = image
             product.temporaryName = name
-            
-            let variantDTO = VariantDTO.init(id: tempVariantId, created_at: Date.init(), updated_at: Date.init(), num_dollar_signs: nil, price: nil, recommendable: false, year: Variant.CURRENT_VARIANT_YEAR, primary_image: nil, product_id: tempProductId)
-            let variant = try Storage.upsertVariant(from: variantDTO, product: product, in: ctx)
-            
+
+            let variantDTO = VariantDTO(
+                id: tempVariantId,
+                created_at: Date(),
+                updated_at: Date(),
+                num_dollar_signs: nil,
+                price: nil,
+                recommendable: false,
+                year: Variant.CURRENT_VARIANT_YEAR,
+                primary_image: nil,
+                product_id: tempProductId
+            )
+
+            _ = try Storage.upsertVariant(from: variantDTO, product: product, in: ctx)
+
             try ctx.save()
         }
-        
+
         if let onTempProductSaved {
             await MainActor.run {
                 onTempProductSaved(tempProductId)
             }
         }
-        
+
         let payload: SParams = [
-            "name"         : name,
-            "category"     : category.getCategoryName(),
-            "subcategory"  : subcategory?.getSubcategoryName(),
-            "type"         : type?.getTypeName()
+            "name": name,
+            "category": category.getCategoryName(),
+            "subcategory": subcategory?.getSubcategoryName(),
+            "type": type?.getTypeName()
         ]
-        
+
         var variantPayload: SParams = [
-            "year"         : Variant.CURRENT_VARIANT_YEAR,
+            "year": Variant.CURRENT_VARIANT_YEAR
         ]
-        
-        if let image = image {
-            var mediaResponse : MediaDTO = try await api.getAlamo().upload(APIEndpoints.postMedia, data: image)
+
+        if let image {
+            let mediaResponse: MediaDTO = try await api.getAlamo().upload(APIEndpoints.postMedia, data: image)
             variantPayload["image_ids"] = [mediaResponse.id]
             variantPayload["primary_image_id"] = mediaResponse.id
         }
-        
-        let productDTO : ProductDTO = try await api.getAlamo().post(APIEndpoints.products, sjson: payload)
-        let variantDTO : VariantDTO = try await api.getAlamo().post(APIEndpoints.variants(product_id: productDTO.id), sjson: variantPayload)
-        
+
+        let productDTO: ProductDTO = try await api.getAlamo().post(APIEndpoints.products, sjson: payload)
+        let variantDTO: VariantDTO = try await api.getAlamo().post(APIEndpoints.variants(product_id: productDTO.id), sjson: variantPayload)
+
         try Storage.withContext { ctx in
             let product = try Storage.upsertProduct(from: productDTO, tempProductId: tempProductId, in: ctx)
-            let varaint = try Storage.upsertVariant(from: variantDTO, product: product, in: ctx)
+            _ = try Storage.upsertVariant(from: variantDTO, product: product, in: ctx)
             try ctx.save()
         }
+
+        return productDTO.id
     }
     
     private func createOrEditTagActual(
@@ -3356,19 +3437,64 @@ public class Preferabli {
                     return
                 }
                 
-                let variant : Variant
-                if let v = product.getVariantWithYear(year: year) {
+                let variant: Variant
+                if let v = try Storage.fetchVariant(productId: product_id, year: year, in: ctx) {
                     variant = v
                 } else {
-                    // let's create a temp variant with the correct year. update it later.
-                    let variantDTO = VariantDTO.init(id: tempVariantId, created_at: Date.init(), updated_at: Date.init(), num_dollar_signs: nil, price: nil, recommendable: false, year: year, primary_image: nil, product_id: product_id)
+                    // Create a temp variant with the correct year. The API-created real variant
+                    // can later promote/replace this temp variant by matching product/year.
+                    let variantDTO = VariantDTO(
+                        id: tempVariantId,
+                        created_at: Date(),
+                        updated_at: Date(),
+                        num_dollar_signs: nil,
+                        price: nil,
+                        recommendable: false,
+                        year: year,
+                        primary_image: nil,
+                        product_id: product_id
+                    )
                     variant = try Storage.upsertVariant(from: variantDTO, product: product, in: ctx)
                     needsRefresh = true
                 }
-                
-                let tagDTO : TagDTO = TagDTO.init(id: tempTagId, collection_id: collection_id, comment: notes, created_at: Date.init(), location: location, badge: nil, tagged_in_collection_id: tagged_in_collection_id, tagged_in_channel_id: nil, tagged_in_channel_name: nil, type: tag_type?.getDatabaseName(), updated_at: Date.init(), user_id: PreferabliTools.getPreferabliUserId(), value: value, bin: bin, variant_id: variant.id, quantity: quantity, format_ml: format_ml, price: price, customer_id: PreferabliTools.getCustomerId())
-                let tag = try Storage.upsertTag(from: tagDTO, variant: variant, in: ctx)
-                product.updateCachedRelationships()
+
+                let tagDTO = TagDTO(
+                    id: tempTagId,
+                    collection_id: collection_id,
+                    comment: notes,
+                    created_at: Date(),
+                    location: location,
+                    badge: nil,
+                    tagged_in_collection_id: tagged_in_collection_id,
+                    tagged_in_channel_id: nil,
+                    tagged_in_channel_name: nil,
+                    type: tag_type?.getDatabaseName(),
+                    updated_at: Date(),
+                    user_id: PreferabliTools.getPreferabliUserId(),
+                    value: value,
+                    bin: bin,
+                    variant_id: variant.id,
+                    quantity: quantity,
+                    format_ml: format_ml,
+                    price: price,
+                    customer_id: PreferabliTools.getCustomerId()
+                )
+
+                _ = try Storage.upsertTag(from: tagDTO, variant: variant, in: ctx)
+
+                // Avoid product.updateCachedRelationships() here because it walks
+                // product.variants -> variant.tags and can fault a stale relationship graph.
+                switch tag_type {
+                case .RATING:
+                    product.cachedMostRecentRating = try Storage.fetchById(Tag.self, id: tempTagId, in: ctx)
+                case .WISHLIST:
+                    product.cachedWishlist = try Storage.fetchById(Tag.self, id: tempTagId, in: ctx)
+                case .COLLECTION:
+                    product.cachedCellar = try Storage.fetchById(Tag.self, id: tempTagId, in: ctx)
+                default:
+                    break
+                }
+
                 try ctx.save()
             }
             
@@ -3421,7 +3547,7 @@ public class Preferabli {
                     throw PreferabliException.init(type: .BadSwiftData, message: "Could not add new tag due to database error involving Product. This should never happen.", code: 600)
                 }
                 
-                guard let variant = product.getVariantWithYear(year: year), variant.hasValidID else {
+                guard let variant = try Storage.fetchById(Variant.self, id: tagDTO.variant_id, in: ctx) else {
                     throw PreferabliException.init(type: .BadSwiftData, message: "Could not add new tag due to database error involving Variant. This should never happen.", code: 600)
                 }
                 
@@ -3730,7 +3856,6 @@ extension Preferabli {
     public func startGenAIConversation() async throws -> String {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
-            try await getGenAILambda()
             
             let auth = try await genAIAuthContext()
             
@@ -3758,8 +3883,6 @@ extension Preferabli {
 
     public func getGenAIThinkingTexts() async throws -> [Int: [String]] {
         do {
-            try await getGenAILambda()
-
             try await canWeContinue(needsToBeLoggedIn: false)
                         
             Analytics.track(["event": "gen_ai_thinking_texts"])
@@ -4106,7 +4229,7 @@ extension Preferabli {
             
             let auth = try await genAIAuthContext()
 
-            let url = try await APIEndpoints.genAIConversation(sessionId: sessionId) + "?origin_id=\(auth.originId)"
+            let url = APIEndpoints.genAIConversation(sessionId: sessionId) + "?origin_id=\(auth.originId)"
 
             try await api
                 .getAlamo()
@@ -4308,19 +4431,21 @@ extension Preferabli {
         }
     }
     
-    public func getGenAILambda() async throws {
+    public func getGenAILambda(
+        originId: String,
+        headers: HTTPHeaders? = nil
+    ) async throws {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
             Analytics.track(["event": "gen_ai_lambda"])
-            
+
             let defaults = Storage.getKeyStore()
-            let lastPiece = "dev"
 
             let lambdas: [GenAILambdaDTO] = try await api.getAlamo().get(
-                APIEndpoints.genAILambda(lastPiece: lastPiece)
+                APIEndpoints.genAILambda(lastPiece: "current"),
+                sparams: ["origin_id": originId],
+                headers: headers
             )
-            
-            let oldLambda = defaults.string(forKey: "genAILambda")
 
             if let lambda = lambdas.first(where: { $0.isCurrent }) {
                 defaults.set(lambda.url, forKey: "genAILambda")
@@ -4328,46 +4453,23 @@ extension Preferabli {
                 defaults.set(lambda.url, forKey: "genAILambda")
             } else if let lambda = lambdas.first(where: { $0.isDev }) {
                 defaults.set(lambda.url, forKey: "genAILambda")
+            } else {
+                defaults.set(APIEndpoints.genAISeedLambda, forKey: "genAILambda")
             }
-            
-            let newLambda = defaults.string(forKey: "genAILambda")
-            if oldLambda != newLambda {
-                await api.clearGenAIAuthToken()
-            }
-            
         } catch {
+            Storage.getKeyStore().set(APIEndpoints.genAISeedLambda, forKey: "genAILambda")
             handleError(error: error)
             throw error
         }
     }
     
     private func genAIAuthContext() async throws -> (originId: String, headers: HTTPHeaders) {
-        try await ensureGenAILambdaConfigured()
-
         let originId = try await api.genAIOriginId()
         let headers = try await api.genAIHeaders()
+
+        try await getGenAILambda(originId: originId, headers: headers)
+
         return (originId, headers)
-    }
-    
-    private func ensureGenAILambdaConfigured() async throws {
-        let defaults = Storage.getKeyStore()
-        let existingLambda = defaults.string(forKey: "genAILambda")
-
-        guard existingLambda?.isEmptyOrWhitespace() != false else {
-            return
-        }
-
-        try await getGenAILambda()
-
-        let refreshedLambda = defaults.string(forKey: "genAILambda")
-        guard refreshedLambda?.isEmptyOrWhitespace() == false else {
-            await api.clearGenAIAuthToken()
-            throw PreferabliException(
-                type: .APIError,
-                message: "GenAI is not configured yet. Please try again.",
-                code: 503
-            )
-        }
     }
     
     public func getGenAIProductDescription(id: Int) async throws -> GenAIProductDescriptionDTO {
@@ -4436,7 +4538,57 @@ extension Preferabli {
         }
     }
 
-    /// Fetches and stores a Personality record, including content associations present in the payload.
+    /// Fetches and stores one paginated page of children for a Content record.
+    ///
+    /// The children endpoint returns a flat array of ContentDTOs. The parent/child relationship
+    /// is created locally using the `content_id` passed into this method.
+    ///
+    /// - Returns: the child ids returned by this page. If the count is less than `limit`, callers
+    ///   can treat that as the end of pagination.
+    @discardableResult
+    public func getContentChildren(
+        force_refresh: Bool = false,
+        content_id: Int,
+        limit: Int = 25,
+        offset: Int = 0
+    ) async throws -> [Int] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track([
+                "event": "content_children_refresh",
+                "content_id": content_id,
+                "limit": limit,
+                "offset": offset
+            ])
+
+            let params: SParams = [
+                "limit": limit,
+                "offset": offset
+            ]
+
+            let body: [ContentDTO] = try await api
+                .getAlamo()
+                .get(APIEndpoints.contentChildren(id: content_id), sparams: params)
+
+            try await Storage.withBackgroundContext { ctx in
+                _ = try Storage.upsertContentChildren(
+                    parentID: content_id,
+                    from: body,
+                    replaceExisting: offset == 0 || force_refresh,
+                    in: ctx
+                )
+                try ctx.save()
+            }
+
+            return body.map(\.id)
+
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    /// Fetches and stores a Personality record.
     /// - Returns: the personality id for use with SwiftData queries.
     public func getPersonality(force_refresh: Bool = false, personality_id: Int) async throws -> Int {
         do {
@@ -4468,6 +4620,57 @@ extension Preferabli {
             }
 
             return personality_id
+
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+
+    /// Fetches and stores one paginated page of content associations for a Personality record.
+    ///
+    /// The personality endpoint no longer embeds content associations directly. This endpoint
+    /// returns a flat array of ContentPersonalityAssociationDTOs, each with its associated content.
+    ///
+    /// - Returns: the association ids returned by this page. If the count is less than `limit`,
+    ///   callers can treat that as the end of pagination.
+    @discardableResult
+    public func getPersonalityContentAssociations(
+        force_refresh: Bool = false,
+        personality_id: Int,
+        limit: Int = 25,
+        offset: Int = 0
+    ) async throws -> [Int] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track([
+                "event": "personality_content_associations_refresh",
+                "personality_id": personality_id,
+                "limit": limit,
+                "offset": offset
+            ])
+
+            let params: SParams = [
+                "limit": limit,
+                "offset": offset
+            ]
+
+            let body: [ContentPersonalityAssociationDTO] = try await api
+                .getAlamo()
+                .get(APIEndpoints.personalityContentAssociations(id: personality_id), sparams: params)
+
+            try await Storage.withBackgroundContext { ctx in
+                _ = try Storage.upsertPersonalityContentAssociations(
+                    personalityID: personality_id,
+                    from: body,
+                    replaceExisting: offset == 0 || force_refresh,
+                    in: ctx
+                )
+                try ctx.save()
+            }
+
+            return body.map(\.id)
 
         } catch {
             handleError(error: error)

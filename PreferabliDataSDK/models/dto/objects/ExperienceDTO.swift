@@ -47,6 +47,7 @@ public struct ExperienceDTO: Decodable, Sendable {
     public let primary_inventory_id: Int?
     public let reservations_provider: String?
     public let preferabli_image_url: String?
+    public let is_booking_link_external: Bool?
 
     public let experience_benefits: [ExperienceBenefitDTO]?
     public let operation_hours_normal: [ExperienceOperationHoursNormalDTO]?
@@ -79,6 +80,7 @@ public struct ExperienceDTO: Decodable, Sendable {
         case reservation_options
         case reservation_type
         case show_upgrade
+        case is_booking_link_external
         case stripe_product_id
         case terms_and_conditions
         case unit_label

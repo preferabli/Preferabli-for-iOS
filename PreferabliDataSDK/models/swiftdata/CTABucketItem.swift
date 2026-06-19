@@ -28,6 +28,9 @@ public final class CTABucketItem: Identifiable, HasIntID, HasImage {
     
     @Relationship(inverse: \CTABucket.items) public var bucket: CTABucket
     
+    // local only
+    public var isTombstoned: Bool = false
+    
     public init(id: Int, bucket: CTABucket) {
         self.id = id
         self.bucket = bucket

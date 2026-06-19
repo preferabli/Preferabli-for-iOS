@@ -21,7 +21,9 @@ public final class CTABucketAssociation: HasIntID, HasTimestamps {
     
     @Relationship public var page: CTAPage
     @Relationship(deleteRule: .nullify, inverse: \CTABucket.bucket_associations) public var bucket: CTABucket
-
+    
+    // local only
+    public var isTombstoned: Bool = false
     
     public init(id: Int, page: CTAPage, bucket: CTABucket) {
         self.id = id

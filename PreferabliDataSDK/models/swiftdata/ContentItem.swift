@@ -19,7 +19,6 @@ public final class ContentItem: HasIntID, HasTimestamps, HasImage {
     public var desc: String?
     public var episode_name: String?
 
-    /// API currently sends this as a string, for example "1".
     public var episode_order: Int?
 
     @Relationship(deleteRule: .nullify, inverse: \ContentItem.content_children)
@@ -37,8 +36,8 @@ public final class ContentItem: HasIntID, HasTimestamps, HasImage {
     @Relationship(deleteRule: .cascade, inverse: \ContentVariantAssociation.content)
     public var variant_associations: [ContentVariantAssociation] = []
 
-    @Relationship(deleteRule: .cascade, inverse: \ContentChannelAssociation.content)
-    public var channel_associations: [ContentChannelAssociation] = []
+//    @Relationship(deleteRule: .cascade, inverse: \ContentChannelAssociation.content)
+//    public var channel_associations: [ContentChannelAssociation] = []
 
     @Relationship(deleteRule: .cascade, inverse: \ContentVenueAssociation.content)
     public var venue_associations: [ContentVenueAssociation] = []
@@ -46,8 +45,8 @@ public final class ContentItem: HasIntID, HasTimestamps, HasImage {
     @Relationship(deleteRule: .cascade, inverse: \ContentExperienceAssociation.content)
     public var experience_associations: [ContentExperienceAssociation] = []
 
-    @Relationship(deleteRule: .cascade, inverse: \ContentMarketTraitAssociation.content)
-    public var market_traits_associations: [ContentMarketTraitAssociation] = []
+//    @Relationship(deleteRule: .cascade, inverse: \ContentMarketTraitAssociation.content)
+//    public var market_traits_associations: [ContentMarketTraitAssociation] = []
 
     public init(id: Int) {
         self.id = id
@@ -141,11 +140,12 @@ public final class ContentVariantAssociation: HasIntID, HasTimestamps {
     public var updated_at: Date = Foundation.Date.now
 
     public var content_id: Int?
+    public var product_id: Int?
     public var variant_id: Int?
     public var order: Int?
 
-    // Denormalized variant fields because the content payload can include a variant without product_id.
-    // That means we cannot always create a full Variant, since Variant requires a Product.
+    // Legacy denormalized variant fields. Current content payloads send variants via products_cache,
+    // so these fields are cleared while the association links to the upserted Variant by id.
     public var variant_year: Int?
     public var variant_price: Decimal?
     public var variant_num_dollar_signs: Int?

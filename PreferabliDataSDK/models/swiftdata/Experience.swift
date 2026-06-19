@@ -52,6 +52,7 @@ public final class Experience: HasIntID, HasImage {
     public var primary_inventory_id: Int?
     public var reservations_provider: String?
     public var preferabli_image_url: String?
+    public var is_booking_link_external: Bool?
     
     // local only
     public var isTombstoned: Bool = false

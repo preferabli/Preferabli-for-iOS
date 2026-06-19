@@ -74,7 +74,9 @@ extension Storage {
         }
 
         // Variants
-        var mostRecentYear = product.cachedMostRecentVariant?.year ?? -2
+        var mostRecentYear = -2
+        product.cachedMostRecentVariant = nil
+        
         if let vDTOs = dto.variants {
             for vDTO in vDTOs {
                 try checkCancelled()
@@ -89,19 +91,58 @@ extension Storage {
         }
 
         if let latest = dto.latest_variant_num_dollar_signs, latest != 0 {
-            if product.variants.isEmpty {
+            if try fetchAnyVariant(productId: product.id, in: ctx) == nil {
                 try checkCancelled()
 
-                let variant = Variant(id: generateRandomLongId(), year: Variant.CURRENT_VARIANT_YEAR, product: product)
+                let variant = Variant(
+                    id: generateRandomLongId(),
+                    year: Variant.CURRENT_VARIANT_YEAR,
+                    product: product
+                )
                 variant.num_dollar_signs = latest
+                variant.isTombstoned = false
+
+                ctx.insert(variant)
 
                 try checkCancelledBeforeRelationshipWrite()
                 product.cachedMostRecentVariant = variant
-                ctx.insert(variant)
             }
         }
 
         return product
+    }
+    
+    nonisolated static func fetchVariant(
+        productId: Int,
+        year: Int,
+        in ctx: ModelContext
+    ) throws -> Variant? {
+        var fd = FetchDescriptor<Variant>(
+            predicate: #Predicate<Variant> {
+                $0.product.id == productId &&
+                $0.year == year &&
+                $0.isTombstoned == false
+            },
+            sortBy: [
+                SortDescriptor(\Variant.id, order: .reverse)
+            ]
+        )
+        fd.fetchLimit = 1
+        return try ctx.fetch(fd).first
+    }
+
+    nonisolated static func fetchAnyVariant(
+        productId: Int,
+        in ctx: ModelContext
+    ) throws -> Variant? {
+        var fd = FetchDescriptor<Variant>(
+            predicate: #Predicate<Variant> {
+                $0.product.id == productId &&
+                $0.isTombstoned == false
+            }
+        )
+        fd.fetchLimit = 1
+        return try ctx.fetch(fd).first
     }
 
     // MARK: ProductProfile
@@ -190,43 +231,68 @@ extension Storage {
     // MARK: Variant
 
     @discardableResult
-    nonisolated static func upsertVariant(from dto: VariantDTO, product: Product, in ctx: ModelContext) throws -> Variant {
+    nonisolated static func upsertVariant(
+        from dto: VariantDTO,
+        product: Product,
+        in ctx: ModelContext
+    ) throws -> Variant {
 
         try checkCancelled()
 
         let v: Variant
-        if let temp = product.getVariantWithYear(year: dto.year) {
+
+        if let existing = try fetchById(Variant.self, id: dto.id, in: ctx) {
+            v = existing
+        } else if dto.id > 0,
+                  let temp = try fetchTempVariant(
+                      productId: product.id,
+                      year: dto.year,
+                      in: ctx
+                  ) {
             v = temp
+            v.id = dto.id
         } else {
-            v = try fetchOrInsert(Variant.self, id: dto.id, in: ctx) {
-                Variant(id: dto.id, year: dto.year, product: product)
-            }
+            v = Variant(id: dto.id, year: dto.year, product: product)
+            ctx.insert(v)
         }
 
-        try checkCancelled()
-
-        // ✅ Re-assert required fields
-        v.id = dto.id
         v.year = dto.year
 
         try checkCancelledBeforeRelationshipWrite()
-        if v.product.id != product.id { v.product = product }
+        v.product = product
 
         v.created_at = dto.created_at ?? v.created_at
         v.updated_at = dto.updated_at ?? v.updated_at
         v.num_dollar_signs = dto.num_dollar_signs ?? v.num_dollar_signs
         v.price = dto.price ?? v.price
         v.recommendable = dto.recommendable ?? v.recommendable
+        v.isTombstoned = false
 
         if let imgDTO = dto.primary_image {
-            try checkCancelled()
             let media = try upsertMedia(from: imgDTO, in: ctx)
-
-            try checkCancelledBeforeRelationshipWrite()
-            if v.primary_image !== media { v.primary_image = media }
+            if v.primary_image !== media {
+                v.primary_image = media
+            }
         }
 
         return v
+    }
+    
+    private nonisolated static func fetchTempVariant(
+        productId: Int,
+        year: Int,
+        in ctx: ModelContext
+    ) throws -> Variant? {
+        var fd = FetchDescriptor<Variant>(
+            predicate: #Predicate<Variant> {
+                $0.product.id == productId &&
+                $0.year == year &&
+                $0.id < 0 &&
+                $0.isTombstoned == false
+            }
+        )
+        fd.fetchLimit = 1
+        return try ctx.fetch(fd).first
     }
 
     // MARK: Tag
@@ -455,6 +521,7 @@ extension Storage {
         experience.badge_text_color_hex = dto.badge_text_color_hex ?? experience.badge_text_color_hex
         experience.primary_inventory_id = dto.primary_inventory_id ?? experience.primary_inventory_id
         experience.preferabli_image_url = dto.preferabli_image_url ?? experience.preferabli_image_url
+        experience.is_booking_link_external = dto.is_booking_link_external ?? experience.is_booking_link_external
         
         // inside Storage.upsertExperience(...)
         if experience.isTombstoned {
@@ -699,6 +766,7 @@ extension Storage {
         if let logo = dto.logo {
             try checkCancelled()
             let media = try upsertMedia(from: logo, in: ctx)
+            media.mime_type = "image/png"
 
             try checkCancelledBeforeRelationshipWrite()
             if v.logo !== media { v.logo = media }
@@ -895,6 +963,7 @@ extension Storage {
 
         if let logo = dto.logo {
             let media = try cachedMedia(from: logo, batch: batch, in: ctx)
+            media.mime_type = "image/png"
 
             try checkCancelledBeforeRelationshipWrite()
             if v.logo !== media { v.logo = media }
@@ -2173,6 +2242,9 @@ extension Storage {
 
         let r = try fetchOrInsert(CTABucketAssociation.self, id: dto.id, in: ctx) { CTABucketAssociation(id: dto.id, page: page, bucket: bucket) }
 
+        r.page = page
+        r.bucket = bucket
+        r.isTombstoned = false
         r.created_at = dto.created_at ?? r.created_at
         r.updated_at = dto.updated_at ?? r.updated_at
         r.order = dto.order ?? r.order
@@ -2199,16 +2271,16 @@ extension Storage {
         r.deeplink_url = dto.deeplink_url ?? r.deeplink_url
 
         if let items = dto.items {
-            var newItems: [CTABucketItem] = []
-            newItems.reserveCapacity(items.count)
+            let keepIDs = Set(items.map(\.id))
+
+            for oldItem in r.items where !keepIDs.contains(oldItem.id) {
+                oldItem.isTombstoned = true
+            }
 
             for item in items {
                 try checkCancelled()
-                newItems.append(try upsertCTABucketItem(from: item, bucket: r, in: ctx))
+                _ = try upsertCTABucketItem(from: item, bucket: r, in: ctx)
             }
-
-            try checkCancelledBeforeRelationshipWrite()
-            r.items = newItems
         }
 
         return r
@@ -2230,18 +2302,27 @@ extension Storage {
         r.affiliate_id = dto.affiliate_id ?? r.affiliate_id
         r.isTombstoned = false
 
-        if let bucket_assoscations = dto.page_bucket_associations {
-            var newItems: [CTABucketAssociation] = []
-            newItems.reserveCapacity(bucket_assoscations.count)
+        if let bucketAssociations = dto.page_bucket_associations {
+            let keepIDs = Set(bucketAssociations.map(\.id))
 
-            for association in bucket_assoscations {
-                try checkCancelled()
-                let bucket = try upsertCTABucket(from: association.bucket, in: ctx)
-                newItems.append(try upsertCTABucketAssociation(from: association, page: r, bucket: bucket, in: ctx))
+            for oldAssociation in r.page_bucket_associations where !keepIDs.contains(oldAssociation.id) {
+                oldAssociation.isTombstoned = true
             }
 
-            try checkCancelledBeforeRelationshipWrite()
-            r.page_bucket_associations = newItems
+            for association in bucketAssociations {
+                try checkCancelled()
+                let bucket = try upsertCTABucket(from: association.bucket, in: ctx)
+                _ = try upsertCTABucketAssociation(
+                    from: association,
+                    page: r,
+                    bucket: bucket,
+                    in: ctx
+                )
+            }
+        } else {
+            for page_bucket_ass in r.page_bucket_associations {
+                page_bucket_ass.isTombstoned = true
+            }
         }
 
         return r
@@ -2264,14 +2345,18 @@ extension Storage {
 
             // Required fields
             b.id = dto.id
+            b.bucket = bucket
+            b.isTombstoned = false
 
             // Fields
             b.badge_icon = dto.badge_icon
             b.badge_color_hex_primary = dto.badge_color_hex_primary
             b.badge_color_hex_secondary = dto.badge_color_hex_secondary
+            b.badge_gradient_css = dto.badge_gradient_css
             b.order = dto.order
             b.color_hex_secondary = dto.color_hex_secondary
             b.color_hex_primary = dto.color_hex_primary
+            b.gradient_css = dto.gradient_css
             b.deeplink_url = dto.deeplink_url
             b.badge_title = dto.badge_title
             b.title = dto.title
@@ -3284,6 +3369,7 @@ extension Storage {
         content.episode_name = dto.episode_name
         content.episode_order = dto.episode_order
 
+        
         // Parent. If this method is being called while walking a parent's child list,
         // prefer the supplied parent to avoid recursive parent/child loops.
         if let parent {
@@ -3327,27 +3413,45 @@ extension Storage {
             }
         }
 
-        if includeChildren, let childDTOs = dto.content_children {
-            var newChildren: [ContentItem] = []
-            newChildren.reserveCapacity(childDTOs.count)
-
-            for childDTO in childDTOs {
+        // Product cache is authoritative for the product/variant objects referenced by
+        // variant_associations. Associations now carry product_id + variant_id only.
+        if let productDTOs = dto.products_cache {
+            for productDTO in productDTOs {
                 try checkCancelled()
-                let child = try upsertContent(
-                    from: childDTO,
-                    parent: content,
-                    includeChildren: true,
-                    includePersonalityAssociations: includePersonalityAssociations,
-                    in: ctx
-                )
-                newChildren.append(child)
-            }
-
-            if !sameIntIDs(content.content_children, newChildren) {
-                try checkCancelledBeforeRelationshipWrite()
-                content.content_children = newChildren
+                _ = try upsertProduct(from: productDTO, in: ctx)
             }
         }
+
+        // Venue cache is authoritative for Venue objects referenced by venue_associations.
+        // Save every cached venue regardless of whether it is associated with this content item.
+        if let venueDTOs = dto.venues_cache {
+            for venueDTO in venueDTOs {
+                try checkCancelled()
+                _ = try upsertVenue(from: venueDTO, in: ctx)
+            }
+        }
+
+//        if includeChildren, let childDTOs = dto.content_children {
+//            var newChildren: [ContentItem] = []
+//            newChildren.reserveCapacity(childDTOs.count)
+//
+//            for childDTO in childDTOs {
+//                try checkCancelled()
+//                let child = try upsertContent(
+//                    from: childDTO,
+//                    parent: content,
+//                    includeChildren: true,
+//                    includePersonalityAssociations: includePersonalityAssociations,
+//                    in: ctx
+//                )
+//                newChildren.append(child)
+//            }
+//
+//            if !sameIntIDs(content.content_children, newChildren) {
+//                try checkCancelledBeforeRelationshipWrite()
+//                content.content_children = newChildren
+//            }
+//        }
 
         if includePersonalityAssociations,
            let associationDTOs = dto.personality_associations {
@@ -3360,7 +3464,6 @@ extension Storage {
 
                 let personality = try upsertPersonality(
                     from: personalityDTO,
-                    includeContentAssociations: false,
                     in: ctx
                 )
 
@@ -3401,24 +3504,24 @@ extension Storage {
             }
         }
 
-        if let associationDTOs = dto.channel_associations {
-            var newAssociations: [ContentChannelAssociation] = []
-            newAssociations.reserveCapacity(associationDTOs.count)
-
-            for associationDTO in associationDTOs {
-                try checkCancelled()
-                newAssociations.append(
-                    try upsertContentChannelAssociation(from: associationDTO, content: content, in: ctx)
-                )
-            }
-
-            try deleteMissing(content.channel_associations, keeping: Set(newAssociations.map(\.id)), in: ctx)
-
-            if !sameIntIDs(content.channel_associations, newAssociations) {
-                try checkCancelledBeforeRelationshipWrite()
-                content.channel_associations = newAssociations
-            }
-        }
+//        if let associationDTOs = dto.channel_associations {
+//            var newAssociations: [ContentChannelAssociation] = []
+//            newAssociations.reserveCapacity(associationDTOs.count)
+//
+//            for associationDTO in associationDTOs {
+//                try checkCancelled()
+//                newAssociations.append(
+//                    try upsertContentChannelAssociation(from: associationDTO, content: content, in: ctx)
+//                )
+//            }
+//
+//            try deleteMissing(content.channel_associations, keeping: Set(newAssociations.map(\.id)), in: ctx)
+//
+//            if !sameIntIDs(content.channel_associations, newAssociations) {
+//                try checkCancelledBeforeRelationshipWrite()
+//                content.channel_associations = newAssociations
+//            }
+//        }
 
         if let associationDTOs = dto.venue_associations {
             var newAssociations: [ContentVenueAssociation] = []
@@ -3458,26 +3561,78 @@ extension Storage {
             }
         }
 
-        if let associationDTOs = dto.market_traits_associations {
-            var newAssociations: [ContentMarketTraitAssociation] = []
-            newAssociations.reserveCapacity(associationDTOs.count)
+//        if let associationDTOs = dto.market_traits_associations {
+//            var newAssociations: [ContentMarketTraitAssociation] = []
+//            newAssociations.reserveCapacity(associationDTOs.count)
+//
+//            for associationDTO in associationDTOs {
+//                try checkCancelled()
+//                newAssociations.append(
+//                    try upsertContentMarketTraitAssociation(from: associationDTO, content: content, in: ctx)
+//                )
+//            }
+//
+//            try deleteMissing(content.market_traits_associations, keeping: Set(newAssociations.map(\.id)), in: ctx)
+//
+//            if !sameIntIDs(content.market_traits_associations, newAssociations) {
+//                try checkCancelledBeforeRelationshipWrite()
+//                content.market_traits_associations = newAssociations
+//            }
+//        }
 
-            for associationDTO in associationDTOs {
-                try checkCancelled()
-                newAssociations.append(
-                    try upsertContentMarketTraitAssociation(from: associationDTO, content: content, in: ctx)
-                )
-            }
+        return content
+    }
 
-            try deleteMissing(content.market_traits_associations, keeping: Set(newAssociations.map(\.id)), in: ctx)
+    @discardableResult
+    nonisolated static func upsertContentChildren(
+        parentID: Int,
+        from childDTOs: [ContentDTO],
+        replaceExisting: Bool = false,
+        in ctx: ModelContext
+    ) throws -> [ContentItem] {
 
-            if !sameIntIDs(content.market_traits_associations, newAssociations) {
-                try checkCancelledBeforeRelationshipWrite()
-                content.market_traits_associations = newAssociations
+        try checkCancelled()
+
+        let parent = try fetchOrInsert(ContentItem.self, id: parentID, in: ctx) {
+            ContentItem(id: parentID)
+        }
+
+        var childrenByID: [Int: ContentItem] = [:]
+        var orderedChildren: [ContentItem] = []
+
+        if !replaceExisting {
+            for existingChild in parent.content_children {
+                childrenByID[existingChild.id] = existingChild
+                orderedChildren.append(existingChild)
             }
         }
 
-        return content
+        for childDTO in childDTOs {
+            try checkCancelled()
+
+            let child = try upsertContent(
+                from: childDTO,
+                parent: parent,
+                includeChildren: false,
+                includePersonalityAssociations: true,
+                in: ctx
+            )
+
+            if childrenByID[child.id] == nil {
+                orderedChildren.append(child)
+            }
+
+            childrenByID[child.id] = child
+        }
+
+        let mergedChildren = orderedChildren.compactMap { childrenByID[$0.id] }
+
+        if !sameIntIDs(parent.content_children, mergedChildren) {
+            try checkCancelledBeforeRelationshipWrite()
+            parent.content_children = mergedChildren
+        }
+
+        return mergedChildren
     }
 
     // MARK: - Personality
@@ -3485,7 +3640,6 @@ extension Storage {
     @discardableResult
     nonisolated static func upsertPersonality(
         from dto: PersonalityDTO,
-        includeContentAssociations: Bool = true,
         in ctx: ModelContext
     ) throws -> Personality {
 
@@ -3518,42 +3672,72 @@ extension Storage {
             }
         }
 
-        if includeContentAssociations,
-           let associationDTOs = dto.content_associations {
-            var newAssociations: [ContentPersonalityAssociation] = []
-            newAssociations.reserveCapacity(associationDTOs.count)
+        return personality
+    }
 
-            for associationDTO in associationDTOs {
-                try checkCancelled()
-                guard let contentDTO = associationDTO.content else { continue }
 
-                let content = try upsertContent(
-                    from: contentDTO,
-                    parent: nil,
-                    includeChildren: true,
-                    includePersonalityAssociations: false,
-                    in: ctx
-                )
+    @discardableResult
+    nonisolated static func upsertPersonalityContentAssociations(
+        personalityID: Int,
+        from associationDTOs: [ContentPersonalityAssociationDTO],
+        replaceExisting: Bool = false,
+        in ctx: ModelContext
+    ) throws -> [ContentPersonalityAssociation] {
 
-                let association = try upsertContentPersonalityAssociation(
-                    from: associationDTO,
-                    content: content,
-                    personality: personality,
-                    in: ctx
-                )
+        try checkCancelled()
 
-                newAssociations.append(association)
-            }
+        let personality = try fetchOrInsert(Personality.self, id: personalityID, in: ctx) {
+            Personality(id: personalityID)
+        }
 
-            try deleteMissing(personality.content_associations, keeping: Set(newAssociations.map(\.id)), in: ctx)
+        var associationsByID: [Int: ContentPersonalityAssociation] = [:]
+        var orderedAssociations: [ContentPersonalityAssociation] = []
 
-            if !sameIntIDs(personality.content_associations, newAssociations) {
-                try checkCancelledBeforeRelationshipWrite()
-                personality.content_associations = newAssociations
+        if !replaceExisting {
+            for existingAssociation in personality.content_associations {
+                associationsByID[existingAssociation.id] = existingAssociation
+                orderedAssociations.append(existingAssociation)
             }
         }
 
-        return personality
+        for associationDTO in associationDTOs {
+            try checkCancelled()
+            guard let contentDTO = associationDTO.content else { continue }
+
+            let content = try upsertContent(
+                from: contentDTO,
+                parent: nil,
+                includeChildren: false,
+                includePersonalityAssociations: false,
+                in: ctx
+            )
+
+            let association = try upsertContentPersonalityAssociation(
+                from: associationDTO,
+                content: content,
+                personality: personality,
+                in: ctx
+            )
+
+            if associationsByID[association.id] == nil {
+                orderedAssociations.append(association)
+            }
+
+            associationsByID[association.id] = association
+        }
+
+        let mergedAssociations = orderedAssociations.compactMap { associationsByID[$0.id] }
+
+        if replaceExisting {
+            try deleteMissing(personality.content_associations, keeping: Set(mergedAssociations.map(\.id)), in: ctx)
+        }
+
+        if !sameIntIDs(personality.content_associations, mergedAssociations) {
+            try checkCancelledBeforeRelationshipWrite()
+            personality.content_associations = mergedAssociations
+        }
+
+        return mergedAssociations
     }
 
     // MARK: - Association rows
@@ -3613,68 +3797,26 @@ extension Storage {
             association.content = content
         }
 
-        if let variantDTO = dto.variant {
-            association.variant_id = variantDTO.id
-            association.variant_year = variantDTO.year
-            association.variant_price = variantDTO.price
-            association.variant_num_dollar_signs = variantDTO.num_dollar_signs
-            association.variant_fresh = variantDTO.fresh
-            association.variant_recommendable = variantDTO.recommendable
-            association.variant_deleted_on_curation = variantDTO.deleted_on_curation
+        association.product_id = dto.product_id
+        association.variant_id = dto.variant_id
 
-            if let localVariant = try Storage.fetchById(Variant.self, id: variantDTO.id, in: ctx) {
-                try checkCancelledBeforeRelationshipWrite()
-                if association.variant?.id != localVariant.id {
-                    association.variant = localVariant
-                }
-            } else {
-                try checkCancelledBeforeRelationshipWrite()
-                association.variant = nil
-            }
+        // Variant details now come from dto.products_cache, which is upserted before associations.
+        // Keep this association as a lightweight link by id.
+        let variant = try dto.variant_id.flatMap { try Storage.fetchById(Variant.self, id: $0, in: ctx) }
 
-            if let imageDTO = variantDTO.primary_image {
-                let media = try upsertMedia(from: imageDTO, in: ctx)
-
-                try checkCancelledBeforeRelationshipWrite()
-                if association.variant_primary_image !== media {
-                    association.variant_primary_image = media
-                }
-            } else {
-                try checkCancelledBeforeRelationshipWrite()
-                association.variant_primary_image = nil
-            }
-
-            if let imageDTOs = variantDTO.images {
-                var images: [Media] = []
-                images.reserveCapacity(imageDTOs.count)
-
-                for imageDTO in imageDTOs {
-                    try checkCancelled()
-                    images.append(try upsertMedia(from: imageDTO, in: ctx))
-                }
-
-                if !sameIntIDs(association.variant_images, images) {
-                    try checkCancelledBeforeRelationshipWrite()
-                    association.variant_images = images
-                }
-            } else {
-                try checkCancelledBeforeRelationshipWrite()
-                association.variant_images = []
-            }
-        } else {
-            association.variant_id = nil
-            association.variant_year = nil
-            association.variant_price = nil
-            association.variant_num_dollar_signs = nil
-            association.variant_fresh = nil
-            association.variant_recommendable = nil
-            association.variant_deleted_on_curation = nil
-
-            try checkCancelledBeforeRelationshipWrite()
-            association.variant = nil
-            association.variant_primary_image = nil
-            association.variant_images = []
+        try checkCancelledBeforeRelationshipWrite()
+        if association.variant?.id != variant?.id {
+            association.variant = variant
         }
+
+        association.variant_year = nil
+        association.variant_price = nil
+        association.variant_num_dollar_signs = nil
+        association.variant_fresh = nil
+        association.variant_recommendable = nil
+        association.variant_deleted_on_curation = nil
+        association.variant_primary_image = nil
+        association.variant_images = []
 
         return association
     }
@@ -3743,21 +3885,14 @@ extension Storage {
             association.content = content
         }
 
-        if let venueDTO = dto.venue {
-            association.venue_id = venueDTO.id
+        association.venue_id = dto.venue_id
 
-            let venue = try upsertVenue(from: venueDTO, in: ctx)
-                ?? Storage.fetchById(Venue.self, id: venueDTO.id, in: ctx)
+        // Venue details now come from dto.venues_cache, which is upserted before associations.
+        let venue = try dto.venue_id.flatMap { try Storage.fetchById(Venue.self, id: $0, in: ctx) }
 
-            try checkCancelledBeforeRelationshipWrite()
-            if association.venue?.id != venue?.id {
-                association.venue = venue
-            }
-        } else {
-            association.venue_id = nil
-
-            try checkCancelledBeforeRelationshipWrite()
-            association.venue = nil
+        try checkCancelledBeforeRelationshipWrite()
+        if association.venue?.id != venue?.id {
+            association.venue = venue
         }
 
         return association
@@ -3786,23 +3921,28 @@ extension Storage {
             association.content = content
         }
 
-        if let experienceDTO = dto.experience {
-            association.experience_id = experienceDTO.id
-
-            if let experience = try Storage.fetchById(Experience.self, id: experienceDTO.id, in: ctx) {
-                try checkCancelledBeforeRelationshipWrite()
-                if association.experience?.id != experience.id {
-                    association.experience = experience
-                }
-            } else {
-                try checkCancelledBeforeRelationshipWrite()
-                association.experience = nil
-            }
-        } else {
+        guard let experienceDTO = dto.experience else {
             association.experience_id = nil
-
             try checkCancelledBeforeRelationshipWrite()
             association.experience = nil
+            return association
+        }
+
+        association.experience_id = experienceDTO.id
+
+        let experience: Experience?
+        if let venueID = experienceDTO.preferabli_venue_id,
+           let venue = try Storage.fetchById(Venue.self, id: venueID, in: ctx) {
+            experience = try upsertExperience(from: experienceDTO, venue: venue, in: ctx)
+        } else if let existingExperience = try Storage.fetchById(Experience.self, id: experienceDTO.id, in: ctx) {
+            experience = try upsertExperience(from: experienceDTO, venue: existingExperience.venue, in: ctx)
+        } else {
+            experience = nil
+        }
+
+        try checkCancelledBeforeRelationshipWrite()
+        if association.experience?.id != experience?.id {
+            association.experience = experience
         }
 
         return association
