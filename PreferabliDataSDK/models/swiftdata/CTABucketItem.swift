@@ -12,9 +12,9 @@ public final class CTABucketItem: Identifiable, HasIntID, HasImage {
     public var badge_icon: String?
     public var badge_color_hex_primary: String?
     public var badge_color_hex_secondary: String?
-    public var order: Int?
     public var color_hex_secondary: String?
     public var color_hex_primary: String?
+    public var text_color_hex: String?
     public var gradient_css: String?
     public var badge_gradient_css: String?
     public var deeplink_url: String?
@@ -26,14 +26,11 @@ public final class CTABucketItem: Identifiable, HasIntID, HasImage {
     @Relationship(deleteRule: .nullify) public var sub_image_1: Media?
     @Relationship(deleteRule: .nullify) public var sub_image_2: Media?
     
-    @Relationship(inverse: \CTABucket.items) public var bucket: CTABucket
+    @Relationship(deleteRule: .cascade, inverse: \CTABucketItemAssociation.item)
+    public var bucket_item_associations: [CTABucketItemAssociation] = []
     
-    // local only
-    public var isTombstoned: Bool = false
-    
-    public init(id: Int, bucket: CTABucket) {
+    public init(id: Int) {
         self.id = id
-        self.bucket = bucket
     }
 
     public static func predicate(forID id: Int) -> Predicate<CTABucketItem> {

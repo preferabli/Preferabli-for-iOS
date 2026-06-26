@@ -43,6 +43,7 @@ public struct ExperienceDTO: Decodable, Sendable {
     public let badge_subtitle: String?
     public let badge_color_hex: String?
     public let badge_text_color_hex: String?
+    public let badge_gradient_css: String?
     public let cancellation_fee: String?
     public let primary_inventory_id: Int?
     public let reservations_provider: String?
@@ -94,6 +95,7 @@ public struct ExperienceDTO: Decodable, Sendable {
         case badge_subtitle
         case badge_color_hex
         case badge_text_color_hex
+        case badge_gradient_css
         case preferabli_image_url
         
         case experience_benefits = "benefits"

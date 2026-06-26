@@ -519,6 +519,7 @@ extension Storage {
         experience.badge_subtitle = dto.badge_subtitle ?? experience.badge_subtitle
         experience.badge_color_hex = dto.badge_color_hex ?? experience.badge_color_hex
         experience.badge_text_color_hex = dto.badge_text_color_hex ?? experience.badge_text_color_hex
+        experience.badge_gradient_css = dto.badge_gradient_css ?? experience.badge_gradient_css
         experience.primary_inventory_id = dto.primary_inventory_id ?? experience.primary_inventory_id
         experience.preferabli_image_url = dto.preferabli_image_url ?? experience.preferabli_image_url
         experience.is_booking_link_external = dto.is_booking_link_external ?? experience.is_booking_link_external
@@ -2135,6 +2136,7 @@ extension Storage {
             }
 
             mta.order = aDTO.order ?? mta.order
+            mta.is_filter_option = aDTO.is_filter_option ?? mta.is_filter_option
             mta.created_at = aDTO.created_at ?? mta.created_at
             mta.updated_at = aDTO.updated_at ?? mta.updated_at
 
@@ -2263,23 +2265,33 @@ extension Storage {
         r.created_at = dto.created_at ?? r.created_at
         r.updated_at = dto.updated_at ?? r.updated_at
         r.name = dto.name ?? r.name
-        r.order = dto.order ?? r.order
         r.type = dto.type ?? r.type
         r.item_width = dto.item_width ?? r.item_width
         r.item_height = dto.item_height ?? r.item_height
         r.item_corner_radius = dto.item_corner_radius ?? r.item_corner_radius
         r.deeplink_url = dto.deeplink_url ?? r.deeplink_url
 
-        if let items = dto.items {
-            let keepIDs = Set(items.map(\.id))
+        if let associations = dto.bucket_item_associations {
+            let keepIDs = Set(associations.map(\.id))
 
-            for oldItem in r.items where !keepIDs.contains(oldItem.id) {
-                oldItem.isTombstoned = true
+            for oldAssociation in r.bucket_item_associations where !keepIDs.contains(oldAssociation.id) {
+                oldAssociation.isTombstoned = true
             }
 
-            for item in items {
+            for associationDTO in associations {
                 try checkCancelled()
-                _ = try upsertCTABucketItem(from: item, bucket: r, in: ctx)
+
+                let item = try upsertCTABucketItem(
+                    from: associationDTO.item,
+                    in: ctx
+                )
+
+                _ = try upsertCTABucketItemAssociation(
+                    from: associationDTO,
+                    bucket: r,
+                    item: item,
+                    in: ctx
+                )
             }
         }
 
@@ -2327,33 +2339,51 @@ extension Storage {
 
         return r
     }
+    
+    @discardableResult
+    nonisolated static func upsertCTABucketItemAssociation(
+        from dto: CTABucketItemAssociationDTO,
+        bucket: CTABucket,
+        item: CTABucketItem,
+        in ctx: ModelContext
+    ) throws -> CTABucketItemAssociation {
+
+        try checkCancelled()
+
+        let r = try fetchOrInsert(CTABucketItemAssociation.self, id: dto.id, in: ctx) {
+            CTABucketItemAssociation(id: dto.id, bucket: bucket, item: item)
+        }
+
+        r.bucket = bucket
+        r.item = item
+        r.isTombstoned = false
+        r.order = dto.order ?? r.order
+        r.created_at = dto.created_at ?? r.created_at
+        r.updated_at = dto.updated_at ?? r.updated_at
+
+        return r
+    }
 
         @discardableResult
-        nonisolated static func upsertCTABucketItem(
-            from dto: CTABucketItemDTO,
-            bucket: CTABucket,
-            in ctx: ModelContext
-        ) throws -> CTABucketItem {
-
-            try checkCancelled()
+    nonisolated static func upsertCTABucketItem(
+        from dto: CTABucketItemDTO,
+        in ctx: ModelContext
+    ) throws -> CTABucketItem {
+        
+        try checkCancelled()
 
             let b = try fetchOrInsert(CTABucketItem.self, id: dto.id, in: ctx) {
-                CTABucketItem(id: dto.id, bucket: bucket)
+                CTABucketItem(id: dto.id)
             }
-
+        
             try checkCancelled()
-
-            // Required fields
-            b.id = dto.id
-            b.bucket = bucket
-            b.isTombstoned = false
 
             // Fields
             b.badge_icon = dto.badge_icon
             b.badge_color_hex_primary = dto.badge_color_hex_primary
             b.badge_color_hex_secondary = dto.badge_color_hex_secondary
             b.badge_gradient_css = dto.badge_gradient_css
-            b.order = dto.order
+            b.text_color_hex = dto.text_color_hex
             b.color_hex_secondary = dto.color_hex_secondary
             b.color_hex_primary = dto.color_hex_primary
             b.gradient_css = dto.gradient_css

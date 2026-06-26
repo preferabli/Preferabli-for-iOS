@@ -48,6 +48,7 @@ public final class Experience: HasIntID, HasImage {
     public var badge_subtitle: String?
     public var badge_color_hex: String?
     public var badge_text_color_hex : String?
+    public var badge_gradient_css: String?
     public var cancellation_fee: String?
     public var primary_inventory_id: Int?
     public var reservations_provider: String?

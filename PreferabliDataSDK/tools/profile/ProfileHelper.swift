@@ -97,7 +97,7 @@ final class ProfileHelper {
     private func isProfilePersistedLocally(profileID: Int) -> Bool {
         guard profileID > 0 else { return false }
         do {
-            return try Storage.withContext { ctx in
+            return try Storage.withContext { ctx, save in
                 var fd = FetchDescriptor<Profile>(
                     predicate: Profile.predicate(forID: profileID)
                 )
@@ -161,7 +161,7 @@ final class ProfileHelper {
 
             // ---- PERSIST: profile + profile styles, and decide which styles need fetching ----
             let result: (prefMapByStyleId: [Int: ProfileStyle], hasRecommendableStyle: Bool) =
-            try Storage.withContext { ctx in
+            try Storage.withContext { ctx, save in
                 let persistedProfile = try Storage.upsertProfile(from: profileResponse, in: ctx)
 
                 var prefMapByStyleId: [Int: ProfileStyle] = [:]
@@ -181,7 +181,7 @@ final class ProfileHelper {
                     }
                 }
 
-                try ctx.save()
+                try save()
                 return (prefMapByStyleId, hasRecommendableStyle)
             }
 
@@ -206,7 +206,7 @@ final class ProfileHelper {
                     index = end
                 }
 
-                try Storage.withContext { ctx in
+                try Storage.withContext { ctx, save in
                     for styleDTO in allStylesResp {
                         try Storage.upsertStyle(
                             from: styleDTO,
@@ -214,7 +214,7 @@ final class ProfileHelper {
                             in: ctx
                         )
                     }
-                    try ctx.save()
+                    try save()
                 }
             }
 

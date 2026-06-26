@@ -70,6 +70,6 @@ public extension HasImage {
 
 // Default helpers (no storage here).
 public extension HasTimestamps {
-    func getCreatedAt() -> Date { created_at ?? Date() }
-    func getUpdatedAt() -> Date { updated_at ?? Date() }
+    func getCreatedAt() -> Date { created_at }
+    func getUpdatedAt() -> Date { updated_at }
 }

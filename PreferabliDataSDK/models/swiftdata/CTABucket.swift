@@ -9,7 +9,6 @@ public final class CTABucket: Identifiable, HasIntID {
     public var created_at: Date = Foundation.Date.now
     public var updated_at: Date = Foundation.Date.now
 
-    public var order: Int?
     public var type: String?
     public var name: String?
     public var item_height: Int?
@@ -17,9 +16,11 @@ public final class CTABucket: Identifiable, HasIntID {
     public var item_corner_radius: Int?
     public var deeplink_url: String?
 
-    @Relationship(deleteRule: .cascade) public var items: [CTABucketItem]  = []
-    
-    @Relationship(deleteRule: .cascade) public var bucket_associations: [CTABucketAssociation]?
+    @Relationship(deleteRule: .cascade, inverse: \CTABucketItemAssociation.bucket)
+    public var bucket_item_associations: [CTABucketItemAssociation] = []
+
+    @Relationship(deleteRule: .cascade)
+    public var bucket_associations: [CTABucketAssociation]?
 
     public init(id: Int) {
         self.id = id

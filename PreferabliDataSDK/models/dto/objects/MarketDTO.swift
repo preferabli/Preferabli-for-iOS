@@ -28,6 +28,7 @@ public struct MarketTraitAssociationDTO: Decodable, Sendable {
     public let id: Int
     public let order: Int?
     public let market_trait: MarketTraitDTO?
+    public let is_filter_option: Bool?
     public let created_at: Date?
     public let updated_at: Date?
 }

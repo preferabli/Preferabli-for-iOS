@@ -217,6 +217,7 @@ public class Preferabli {
         let mainScale = keyStore.double(forKey: "mainScale")
         let versionCode = keyStore.integer(forKey: "versionCode")
         let lastDatabaseBuildNumber = keyStore.integer(forKey: "lastDatabaseBuildNumber")
+        let pendingStoreCleanupURLs = keyStore.stringArray(forKey: "PreferabliSDK.pendingStoreCleanupURLs")
 
         keyStore.removePersistentDomain(forName: "Preferabli")
 
@@ -226,6 +227,9 @@ public class Preferabli {
         keyStore.set(mainScale, forKey: "mainScale")
         keyStore.set(versionCode, forKey: "versionCode")
         keyStore.set(lastDatabaseBuildNumber, forKey: "lastDatabaseBuildNumber")
+        if let pendingStoreCleanupURLs {
+            keyStore.set(pendingStoreCleanupURLs, forKey: "PreferabliSDK.pendingStoreCleanupURLs")
+        }
 
         try await Storage.logoutReset()
     }
@@ -259,7 +263,7 @@ public class Preferabli {
             
             let user: PreferabliUserDTO = try await api.getAlamo().post(APIEndpoints.users, sjson: createParams)
             
-            try await userUpdated(dto: user)
+            try await userUpdated(dto: user, doNotSave: true)
         }
     }
     
@@ -521,15 +525,20 @@ public class Preferabli {
         }
     }
     
-    internal func userUpdated(dto : PreferabliUserDTO) throws {
-        try Storage.withContext { ctx in
+    internal func userUpdated(dto: PreferabliUserDTO, doNotSave: Bool = false) throws {
+        if doNotSave {
+            Storage.getKeyStore().set(dto.id, forKey: "user_id")
+            return
+        }
+
+        try Storage.withContext { ctx, save in
             let user = try Storage.upsertPreferabliUser(from: dto, in: ctx)
-            try ctx.save()
+            try save()
             PreferabliTools.setUserProperties(user: user)
         }
+
         PreferabliTools.addSDKProperties()
     }
-    
     
     /// Performs label recognition on a supplied image. Returns matches as an array of ``Product`` ids.
     /// - Parameters:
@@ -562,7 +571,7 @@ public class Preferabli {
             }
             
             // 4. Persist Products and Collect IDs
-            let productIds = try Storage.withContext { ctx in
+            let productIds = try Storage.withContext { ctx, save in
                 var productsToReturn = [Int]()
                 
                 // Upsert in sorted order to maintain relevance
@@ -570,7 +579,7 @@ public class Preferabli {
                     let p = try Storage.upsertProduct(from: imageRec.product, in: ctx)
                     productsToReturn.append(p.id)
                 }
-                try ctx.save()
+                try save()
                 return productsToReturn
             }
             
@@ -594,12 +603,12 @@ public class Preferabli {
             
             let body: [ReservationDTO] = try await api.getAlamo().get(APIEndpoints.reservations)
             
-            try await Storage.withBackgroundContext { ctx in
+            try await Storage.withBackgroundContext { ctx, save in
                 for dto in body {
                     try Storage.upsertReservation(from: dto, in: ctx)
                 }
                 
-                try ctx.save()
+                try save()
             }
                         
         } catch {
@@ -624,12 +633,12 @@ public class Preferabli {
             
             let body: [ReservationDTO] = try await api.getAlamo().get(APIEndpoints.reservations)
             
-            try await Storage.withBackgroundContext { ctx in
+            try await Storage.withBackgroundContext { ctx, save in
                 for dto in body {
                     try Storage.upsertReservation(from: dto, in: ctx)
                 }
                 
-                try ctx.save()
+                try save()
             }
                         
         } catch {
@@ -673,12 +682,12 @@ public class Preferabli {
 
             let body: [ReservationDTO] = try await api.getAlamo().get(APIEndpoints.reservations)
             
-            try await Storage.withBackgroundContext { ctx in
+            try await Storage.withBackgroundContext { ctx, save in
                 for dto in body {
                     try Storage.upsertReservation(from: dto, in: ctx)
                 }
                 
-                try ctx.save()
+                try save()
             }
                         
         } catch {
@@ -718,11 +727,11 @@ public class Preferabli {
                 .getAlamo()
                 .get(APIEndpoints.reservations)
 
-            try await Storage.withBackgroundContext { ctx in
+            try await Storage.withBackgroundContext { ctx, save in
                 for dto in body {
                     try Storage.upsertReservation(from: dto, in: ctx)
                 }
-                try ctx.save()
+                try save()
             }
 
         } catch {
@@ -756,7 +765,7 @@ public class Preferabli {
                 "date": date,
                 "requested_times": requested_times,
                 "guests": guestParams,
-                "reservation_source": "v3_ios_app",
+                "reservation_source": Storage.getKeyStore().string(forKey: "CLIENT_INTERFACE"),
                 "hubspot_deal_id": hubspot_deal_id
             ]
             
@@ -772,11 +781,91 @@ public class Preferabli {
                 .getAlamo()
                 .get(APIEndpoints.reservations)
 
-            try await Storage.withBackgroundContext { ctx in
+            try await Storage.withBackgroundContext { ctx, save in
                 for dto in body {
                     try Storage.upsertReservation(from: dto, in: ctx)
                 }
-                try ctx.save()
+                try save()
+            }
+
+            return response.id
+
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func createAnyroadReservation(
+        experience_id: Int,
+        hubspot_deal_id: String,
+        date: String,
+        time: String?,
+        guest_count : Int,
+        modification_link : String?,
+        booking_confirmation_ref : String?,
+        unit_price : Int?,
+        total_price : Int?,
+        specific_requests : String?,
+        cancellation_policy : String?,
+        confirmation_message : String?
+    ) async throws -> Int {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            Analytics.track(["event": "create_anyroad_reservation"])
+            
+            var dictionary: SParams = [
+                "date": date,
+                "guest_count": guest_count,
+                "reservation_source": Storage.getKeyStore().string(forKey: "CLIENT_INTERFACE"),
+                "hubspot_deal_id": hubspot_deal_id
+            ]
+            
+            if let time {
+                dictionary["requested_times"] = [time]
+            }
+            
+            if let modification_link {
+                dictionary["modification_link"] = modification_link
+            }
+
+            if let booking_confirmation_ref {
+                dictionary["booking_confirmation_ref"] = booking_confirmation_ref
+            }
+
+            if let unit_price {
+                dictionary["unit_price"] = unit_price
+            }
+
+            if let total_price {
+                dictionary["total_price"] = total_price
+            }
+
+            if let specific_requests {
+                dictionary["specific_requests"] = specific_requests
+            }
+
+            if let cancellation_policy {
+                dictionary["cancellation_policy"] = cancellation_policy
+            }
+
+            if let confirmation_message {
+                dictionary["confirmation_message"] = confirmation_message
+            }
+
+            let response: InternalReservationResponseDTO = try await api
+                .getAlamo()
+                .post(APIEndpoints.internalReservations(id: experience_id), sjson: dictionary)
+
+            let body: [ReservationDTO] = try await api
+                .getAlamo()
+                .get(APIEndpoints.reservations)
+
+            try await Storage.withBackgroundContext { ctx, save in
+                for dto in body {
+                    try Storage.upsertReservation(from: dto, in: ctx)
+                }
+                try save()
             }
 
             return response.id
@@ -806,7 +895,7 @@ public class Preferabli {
             Analytics.track( ["event" : "create_reservation"])
             
             var dictionary: SParams = [
-                "reservation_source": "v3_ios_app",
+                "reservation_source": Storage.getKeyStore().string(forKey: "CLIENT_INTERFACE"),
                 "experience_id": experience_id,
                 "hubspot_deal_id": hubspot_deal_id,
                 "date": date,
@@ -850,12 +939,12 @@ public class Preferabli {
             
             let body: [ReservationDTO] = try await api.getAlamo().get(APIEndpoints.reservations)
             
-            try await Storage.withBackgroundContext { ctx in
+            try await Storage.withBackgroundContext { ctx, save in
                 for dto in body {
                     try Storage.upsertReservation(from: dto, in: ctx)
                 }
                 
-                try ctx.save()
+                try save()
             }
             
             return response.reservation_request_id
@@ -911,14 +1000,14 @@ public class Preferabli {
             
 
             
-            let ids : [Int] = try await Storage.withBackgroundContext { ctx in
+            let ids : [Int] = try await Storage.withBackgroundContext { ctx, save in
                 var idsToReturn = [Int]()
                 for affiliateDTO in affiliateArray {
                     try Storage.upsertAffiliate(from: affiliateDTO, in: ctx)
                     idsToReturn.append(Int(affiliateDTO.id))
                 }
 
-                try ctx.save()
+                try save()
                 return idsToReturn
             }
 
@@ -941,14 +1030,14 @@ public class Preferabli {
 
             let response: [AffiliateDTO] = try await api.getAlamo().get(APIEndpoints.affiliates)
 
-            let ids : [Int] = try await Storage.withBackgroundContext { ctx in
+            let ids : [Int] = try await Storage.withBackgroundContext { ctx, save in
                 var idsToReturn = [Int]()
                 for affiliateDTO in response {
                     try Storage.upsertAffiliate(from: affiliateDTO, in: ctx)
                     idsToReturn.append(Int(affiliateDTO.id))
                 }
 
-                try ctx.save()
+                try save()
                 return idsToReturn
             }
 
@@ -1026,7 +1115,7 @@ public class Preferabli {
             
             let searchResponse : VenueSearchResponseDTO = try await api.getAlamo().get(APIEndpoints.search, sparams: dictionary)
             
-            let venueIds = try await Storage.withBackgroundContext { ctx in
+            let venueIds = try await Storage.withBackgroundContext { ctx, save in
                 var venuesToReturn = [Int]()
                 
                 for vd in searchResponse.venues {
@@ -1034,7 +1123,7 @@ public class Preferabli {
                         venuesToReturn.append(v.id)
                     }
                 }
-                try ctx.save()
+                try save()
                 return venuesToReturn
             }
             
@@ -1088,14 +1177,14 @@ public class Preferabli {
             var searchResponse : ProductSearchResponseDTO = try await api.getAlamo().get(APIEndpoints.search, sparams: dictionary)
             
             // Upsert Products
-            let productIds = try Storage.withContext { ctx in
+            let productIds = try Storage.withContext { ctx, save in
                 var productsToReturn = [Int]()
                 
                 for pd in searchResponse.products {
                     let p = try Storage.upsertProduct(from: pd, in: ctx)
                     productsToReturn.append(p.id)
                 }
-                try ctx.save()
+                try save()
                 return productsToReturn
             }
             
@@ -1116,7 +1205,7 @@ public class Preferabli {
             
             let searchResponse : [ExperienceDTO] = try await api.getAlamo().get(APIEndpoints.searchExperiences(query: query))
             
-            let needsVenues = try await Storage.withBackgroundContext { ctx in
+            let needsVenues = try await Storage.withBackgroundContext { ctx, save in
                 var needsVenues = [Int]()
                 
                 for expDTO in searchResponse {
@@ -1140,14 +1229,14 @@ public class Preferabli {
             }
             
             let venueResponsesFinal = venueResponses
-            let experienceIds = try await Storage.withBackgroundContext { ctx in
+            let experienceIds = try await Storage.withBackgroundContext { ctx, save in
                 var experienceIds = [Int]()
 
                 for venueResponse in venueResponsesFinal {
                     try Storage.upsertVenue(from: venueResponse, in: ctx)
 
                 }
-                try ctx.save()
+                try save()
 
                 for expDTO in searchResponse {
                     if let venueId = expDTO.preferabli_venue_id {
@@ -1179,7 +1268,7 @@ public class Preferabli {
             return
         }
         do {
-            try Storage.withContext { ctx in
+            try Storage.withContext { ctx, save in
                 let predicate = #Predicate<Search> { $0.text == query }
                 var descriptor = FetchDescriptor<Search>(predicate: predicate)
                 descriptor.fetchLimit = 1
@@ -1201,7 +1290,7 @@ public class Preferabli {
                 searchRecord.count += 1
                 searchRecord.last_searched = Date()
                 
-                try ctx.save()
+                try save()
             }
         } catch {
             handleError(error: error)
@@ -1285,7 +1374,7 @@ public class Preferabli {
             guard !variantIds.isEmpty else { return [] }
             
             // 2) Figure out which variants are missing (on main context)
-            let missingVariantIds: [Int] = try Storage.withContext { ctx in
+            let missingVariantIds: [Int] = try Storage.withContext { ctx, save in
                 try Storage.missingVariantIds(from: variantIds, in: ctx)
             }
             
@@ -1302,7 +1391,7 @@ public class Preferabli {
             
             // 4) Upsert missing products + attach preference data for *all* variants
             //    and build ordered productIds (by variant order).
-            let productIds: [Int] = try Storage.withContext { ctx in
+            let productIds: [Int] = try Storage.withContext { ctx, save in
                 // 4a) Upsert missing products
                 for pd in productDTOs {
                     _ = try Storage.upsertProduct(from: pd, in: ctx)
@@ -1332,7 +1421,7 @@ public class Preferabli {
                     }
                 }
                 
-                try ctx.save()
+                try save()
                 return ids
             }
             
@@ -1383,7 +1472,7 @@ public class Preferabli {
 
             guard !variantIds.isEmpty else { return [] }
 
-            let missingVariantIds: [Int] = try Storage.withContext { ctx in
+            let missingVariantIds: [Int] = try Storage.withContext { ctx, save in
                 try Storage.missingVariantIds(from: variantIds, in: ctx)
             }
 
@@ -1398,7 +1487,7 @@ public class Preferabli {
                 )
             }
 
-            let productIds: [Int] = try Storage.withContext { ctx in
+            let productIds: [Int] = try Storage.withContext { ctx, save in
                 for pd in productDTOs {
                     _ = try Storage.upsertProduct(from: pd, in: ctx)
                 }
@@ -1426,7 +1515,7 @@ public class Preferabli {
                     }
                 }
 
-                try ctx.save()
+                try save()
                 return ids
             }
 
@@ -1475,7 +1564,7 @@ public class Preferabli {
             
             let body: [FoodCategoryDTO] = try await api.getAlamo().get(APIEndpoints.foodCategories, sparams: params)
             
-            let foodIds = try Storage.withContext { ctx in
+            let foodIds = try Storage.withContext { ctx, save in
                 
                 var foodIds: [Int] = []
                 
@@ -1484,7 +1573,7 @@ public class Preferabli {
                     foodIds.append(food.id)
                 }
                 
-                try ctx.save()
+                try save()
                 
                 return foodIds
             }
@@ -1514,7 +1603,7 @@ public class Preferabli {
             
             // ✅ Fast path: return local if not stale AND we’ve loaded before
             if !needsRefresh, ks.bool(forKey: "hasLoadedUserCollections") {
-                let localIds: [Int] = try await Storage.withBackgroundContext { ctx in
+                let localIds: [Int] = try await Storage.withBackgroundContext { ctx, save in
                     var fd = FetchDescriptor<UserCollection>(
                         predicate: StorageFacade.QueriesNamespace().cellars()
                     )
@@ -1533,7 +1622,7 @@ public class Preferabli {
             
             let apiIds = Set(body.map { $0.id })
             
-            let ids: [Int] = try await Storage.withBackgroundContext { ctx in
+            let ids: [Int] = try await Storage.withBackgroundContext { ctx, save in
                 // 1) Upsert all from API
                 var out: [Int] = []
                 out.reserveCapacity(body.count)
@@ -1553,7 +1642,7 @@ public class Preferabli {
                     ctx.delete(local)
                 }
                 
-                try ctx.save()
+                try save()
                 return out
             }
             
@@ -1565,6 +1654,12 @@ public class Preferabli {
                 .compactMap { $0.collection_id }
             
             Storage.saveCellarCollectionIDs(cellarIDs)
+            
+            if let first : Int = (body
+                .filter { ($0.relationship_type ?? "") == "skip" }
+                .compactMap { $0.collection_id }).first {
+                ks.set(first, forKey: "skips_id")
+            }
             
             return ids
             
@@ -1582,7 +1677,7 @@ public class Preferabli {
             
             let body: [MediaDTO] = try await api.getAlamo().get(APIEndpoints.avatars)
             
-            let mediaIds = try Storage.withContext { ctx in
+            let mediaIds = try Storage.withContext { ctx, save in
                 
                 var mediaIds: [Int] = []
                 
@@ -1591,7 +1686,7 @@ public class Preferabli {
                     mediaIds.append(media.id)
                 }
                 
-                try ctx.save()
+                try save()
                 
                 return mediaIds
             }
@@ -1624,13 +1719,13 @@ public class Preferabli {
             
             let body: [StyleDTO] = try await api.getAlamo().get(APIEndpoints.stylesToTry, sparams: params)
             
-            let styleIds = try Storage.withContext { ctx in
+            let styleIds = try Storage.withContext { ctx, save in
                 var styleIds = [Int]()
                 for styleDTO in body {
                     let style = try Storage.upsertStyle(from: styleDTO, in: ctx)
                     styleIds.append(style.id)
                 }
-                try ctx.save()
+                try save()
                 return styleIds
             }
             
@@ -1665,7 +1760,7 @@ public class Preferabli {
             
             let body: [StyleRecResponseDTO] = try await api.getAlamo().get(APIEndpoints.stylesToTryRecs, sparams: params)
             
-            let productIDs = try Storage.withContext { ctx in
+            let productIDs = try Storage.withContext { ctx, save in
                 var productIDs = [Int]()
                 
                 if let first = body.first {
@@ -1674,7 +1769,7 @@ public class Preferabli {
                         productIDs.append(product.id)
                     }
                     
-                    try ctx.save()
+                    try save()
                 }
                 
                 return productIDs
@@ -1712,7 +1807,7 @@ public class Preferabli {
             
             let body: [StyleRecResponseDTO] = try await api.getAlamo().get(APIEndpoints.styleSuggestions, sparams: params)
             
-            let productIDs = try Storage.withContext { ctx in
+            let productIDs = try Storage.withContext { ctx, save in
                 var productIDs = [Int]()
                 
                 if let first = body.first {
@@ -1721,10 +1816,10 @@ public class Preferabli {
                         productIDs.append(product.id)
                     }
                     
-                    try ctx.save()
+                    try save()
                 }
                 
-                try ctx.save()
+                try save()
                 
                 return productIDs
             }
@@ -1769,7 +1864,7 @@ public class Preferabli {
             
             let body: LTTTResponseDTO = try await api.getAlamo().get(APIEndpoints.lttt, sparams: params)
             
-            let productIDs = try Storage.withContext { ctx in
+            let productIDs = try Storage.withContext { ctx, save in
                 var productIDs = [Int]()
                 
                 for item in body.results {
@@ -1783,7 +1878,7 @@ public class Preferabli {
                     productIDs.append(product.id)
                 }
                 
-                try ctx.save()
+                try save()
                 
                 return productIDs
             }
@@ -1816,7 +1911,7 @@ public class Preferabli {
             
             let body: FLTTTResponseDTO = try await api.getAlamo().get(APIEndpoints.flttt, sparams: params)
             
-            let productIDs = try Storage.withContext { ctx in
+            let productIDs = try Storage.withContext { ctx, save in
                 var productIDs = [Int]()
                 
                 for item in body.products {
@@ -1824,7 +1919,7 @@ public class Preferabli {
                     productIDs.append(product.id)
                 }
                 
-                try ctx.save()
+                try save()
                 
                 return productIDs
             }
@@ -1844,7 +1939,7 @@ public class Preferabli {
             
             Analytics.track(["event": "recipes_for_product"])
             
-            let recipeIdsFirst = try await Storage.withContext { ctx in
+            let recipeIdsFirst = try await Storage.withContext { ctx, save in
                 guard let product = try Storage.fetchById(Product.self, id: productId, in: ctx) else {
                     throw PreferabliException.init(type: .BadSwiftData, message: "Product not found.", code: 404)
                 }
@@ -1873,7 +1968,7 @@ public class Preferabli {
             
             let body: [RecipesResponseDTO] = try await api.getAlamo().get(APIEndpoints.recipesForProducts, sparams: params)
             
-            let recipeIds = try await Storage.withContext { ctx in
+            let recipeIds = try await Storage.withContext { ctx, save in
                 guard let product = try Storage.fetchById(Product.self, id: productId, in: ctx) else {
                     throw PreferabliException.init(type: .BadSwiftData, message: "Product not found.", code: 404)
                 }
@@ -1895,7 +1990,7 @@ public class Preferabli {
                     order = order + 1
                 }
                 
-                try ctx.save()
+                try save()
                 
                 return recipeIds
             }
@@ -1953,7 +2048,7 @@ public class Preferabli {
             
             // --- 1. READ PHASE ---
             // Use a short-lived context just to check timestamps
-            try Storage.withContext { ctx in
+            try Storage.withContext { ctx, save in
                 guard let product = try Storage.fetchById(Product.self, id: product_id, in: ctx) else {
                     throw PreferabliException.init(type: .BadSwiftData, message: "Product not found.", code: 404)
                 }
@@ -1970,7 +2065,7 @@ public class Preferabli {
                 
                 // --- 3. WRITE PHASE ---
                 // Open a new, clean context *just* for writing
-                try Storage.withContext { ctx in
+                try Storage.withContext { ctx, save in
                     guard let product = try Storage.fetchById(Product.self, id: product_id, in: ctx) else {
                         throw PreferabliException.init(type: .BadSwiftData, message: "Product not found.", code: 404)
                     }
@@ -1979,7 +2074,7 @@ public class Preferabli {
                     let profile = try Storage.upsertProductProfile(from: body, for: product, in: ctx)
                     
                     // Save the write context
-                    try ctx.save()
+                    try save()
                 }
             }
             
@@ -2000,7 +2095,7 @@ public class Preferabli {
             
             _ = try await api.getAlamo().postNoBody(APIEndpoints.favoriteVenue(id: PreferabliTools.getPreferabliUserId(), venueId: venueId))
             
-            try await Storage.withBackgroundContext { ctx in
+            try await Storage.withBackgroundContext { ctx, save in
                 guard let user = try Storage.fetchById(PreferabliUser.self, id: PreferabliTools.getPreferabliUserId(), in: ctx) else {
                     return
                 }
@@ -2009,7 +2104,7 @@ public class Preferabli {
                 favorites.append(venueId)
                 user.favorite_venue_ids = favorites
                 
-                try ctx.save()
+                try save()
             }
             
         } catch {
@@ -2027,7 +2122,7 @@ public class Preferabli {
             
             _ = try await api.getAlamo().postNoBody(APIEndpoints.favoriteExperience(id: PreferabliTools.getPreferabliUserId(), experienceId: experienceId))
             
-            try await Storage.withBackgroundContext { ctx in
+            try await Storage.withBackgroundContext { ctx, save in
                 guard let user = try Storage.fetchById(PreferabliUser.self, id: PreferabliTools.getPreferabliUserId(), in: ctx) else {
                     return
                 }
@@ -2036,7 +2131,7 @@ public class Preferabli {
                 favorites.append(experienceId)
                 user.favorite_experience_ids = favorites
                 
-                try ctx.save()
+                try save()
             }
             
         } catch {
@@ -2054,7 +2149,7 @@ public class Preferabli {
             
             _ = try await api.getAlamo().delete(APIEndpoints.favoriteVenue(id: PreferabliTools.getPreferabliUserId(), venueId: venueId))
             
-            try await Storage.withBackgroundContext { ctx in
+            try await Storage.withBackgroundContext { ctx, save in
                 guard let user = try Storage.fetchById(PreferabliUser.self, id: PreferabliTools.getPreferabliUserId(), in: ctx) else {
                     return
                 }
@@ -2063,7 +2158,7 @@ public class Preferabli {
                 favorites.removeAll { $0 == venueId }
                 user.favorite_venue_ids = favorites
                 
-                try ctx.save()
+                try save()
             }
             
         } catch {
@@ -2081,7 +2176,7 @@ public class Preferabli {
             
             _ = try await api.getAlamo().delete(APIEndpoints.favoriteExperience(id: PreferabliTools.getPreferabliUserId(), experienceId: experienceId))
             
-            try await Storage.withBackgroundContext { ctx in
+            try await Storage.withBackgroundContext { ctx, save in
                 guard let user = try Storage.fetchById(PreferabliUser.self, id: PreferabliTools.getPreferabliUserId(), in: ctx) else {
                     return
                 }
@@ -2090,7 +2185,7 @@ public class Preferabli {
                 favorites.removeAll { $0 == experienceId }
                 user.favorite_experience_ids = favorites
                 
-                try ctx.save()
+                try save()
             }
             
         } catch {
@@ -2110,14 +2205,14 @@ public class Preferabli {
             
             // --- 3. WRITE PHASE ---
             // Open a new, clean context *just* for writing
-            let channelIds = try await Storage.withBackgroundContext { ctx in
+            let channelIds = try await Storage.withBackgroundContext { ctx, save in
                 var channelIds = [Int]()
                 for channelDTO in body {
                     let channel = try Storage.upsertChannel(from: channelDTO, in: ctx)
                     channelIds.append(channel.id)
                 }
                 // Save the write context
-                try ctx.save()
+                try save()
                 return channelIds
             }
             
@@ -2146,7 +2241,7 @@ public class Preferabli {
                 sparams: params
             )
 
-            let venueIds: [Int] = try await Storage.withBackgroundContext { ctx in
+            let venueIds: [Int] = try await Storage.withBackgroundContext { ctx, save in
                 guard let market = try Storage.fetchById(Market.self, id: market_id, in: ctx) else {
                     throw PreferabliException(
                         type: .BadSwiftData,
@@ -2178,7 +2273,7 @@ public class Preferabli {
                     }
                 }
 
-                try ctx.save()
+                try save()
                 return venueIds
             }
 
@@ -2199,7 +2294,7 @@ public class Preferabli {
             let params: SParams = ["limit": 9999, "offset": 0]
             let body: [ExperienceDTO] = try await api.getAlamo().get(APIEndpoints.experiences(marketId: market_id), sparams: params)
             
-            let experienceIds: [Int] = try await Storage.withBackgroundContext { ctx in
+            let experienceIds: [Int] = try await Storage.withBackgroundContext { ctx, save in
                 var experienceIds: [Int] = []
                 experienceIds.reserveCapacity(body.count)
 
@@ -2223,7 +2318,7 @@ public class Preferabli {
                     )
                 }
 
-                try ctx.save()
+                try save()
                 return experienceIds
             }
             
@@ -2252,7 +2347,7 @@ public class Preferabli {
                 if !force_refresh,
                    Storage.getKeyStore().bool(forKey: "hasLoadedCTAPages") {
                     
-                    let localIds: [Int] = try await Storage.withBackgroundContext { ctx in
+                    let localIds: [Int] = try await Storage.withBackgroundContext { ctx, save in
                         let pages = try ctx.fetch(FetchDescriptor<CTAPage>())
                         return pages.filter { !$0.isTombstoned }.map { $0.id }
                     }
@@ -2266,12 +2361,12 @@ public class Preferabli {
                     .getAlamo()
                     .get(APIEndpoints.ctaPages, sparams: params)
                 
-                let dtoIds: [Int] = try await Storage.withBackgroundContext { ctx in
+                let dtoIds: [Int] = try await Storage.withBackgroundContext { ctx, save in
                     let ids = try Storage.upsertCTAPagesSourceOfTruth(
                         from: body,
                         in: ctx
                     )
-                    try ctx.save()
+                    try save()
                     return ids
                 }
                 
@@ -2300,7 +2395,7 @@ public class Preferabli {
                 Analytics.track(["event": "get_markets"])
                 
                 if !force_refresh, Storage.getKeyStore().bool(forKey: "hasLoadedMarkets") {
-                    let localIds: [Int] = try await Storage.withBackgroundContext { ctx in
+                    let localIds: [Int] = try await Storage.withBackgroundContext { ctx, save in
                         let markets = try ctx.fetch(FetchDescriptor<Market>())
                         return markets.map { $0.id }
                     }
@@ -2321,9 +2416,9 @@ public class Preferabli {
                     return out
                 }()
                 
-                try await Storage.withBackgroundContext { ctx in
+                try await Storage.withBackgroundContext { ctx, save in
                     _ = try Storage.upsertMarketsSourceOfTruth(from: body, in: ctx)
-                    try ctx.save()
+                    try save()
                 }
                 
                 Storage.getKeyStore().set(true, forKey: "hasLoadedMarkets")
@@ -2344,7 +2439,7 @@ public class Preferabli {
             Analytics.track(["event": "get_recipes"])
             
             if !force_refresh, Storage.getKeyStore().bool(forKey: "hasLoadedRecipes") {
-                let localIds: [Int] = try await Storage.withBackgroundContext { ctx in
+                let localIds: [Int] = try await Storage.withBackgroundContext { ctx, save in
                     let recipes = try ctx.fetch(FetchDescriptor<Recipe>())
                     return recipes.map { $0.id }
                 }
@@ -2353,13 +2448,13 @@ public class Preferabli {
             
             let body: [RecipeDTO] = try await api.getAlamo().get(APIEndpoints.recipes)
             
-            let recipeIds : [Int] = try await Storage.withBackgroundContext { ctx in
+            let recipeIds : [Int] = try await Storage.withBackgroundContext { ctx, save in
                 var recipeIds : [Int] = []
                 for recipe in body {
                     let recipeActual = try Storage.upsertRecipe(from: recipe, in: ctx)
                     recipeIds.append(recipeActual.id)
                 }
-                try ctx.save()
+                try save()
                 
                 return recipeIds
             }
@@ -2379,7 +2474,7 @@ public class Preferabli {
             Analytics.track(["event": "get_recipe_groups"])
             
             if !force_refresh, Storage.getKeyStore().bool(forKey: "hasLoadedRecipeGroups") {
-                let localIds: [Int] = try await Storage.withBackgroundContext { ctx in
+                let localIds: [Int] = try await Storage.withBackgroundContext { ctx, save in
                     let recipes = try ctx.fetch(FetchDescriptor<Recipe>())
                     return recipes.map { $0.id }
                 }
@@ -2388,13 +2483,13 @@ public class Preferabli {
             
             let body: [RecipeGroupDTO] = try await api.getAlamo().get(APIEndpoints.recipeGroups)
             
-            let recipeGroupIds : [Int] = try await Storage.withBackgroundContext { ctx in
+            let recipeGroupIds : [Int] = try await Storage.withBackgroundContext { ctx, save in
                 var recipeGroupIds : [Int] = []
                 for recipeGroup in body {
                     let recipeActual = try Storage.upsertRecipeGroup(from: recipeGroup, in: ctx)
                     recipeGroupIds.append(recipeActual.id)
                 }
-                try ctx.save()
+                try save()
                 
                 return recipeGroupIds
             }
@@ -2425,7 +2520,7 @@ public class Preferabli {
             var needsRefresh = true
             
             if (!force_refresh) {
-                try Storage.withContext { ctx in
+                try Storage.withContext { ctx, save in
                     if let product = try Storage.fetchById(Product.self, id: product_id, in: ctx) {
                         
                         needsRefresh = PreferabliTools.hasMinutesPassed(minutes: 60, startDate: Storage.getKeyStore().object(forKey: "lastCalledProduct\(product_id)") as? Date)
@@ -2436,10 +2531,10 @@ public class Preferabli {
             if needsRefresh {
                 let body: ProductDTO = try await api.getAlamo().get(APIEndpoints.product(id: product_id))
                 
-                try Storage.withContext { ctx in
+                try Storage.withContext { ctx, save in
                     try Storage.upsertProduct(from: body, in: ctx)
                     
-                    try ctx.save()
+                    try save()
                     
                     Storage.getKeyStore().set(Date(), forKey: "lastCalledProduct\(product_id)")
                 }
@@ -2463,7 +2558,7 @@ public class Preferabli {
             var needsRefresh = true
             var needsVenue = true
             
-                try Storage.withContext { ctx in
+                try Storage.withContext { ctx, save in
                     if let venue = try Storage.fetchById(Venue.self, id: venue_id, in: ctx) {
                         needsVenue = false
                     }
@@ -2475,10 +2570,10 @@ public class Preferabli {
             if needsVenue {
                 let body: VenueDTO = try await api.getAlamo().get(APIEndpoints.venue(id: venue_id))
                 
-                try Storage.withContext { ctx in
+                try Storage.withContext { ctx, save in
                     try Storage.upsertVenue(from: body, in: ctx)
                     
-                    try ctx.save()
+                    try save()
                 }
             }
             
@@ -2487,7 +2582,7 @@ public class Preferabli {
                 let params: SParams = ["limit": 9999, "offset": 0]
                 let body: [ExperienceDTO] = try await api.getAlamo().get(APIEndpoints.experiences(id: venue_id), sparams: params)
                 
-                try await Storage.withBackgroundContext { ctx in
+                try await Storage.withBackgroundContext { ctx, save in
                     for experienceDTO in body {
                         
                         guard let preferabli_venue_id =  experienceDTO.preferabli_venue_id, let venue = try Storage.fetchById(Venue.self, id: preferabli_venue_id, in: ctx) else {
@@ -2497,7 +2592,7 @@ public class Preferabli {
                         try Storage.upsertExperience(from: experienceDTO, venue: venue, in: ctx)
                     }
 
-                    try ctx.save()
+                    try save()
                     
                     Storage.getKeyStore().set(Date(), forKey: "lastCalledExperiences\(venue_id)")
                 }
@@ -2521,7 +2616,7 @@ public class Preferabli {
             var needsRefresh = true
             
             if (!force_refresh) {
-                try Storage.withContext { ctx in
+                try Storage.withContext { ctx, save in
                     if let venue = try Storage.fetchById(Venue.self, id: venue_id, in: ctx) {
                         needsRefresh = PreferabliTools.hasMinutesPassed(minutes: 60, startDate: Storage.getKeyStore().object(forKey: "lastCalledVenue\(venue_id)") as? Date)
                     }
@@ -2531,10 +2626,10 @@ public class Preferabli {
             if needsRefresh {
                 let body: VenueDTO = try await api.getAlamo().get(APIEndpoints.venue(id: venue_id))
                 
-                try Storage.withContext { ctx in
+                try Storage.withContext { ctx, save in
                     try Storage.upsertVenue(from: body, in: ctx)
                     
-                    try ctx.save()
+                    try save()
                     
                     Storage.getKeyStore().set(Date(), forKey: "lastCalledVenue\(venue_id)")
                 }
@@ -2559,14 +2654,14 @@ public class Preferabli {
             
             let body: [ReservationDTO] = try await api.getAlamo().get(APIEndpoints.reservations)
             
-            let reservationIds = try Storage.withContext { ctx in
+            let reservationIds = try Storage.withContext { ctx, save in
                 var ids = [Int]()
                 for dto in body {
                     let reservation = try Storage.upsertReservation(from: dto, in: ctx)
                     ids.append(reservation.id)
                 }
                 
-                try ctx.save()
+                try save()
                 
                 return ids
             }
@@ -2588,7 +2683,7 @@ public class Preferabli {
             var needsRefresh = true
             
             if !force_refresh {
-                try Storage.withContext { ctx in
+                try Storage.withContext { ctx, save in
                     if try Storage.fetchById(Venue.self, id: venue_id, in: ctx) != nil {
                         needsRefresh = PreferabliTools.hasMinutesPassed(
                             minutes: 60,
@@ -2604,7 +2699,7 @@ public class Preferabli {
                 let params: SParams = ["limit": 9999, "offset": 0]
                 let body: [ExperienceDTO] = try await api.getAlamo().get(APIEndpoints.experiences(id: venue_id), sparams: params)
                 
-                experienceIds = try await Storage.withBackgroundContext { ctx in
+                experienceIds = try await Storage.withBackgroundContext { ctx, save in
                     var experienceIds: [Int] = []
                     experienceIds.reserveCapacity(body.count)
                     
@@ -2624,7 +2719,7 @@ public class Preferabli {
                         in: ctx
                     )
 
-                    try ctx.save()
+                    try save()
                     return experienceIds
                 }
             }
@@ -2646,9 +2741,9 @@ public class Preferabli {
             let params: SParams = ["search": booking_code]
             let body : BalloonResponseDTO = try await api.getAlamo().get(APIEndpoints.balloonBooking, sparams: params)
             
-            let reservationId = try Storage.withContext { ctx in
+            let reservationId = try Storage.withContext { ctx, save in
                 let reservation = try Storage.upsertBalloonReservation(from: body.booking, in: ctx)
-                try ctx.save()
+                try save()
                 return reservation.id
             }
             
@@ -2684,21 +2779,21 @@ public class Preferabli {
                 "phone": phone,
                 "completed_safety_brief": true,
                 "marketing_sign_up_requested": marketing_sign_up_requested,
-                "completed_safety_brief_platform": "v3_ios_app",
+                "completed_safety_brief_platform": Storage.getKeyStore().string(forKey: "CLIENT_INTERFACE"),
                 "booking_id": booking_id,
                 "date_of_birth": date_of_birth
             ]
 
             try await api.getAlamo().post(APIEndpoints.completeSafetyBrief, sjson: params)
 
-            try await Storage.withBackgroundContext { ctx in
+            try await Storage.withBackgroundContext { ctx, save in
                 guard let reservation = try Storage.fetchById(BalloonReservation.self, id: booking_id, in: ctx) else {
                     return
                 }
                 
                 reservation.completed_safety_brief = true
                 
-                try ctx.save()
+                try save()
             }
 
         } catch {
@@ -2840,10 +2935,10 @@ public class Preferabli {
                 .post(APIEndpoints.userCollections(id: PreferabliTools.getPreferabliUserId()), sjson: relPayload)
             
             // --- 3) Upsert locally ---
-            try Storage.withContext { ctx in
+            try Storage.withContext { ctx, save in
                 _ = try Storage.upsertCollection(from: collectionDTO, in: ctx)
                 _ = try Storage.upsertUserCollection(from: userCollectionDTO, in: ctx)
-                try ctx.save()
+                try save()
             }
             
             
@@ -2888,9 +2983,9 @@ public class Preferabli {
                 .getAlamo()
                 .put(APIEndpoints.collection(id: collectionId), sjson: payload)
             
-            try Storage.withContext { ctx in
+            try Storage.withContext { ctx, save in
                 _ = try Storage.upsertCollection(from: collectionDTO, in: ctx)
-                try ctx.save()
+                try save()
             }
             
             try await canWeContinue(needsToBeLoggedIn: true)
@@ -2913,14 +3008,14 @@ public class Preferabli {
                 .getAlamo()
                 .delete(APIEndpoints.userCollection(id: PreferabliTools.getPreferabliUserId(), userCollectionId: userCollectionId))
             
-            try Storage.withContext { ctx in
+            try Storage.withContext { ctx, save in
                 guard let userCollection = try Storage.fetchById(UserCollection.self, id: userCollectionId, in: ctx) else {
                     return
                 }
                 
                 ctx.delete(userCollection)
                 
-                try ctx.save()
+                try save()
             }
             
             try await canWeContinue(needsToBeLoggedIn: true)
@@ -2944,7 +3039,7 @@ public class Preferabli {
                 .getAlamo()
                 .delete(APIEndpoints.ordering(collectionId: collectionId, versionId: versionId, groupId: groupId, orderingId: orderingId))
             
-            try Storage.withContext { ctx in
+            try Storage.withContext { ctx, save in
                 guard let ordering = try Storage.fetchById(CollectionOrder.self, id: orderingId, in: ctx) else {
                     return
                 }
@@ -2955,7 +3050,7 @@ public class Preferabli {
                     collection.updated_at = Date()
                 }
                 
-                try ctx.save()
+                try save()
             }
             
             try await canWeContinue(needsToBeLoggedIn: true)
@@ -3103,7 +3198,7 @@ public class Preferabli {
             }
             
             // 3) Figure out missing variants in a BACKGROUND context
-            let missingVariantIds: [Int] = try await Storage.withBackgroundContext { ctx in
+            let missingVariantIds: [Int] = try await Storage.withBackgroundContext { ctx, save in
                 try Storage.missingVariantIds(from: variantIds, in: ctx)
             }
             
@@ -3119,7 +3214,7 @@ public class Preferabli {
             }
             
             // 5) Upsert missing products + attach PreferenceData + build ordered productIds
-            let productIds: [Int] = try await Storage.withBackgroundContext { ctx in
+            let productIds: [Int] = try await Storage.withBackgroundContext { ctx, save in
                 // 5a) Upsert missing products
                 for pd in productDTOs {
                     _ = try Storage.upsertProduct(from: pd, in: ctx)
@@ -3148,7 +3243,7 @@ public class Preferabli {
                     }
                 }
                 
-                try ctx.save()
+                try save()
                 return ids
             }
             
@@ -3201,7 +3296,7 @@ public class Preferabli {
                 }
                 
                 // Try local first
-                if let local = try Storage.withContext({ ctx -> (Int, Int)? in
+                if let local = try Storage.withContext({ ctx, save -> (Int, Int)? in
                     guard let collection = try Storage.fetchById(Collection.self, id: cellar_id, in: ctx) else { return nil }
                     guard let versionId = pickVersionId(collection.versions) else { return nil }
                     guard let group = try Storage.fetchById(CollectionGroup.self, id: group_id, in: ctx) else { return nil }
@@ -3216,12 +3311,12 @@ public class Preferabli {
                 
                 // Network fallback: fetch collection, upsert versions/groups, then recompute
                 let dto: CollectionDTO = try await api.getAlamo().get(APIEndpoints.collection(id: cellar_id))
-                _ = try Storage.withContext { ctx in
+                _ = try Storage.withContext { ctx, save in
                     _ = try Storage.upsertCollection(from: dto, in: ctx)
-                    try ctx.save()
+                    try save()
                 }
                 
-                guard let after = try Storage.withContext({ ctx -> (Int, Int)? in
+                guard let after = try Storage.withContext({ ctx, save -> (Int, Int)? in
                     guard let collection = try Storage.fetchById(Collection.self, id: cellar_id, in: ctx) else { return nil }
                     guard let versionId = pickVersionId(collection.versions) else { return nil }
                     guard let group = try Storage.fetchById(CollectionGroup.self, id: group_id, in: ctx) else { return nil }
@@ -3253,7 +3348,7 @@ public class Preferabli {
             )
             
             // 4) Upsert ordering locally and link relationships (Group <-> Order <-> Tag)
-            try Storage.withContext { ctx in
+            try Storage.withContext { ctx, save in
                 guard
                     let group = try Storage.fetchById(CollectionGroup.self, id: group_id, in: ctx),
                     let tag   = try Storage.fetchById(Tag.self, id: tagId, in: ctx),
@@ -3278,7 +3373,7 @@ public class Preferabli {
                 collection.product_count = (collection.product_count ?? 0) + 1
                 collection.updated_at = Date()
                 
-                try ctx.save()
+                try save()
             }
             
             try await canWeContinue(needsToBeLoggedIn: true)
@@ -3287,6 +3382,11 @@ public class Preferabli {
             handleError(error: error)
             throw error
         }
+    }
+    
+    public func skipProduct(product_id : Int) async throws {
+        Analytics.track( ["event" : "skip_product"])
+        try await createOrEditTagActual(product_id: product_id, year: Variant.CURRENT_VARIANT_YEAR, collection_id: Storage.getKeyStore().integer(forKey: "skips_id"), value: nil, tag_type: .SKIPPED, location: nil, notes: nil, price: nil, quantity: nil, format_ml: nil)
     }
     
     /// Rate a ``Product``. Creates a ``Tag`` of type ``TagType/RATING`` which is returned within the relevant product ``Variant``. User must be logged in to run this call.
@@ -3311,12 +3411,12 @@ public class Preferabli {
         Analytics.track( ["event" : "wishlist_product"])
         
         var existingTagId : Int?
-        try Storage.withContext { ctx in
+        try Storage.withContext { ctx, save in
             let product = try Storage.fetchById(Product.self, id: product_id, in: ctx)
             existingTagId = product?.cachedWishlist?.id
             product?.cachedWishlist?.isTombstoned = true
             product?.cachedWishlist = nil
-            try ctx.save()
+            try save()
         }
         
         if let existingTagId = existingTagId {
@@ -3343,7 +3443,7 @@ public class Preferabli {
         let tempProductId = Storage.generateRandomLongId()
         let tempVariantId = Storage.generateRandomLongId()
 
-        try Storage.withContext { ctx in
+        try Storage.withContext { ctx, save in
             let productDTO = ProductDTO(
                 id: tempProductId,
                 name: name,
@@ -3370,7 +3470,7 @@ public class Preferabli {
 
             _ = try Storage.upsertVariant(from: variantDTO, product: product, in: ctx)
 
-            try ctx.save()
+            try save()
         }
 
         if let onTempProductSaved {
@@ -3399,10 +3499,10 @@ public class Preferabli {
         let productDTO: ProductDTO = try await api.getAlamo().post(APIEndpoints.products, sjson: payload)
         let variantDTO: VariantDTO = try await api.getAlamo().post(APIEndpoints.variants(product_id: productDTO.id), sjson: variantPayload)
 
-        try Storage.withContext { ctx in
+        try Storage.withContext { ctx, save in
             let product = try Storage.upsertProduct(from: productDTO, tempProductId: tempProductId, in: ctx)
             _ = try Storage.upsertVariant(from: variantDTO, product: product, in: ctx)
-            try ctx.save()
+            try save()
         }
 
         return productDTO.id
@@ -3430,7 +3530,7 @@ public class Preferabli {
             let tempVariantId = Storage.generateRandomLongId()
             var needsRefresh = false
             
-            try Storage.withContext { ctx in
+            try Storage.withContext { ctx, save in
                 let product = try Storage.fetchById(Product.self, id: product_id, in: ctx)
                 guard let product = product else {
                     needsRefresh = true
@@ -3495,7 +3595,7 @@ public class Preferabli {
                     break
                 }
 
-                try ctx.save()
+                try save()
             }
             
             let payload: SParams = [
@@ -3534,7 +3634,7 @@ public class Preferabli {
             }
             
             // now we upsert the tag
-            let tag_id: Int = try Storage.withContext { ctx in
+            let tag_id: Int = try Storage.withContext { ctx, save in
                 
                 let product : Product?
                 if let productDTO = productDTO {
@@ -3553,7 +3653,7 @@ public class Preferabli {
                 
                 let tag = try Storage.upsertTag(from: tagDTO, variant: variant, tempTagId: tempTagId, in: ctx)
                 
-                try ctx.save()
+                try save()
                 
                 return tag.id
             }
@@ -3585,11 +3685,11 @@ public class Preferabli {
             try await canWeContinue(needsToBeLoggedIn: true)
             Analytics.track( ["event" : "delete_tag"])
             
-            try Storage.withContext { ctx in
+            try Storage.withContext { ctx, save in
                 let tag = try Storage.fetchById(Tag.self, id: tag_id, in: ctx)
                 tag?.isTombstoned = true
                 tag?.variant.product.updateCachedRelationships()
-                try ctx.save()
+                try save()
             }
             
             do {
@@ -3607,13 +3707,13 @@ public class Preferabli {
             } catch {
                 // catch here to UNDELETE if for some reason the call fails...
                 // we also need to figure out a way to run these with no network...
-                try await Storage.withContext { ctx in
+                try await Storage.withContext { ctx, save in
                     guard let tag = try Storage.fetchById(Tag.self, id: tag_id, in: ctx), tag.product_id != nil else {
                         throw PreferabliException(type: .DatabaseError)
                     }
                     tag.isTombstoned = false
                     tag.variant.product.updateCachedRelationships()
-                    try ctx.save()
+                    try save()
                     throw error
                 }
             }
@@ -3641,7 +3741,7 @@ public class Preferabli {
             
             Analytics.track( ["event" : "get_preferabli_score"])
             
-            let needsRefresh = try await Storage.withContext { ctx in
+            let needsRefresh = try await Storage.withContext { ctx, save in
                 var needsRefresh = false
                 guard let product = try Storage.fetchById(Product.self, id: product_id, in: ctx) else {
                     throw PreferabliException.init(type: .BadSwiftData, message: "Product not found.", code: 404)
@@ -3650,7 +3750,7 @@ public class Preferabli {
                 if (!(product.recommendable ?? false)) {
                     let dto = PreferenceDataDTO.init(title: "maybe")
                     try Storage.upsertPreferenceData(from: dto, for: product, in: ctx)
-                    try ctx.save()
+                    try save()
                     needsRefresh = false
                 } else {
                     let preference_data = product.preference_data
@@ -3672,14 +3772,14 @@ public class Preferabli {
                     preferenceResponse = try await api.getAlamo().get(APIEndpoints.preferenceData, sparams: params)
                 }
                 
-                try await Storage.withContext { ctx in
+                try await Storage.withContext { ctx, save in
                     guard let product = try Storage.fetchById(Product.self, id: product_id, in: ctx) else {
                         throw PreferabliException.init(type: .BadSwiftData, message: "Product not found.", code: 404)
                     }
                     
                     try Storage.upsertPreferenceData(from: preferenceResponse, for: product, in: ctx)
                     
-                    try ctx.save()
+                    try save()
                 }
             }
             
@@ -3715,7 +3815,7 @@ public class Preferabli {
         format_ml : Int? = nil,
     ) async throws {
         let (product_id, collection_id, tag_type, value): (Int, Int, TagType?, String?) =
-        try Storage.withContext { ctx in
+        try Storage.withContext { ctx, save in
             guard let tag = try Storage.fetchById(Tag.self, id: tag_id, in: ctx) else {
                 throw PreferabliException.init(type: .BadSwiftData, message: "Tag not found.", code: 404)
             }
@@ -3737,7 +3837,7 @@ public class Preferabli {
         
         // If we have an id, make sure the Collection row actually exists.
         if !needsFetch {
-            let exists = try Storage.withContext { ctx in
+            let exists = try Storage.withContext { ctx, save in
                 try Storage.fetchById(Collection.self, id: collectionID, in: ctx) != nil
             }
             if !exists {
@@ -3757,9 +3857,9 @@ public class Preferabli {
             .get(APIEndpoints.jumpstartCollection)
         
         // 2) Upsert into SwiftData and grab the id
-        collectionID = try Storage.withContext { ctx in
+        collectionID = try Storage.withContext { ctx, save in
             let collection = try Storage.upsertCollection(from: dto, in: ctx)
-            try ctx.save()
+            try save()
             return collection.id
         }
         
@@ -3835,7 +3935,6 @@ extension Preferabli {
     /// Assumes caller has already entered the logout gate.
     private func performLogoutCleanupLocked() async {
         await Storage.beginLogoutCancellation()
-        defer { Task { await Storage.endLogoutCancellation() } }
 
         await PreferabliTools.cancelAllInflight()
 
@@ -3846,6 +3945,7 @@ extension Preferabli {
         }
 
         await sessionBootstrapper.reset(preferabli: self)
+        await Storage.endLogoutCancellation()
     }
 }
 
@@ -4311,7 +4411,7 @@ extension Preferabli {
     }
 
     private func fetchRepresentativeGenAIHistoryMessage(sessionId: String) throws -> GenAIMessage? {
-        try Storage.withContext { ctx in
+        try Storage.withContext { ctx, save in
             var descriptor = FetchDescriptor<GenAIMessage>(
                 predicate: #Predicate { message in
                     message.sessionId == sessionId && message.isTombstoned == false
@@ -4331,21 +4431,21 @@ extension Preferabli {
         fallbackSessionId: String? = nil,
         fallbackTurn: Int? = nil
     ) async throws -> GenAIMessage {
-        let messageId = try Storage.withContext { ctx in
+        let messageId = try Storage.withContext { ctx, save in
             let message = try Storage.upsertGenAIMessage(
                 from: dto,
                 fallbackSessionId: fallbackSessionId,
                 fallbackTurn: fallbackTurn,
                 in: ctx
             )
-            try ctx.save()
+            try save()
             return message.id
         }
 
         try await hydrateGenAIProducts(for: dto, messageId: messageId)
         try await hydrateGenAIFoodsIfNeeded(foodIds: dto.foodIds)
 
-        return try Storage.withContext { ctx in
+        return try Storage.withContext { ctx, save in
             guard let message = try Storage.fetchGenAIMessage(id: messageId, in: ctx) else {
                 throw PreferabliException(type: .DatabaseError)
             }
@@ -4390,7 +4490,7 @@ extension Preferabli {
 
         productIdsForMessage = productIdsForMessage.uniqued()
 
-        try Storage.withContext { ctx in
+        try Storage.withContext { ctx, save in
             for productDTO in productDTOs {
                 _ = try Storage.upsertProduct(from: productDTO, in: ctx)
             }
@@ -4399,7 +4499,7 @@ extension Preferabli {
                 productIds: productIdsForMessage,
                 in: ctx
             )
-            try ctx.save()
+            try save()
         }
     }
 
@@ -4407,7 +4507,7 @@ extension Preferabli {
         let foodIds = foodIds.uniqued()
         guard !foodIds.isEmpty else { return }
 
-        let missingFoodIds: [Int] = try Storage.withContext { ctx in
+        let missingFoodIds: [Int] = try Storage.withContext { ctx, save in
             var missing: [Int] = []
             for foodId in foodIds {
                 if try Storage.fetchById(Food.self, id: foodId, in: ctx) == nil {
@@ -4423,11 +4523,11 @@ extension Preferabli {
             .getAlamo()
             .get(APIEndpoints.foods)
 
-        try Storage.withContext { ctx in
+        try Storage.withContext { ctx, save in
             for foodDTO in foodDTOs {
                 _ = try Storage.upsertFood(from: foodDTO, in: ctx)
             }
-            try ctx.save()
+            try save()
         }
     }
     
@@ -4509,7 +4609,7 @@ extension Preferabli {
             var needsRefresh = true
 
             if !force_refresh {
-                try Storage.withContext { ctx in
+                try Storage.withContext { ctx, save in
                     if try Storage.fetchById(ContentItem.self, id: content_id, in: ctx) != nil {
                         needsRefresh = PreferabliTools.hasMinutesPassed(
                             minutes: 60,
@@ -4522,9 +4622,9 @@ extension Preferabli {
             if needsRefresh {
                 let body: ContentDTO = try await api.getAlamo().get(APIEndpoints.content(id: content_id))
 
-                try await Storage.withBackgroundContext { ctx in
+                try await Storage.withBackgroundContext { ctx, save in
                     _ = try Storage.upsertContent(from: body, in: ctx)
-                    try ctx.save()
+                    try save()
 
                     Storage.getKeyStore().set(Date(), forKey: "lastCalledContent\(content_id)")
                 }
@@ -4570,14 +4670,14 @@ extension Preferabli {
                 .getAlamo()
                 .get(APIEndpoints.contentChildren(id: content_id), sparams: params)
 
-            try await Storage.withBackgroundContext { ctx in
+            try await Storage.withBackgroundContext { ctx, save in
                 _ = try Storage.upsertContentChildren(
                     parentID: content_id,
                     from: body,
                     replaceExisting: offset == 0 || force_refresh,
                     in: ctx
                 )
-                try ctx.save()
+                try save()
             }
 
             return body.map(\.id)
@@ -4598,7 +4698,7 @@ extension Preferabli {
             var needsRefresh = true
 
             if !force_refresh {
-                try Storage.withContext { ctx in
+                try Storage.withContext { ctx, save in
                     if try Storage.fetchById(Personality.self, id: personality_id, in: ctx) != nil {
                         needsRefresh = PreferabliTools.hasMinutesPassed(
                             minutes: 60,
@@ -4611,9 +4711,9 @@ extension Preferabli {
             if needsRefresh {
                 let body: PersonalityDTO = try await api.getAlamo().get(APIEndpoints.personality(id: personality_id))
 
-                try await Storage.withBackgroundContext { ctx in
+                try await Storage.withBackgroundContext { ctx, save in
                     _ = try Storage.upsertPersonality(from: body, in: ctx)
-                    try ctx.save()
+                    try save()
 
                     Storage.getKeyStore().set(Date(), forKey: "lastCalledPersonality\(personality_id)")
                 }
@@ -4660,14 +4760,14 @@ extension Preferabli {
                 .getAlamo()
                 .get(APIEndpoints.personalityContentAssociations(id: personality_id), sparams: params)
 
-            try await Storage.withBackgroundContext { ctx in
+            try await Storage.withBackgroundContext { ctx, save in
                 _ = try Storage.upsertPersonalityContentAssociations(
                     personalityID: personality_id,
                     from: body,
                     replaceExisting: offset == 0 || force_refresh,
                     in: ctx
                 )
-                try ctx.save()
+                try save()
             }
 
             return body.map(\.id)

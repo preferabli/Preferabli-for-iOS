@@ -29,13 +29,20 @@ public struct CTABucketAssociationDTO: Decodable, Sendable {
 public struct CTABucketDTO: Decodable, Sendable {
     let id: Int
     let name: String?
-    let order: Int?
     let item_width: Int?
     let item_height: Int?
     let item_corner_radius: Int?
     let type: String?
     let deeplink_url: String?
-    let items: [CTABucketItemDTO]?
+    let bucket_item_associations: [CTABucketItemAssociationDTO]?
+    let created_at: Date?
+    let updated_at: Date?
+}
+
+public struct CTABucketItemAssociationDTO: Decodable, Sendable {
+    let id: Int
+    let order: Int?
+    let item: CTABucketItemDTO
     let created_at: Date?
     let updated_at: Date?
 }
@@ -45,6 +52,7 @@ public struct CTABucketItemDTO: Decodable, Sendable {
     public let badge_icon: String?
     public let badge_color_hex_primary: String?
     public let badge_color_hex_secondary: String?
+    public let text_color_hex: String?
     public let order: Int?
     public let color_hex_secondary: String?
     public let color_hex_primary: String?

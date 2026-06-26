@@ -8,54 +8,179 @@
 import SwiftData
 import Foundation
 
+private final class StorageLockedBool: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Bool = false
+
+    func set(_ newValue: Bool) {
+        lock.lock()
+        value = newValue
+        lock.unlock()
+    }
+
+    func get() -> Bool {
+        lock.lock()
+        let result = value
+        lock.unlock()
+        return result
+    }
+}
+
+private let storageLogoutSyncFlag = StorageLockedBool()
+
 /// Internal class used for interacting with our SwiftData storage.
 @MainActor
 public enum Storage {
     // MARK: - Cancellation + Logout Epoch
 
     private actor _LogoutRegistry {
+        private struct Operation {
+            let epoch: UInt64
+            var cancel: (@Sendable () -> Void)?
+        }
+
         private var epoch: UInt64 = 0
-        private var cancellers: [UUID: @Sendable () -> Void] = [:]
+        private var operations: [UUID: Operation] = [:]
+        private var waiters: [CheckedContinuation<Void, Never>] = []
 
-        func currentEpoch() -> UInt64 { epoch }
+        func currentEpoch() -> UInt64 {
+            epoch
+        }
 
-        func registerCanceller(_ cancel: @escaping @Sendable () -> Void) -> UUID {
+        func registerOperation() -> (id: UUID, epoch: UInt64) {
             let id = UUID()
-            cancellers[id] = cancel
-            return id
+            operations[id] = Operation(epoch: epoch, cancel: nil)
+            return (id, epoch)
         }
 
-        func unregister(_ id: UUID) {
-            cancellers[id] = nil
+        func setCanceller(_ cancel: @escaping @Sendable () -> Void, for id: UUID) {
+            guard var operation = operations[id] else {
+                cancel()
+                return
+            }
+
+            operation.cancel = cancel
+            operations[id] = operation
+
+            if operation.epoch != epoch {
+                cancel()
+            }
         }
 
-        func beginLogout() {
+        func finishOperation(_ id: UUID) {
+            operations[id] = nil
+
+            if operations.isEmpty {
+                let continuations = waiters
+                waiters.removeAll()
+                for continuation in continuations {
+                    continuation.resume()
+                }
+            }
+        }
+
+        func beginLogoutAndWaitForOperationsToDrain() async {
             epoch &+= 1
-            let all = cancellers.values
-            cancellers.removeAll(keepingCapacity: true)
-            for c in all { c() }
+
+            let cancels = operations.values.compactMap(\.cancel)
+            for cancel in cancels {
+                cancel()
+            }
+
+            guard !operations.isEmpty else { return }
+
+            await withCheckedContinuation { continuation in
+                waiters.append(continuation)
+            }
         }
     }
 
     private static let _logoutRegistry = _LogoutRegistry()
 
-    /// Call this right before you start wiping/resetting.
-    /// Cancels Storage-launched detached work and bumps the epoch.
     public static func beginLogoutCancellation() async {
-        await _logoutRegistry.beginLogout()
-        // mirror the flag for sync gates (withContext)
-        await MainActor.run { PreferabliTools._setLoggingOutFlag(true) }
+        storageLogoutSyncFlag.set(true)
+
+        await MainActor.run {
+            PreferabliTools._setLoggingOutFlag(true)
+        }
+
+        await _logoutRegistry.beginLogoutAndWaitForOperationsToDrain()
     }
 
-    /// Call this when logout is fully finished.
     public static func endLogoutCancellation() async {
-        await MainActor.run { PreferabliTools._setLoggingOutFlag(false) }
+        storageLogoutSyncFlag.set(false)
+
+        await MainActor.run {
+            PreferabliTools._setLoggingOutFlag(false)
+        }
     }
 
-    public static let storeURL: URL = {
-        let dir = try! FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        return dir.appendingPathComponent("PreferabliSDK.sqlite")
+    nonisolated
+    private static func isLogoutSyncFlagSet() -> Bool {
+        storageLogoutSyncFlag.get()
+    }
+
+    private static let activeStoreFilenameKey = "PreferabliSDK.activeStoreFilename"
+    private static let defaultStoreFilename = "PreferabliSDK.sqlite"
+
+    @MainActor
+    private static var activeStoreFilename: String = {
+        Storage.getKeyStore().string(forKey: activeStoreFilenameKey) ?? defaultStoreFilename
     }()
+
+    @MainActor
+    public static var storeURL: URL {
+        applicationSupportDirectory()
+            .appendingPathComponent(activeStoreFilename)
+    }
+
+    private static func applicationSupportDirectory() -> URL {
+        let dir = try! FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+
+        try? FileManager.default.createDirectory(
+            at: dir,
+            withIntermediateDirectories: true
+        )
+
+        return dir
+    }
+
+    @MainActor
+    private static func setActiveStoreFilename(_ filename: String) {
+        activeStoreFilename = filename
+        Storage.getKeyStore().set(filename, forKey: activeStoreFilenameKey)
+    }
+
+    private static func freshStoreFilename() -> String {
+        "PreferabliSDK-\(UUID().uuidString).sqlite"
+    }
+
+    private static func defaultStoreURL() -> URL {
+        let dir = try! FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+
+        return dir.appendingPathComponent("PreferabliSDK.sqlite")
+    }
+
+    private static func freshStoreURL() -> URL {
+        let dir = try! FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+
+        return dir.appendingPathComponent("PreferabliSDK-\(UUID().uuidString).sqlite")
+    }
     
     public nonisolated static func makeSchema() -> Schema {
         Schema(ModelRegistry.types)
@@ -93,8 +218,7 @@ public enum Storage {
     @MainActor
     private static func makeContainer() -> ModelContainer {
         let schema = makeSchema()
-
-        let url = Storage.storeURL                 // ✅ IMPORTANT
+        let url = Storage.storeURL
         let config = ModelConfiguration(schema: schema, url: url)
 
         do {
@@ -104,9 +228,10 @@ public enum Storage {
                 configurations: [config]
             )
         } catch {
-            NSLog("[PreferabliDataSDK] Failed to create ModelContainer. Will nuke store and retry. Error: \(error)")
+            NSLog("[PreferabliDataSDK] Failed to create ModelContainer at \(url). Error: \(error)")
+
             do {
-                try nukePersistentStoreFiles(at: url)   // ✅ use the same url
+                try nukePersistentStoreFiles(at: url)
                 resetDatabaseKeystore()
 
                 return try ModelContainer(
@@ -115,7 +240,34 @@ public enum Storage {
                     configurations: [config]
                 )
             } catch {
-                fatalError("[PreferabliDataSDK] Unable to create ModelContainer even after nuking the store: \(error)")
+                NSLog("[PreferabliDataSDK] Retry failed. Falling back to fresh store. Error: \(error)")
+
+                setActiveStoreFilename(freshStoreFilename())
+
+                let fallbackURL = Storage.storeURL
+                let fallbackConfig = ModelConfiguration(schema: schema, url: fallbackURL)
+
+                do {
+                    return try ModelContainer(
+                        for: schema,
+                        migrationPlan: nil,
+                        configurations: [fallbackConfig]
+                    )
+                } catch {
+                    NSLog("[PreferabliDataSDK] Disk store fallback failed. Using in-memory store. Error: \(error)")
+
+                    let memoryConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+
+                    do {
+                        return try ModelContainer(
+                            for: schema,
+                            migrationPlan: nil,
+                            configurations: [memoryConfig]
+                        )
+                    } catch {
+                        fatalError("[PreferabliDataSDK] Unable to create any ModelContainer: \(error)")
+                    }
+                }
             }
         }
     }
@@ -149,27 +301,39 @@ public enum Storage {
 
     @inline(__always)
     public static func withContext<T>(
-      _ body: @MainActor (ModelContext) throws -> T
+        _ body: @MainActor (
+            ModelContext,
+            () throws -> Void
+        ) throws -> T
     ) throws -> T {
-      if PreferabliTools.isLoggingOutSync() {
-        throw CancellationError()
-      }
 
-      let ctx = container.mainContext
-      let old = ctx.autosaveEnabled
-      ctx.autosaveEnabled = false
-      defer { ctx.autosaveEnabled = old }
+        if PreferabliTools.isLoggingOutSync() {
+            throw CancellationError()
+        }
 
-      return try body(ctx)
+        let ctx = container.mainContext
+        let old = ctx.autosaveEnabled
+        ctx.autosaveEnabled = false
+        defer { ctx.autosaveEnabled = old }
+
+        let save = {
+            if PreferabliTools.isLoggingOutSync() {
+                throw CancellationError()
+            }
+
+            try ctx.save()
+        }
+
+        return try body(ctx, save)
     }
     
     // still updates UI since it is from the same container
     nonisolated
     public static func withBackgroundContext<T: Sendable>(
-      priority: TaskPriority = .userInitiated,
-      _ body: @escaping @Sendable (ModelContext) throws -> T
+        priority: TaskPriority = .userInitiated,
+        _ body: @escaping @Sendable (ModelContext) throws -> T
     ) async throws -> T {
-      try await withBackgroundContext(priority: priority, allowDuringLogout: false, body)
+        try await withBackgroundContext(priority: priority, allowDuringLogout: false, body)
     }
 
     nonisolated
@@ -178,33 +342,81 @@ public enum Storage {
         allowDuringLogout: Bool = false,
         _ body: @escaping @Sendable (ModelContext) throws -> T
     ) async throws -> T {
+        try await withBackgroundContext(priority: priority, allowDuringLogout: allowDuringLogout) { ctx, _ in
+            try body(ctx)
+        }
+    }
 
-        if !allowDuringLogout, await PreferabliTools.isLoggingOut() {
+    nonisolated
+    public static func withBackgroundContext<T: Sendable>(
+        priority: TaskPriority = .userInitiated,
+        allowDuringLogout: Bool = false,
+        _ body: @escaping @Sendable (
+            ModelContext,
+            @escaping () throws -> Void
+        ) throws -> T
+    ) async throws -> T {
+        if !allowDuringLogout, Storage.isLogoutSyncFlagSet() {
             throw CancellationError()
         }
 
-        let startingEpoch = await _logoutRegistry.currentEpoch()
+        let registration = await _logoutRegistry.registerOperation()
+        let startingEpoch = registration.epoch
         let container = await MainActor.run { Storage.container }
 
         let task = Task.detached(priority: priority) { () throws -> T in
             try Task.checkCancellation()
 
-            if !allowDuringLogout, await PreferabliTools.isLoggingOut() {
+            if !allowDuringLogout, Storage.isLogoutSyncFlagSet() {
                 throw CancellationError()
             }
 
             let nowEpoch = await _logoutRegistry.currentEpoch()
-            if nowEpoch != startingEpoch { throw CancellationError() }
+            if nowEpoch != startingEpoch {
+                throw CancellationError()
+            }
 
             let ctx = ModelContext(container)
             ctx.autosaveEnabled = false
-            return try body(ctx)
+
+            let save: () throws -> Void = {
+                try Task.checkCancellation()
+
+                if !allowDuringLogout, Storage.isLogoutSyncFlagSet() {
+                    throw CancellationError()
+                }
+
+                try ctx.save()
+
+                try Task.checkCancellation()
+            }
+
+            let result = try body(ctx, save)
+
+            try Task.checkCancellation()
+
+            if !allowDuringLogout, Storage.isLogoutSyncFlagSet() {
+                throw CancellationError()
+            }
+
+            let endEpoch = await _logoutRegistry.currentEpoch()
+            if endEpoch != startingEpoch {
+                throw CancellationError()
+            }
+
+            return result
         }
 
-        let token = await _logoutRegistry.registerCanceller { task.cancel() }
-        defer { Task { await _logoutRegistry.unregister(token) } }
+        await _logoutRegistry.setCanceller({ task.cancel() }, for: registration.id)
 
-        return try await task.value
+        do {
+            let value = try await task.value
+            await _logoutRegistry.finishOperation(registration.id)
+            return value
+        } catch {
+            await _logoutRegistry.finishOperation(registration.id)
+            throw error
+        }
     }
 
     nonisolated
@@ -213,12 +425,12 @@ public enum Storage {
         allowDuringLogout: Bool = false,
         _ body: @escaping @Sendable (ModelContext) async throws -> T
     ) async throws -> T {
-
         if !allowDuringLogout, await PreferabliTools.isLoggingOut() {
             throw CancellationError()
         }
 
-        let startingEpoch = await _logoutRegistry.currentEpoch()
+        let registration = await _logoutRegistry.registerOperation()
+        let startingEpoch = registration.epoch
         let container = await MainActor.run { Storage.container }
 
         let task = Task.detached(priority: priority) { () async throws -> T in
@@ -229,7 +441,9 @@ public enum Storage {
             }
 
             let nowEpoch = await _logoutRegistry.currentEpoch()
-            if nowEpoch != startingEpoch { throw CancellationError() }
+            if nowEpoch != startingEpoch {
+                throw CancellationError()
+            }
 
             let ctx = ModelContext(container)
             ctx.autosaveEnabled = false
@@ -237,16 +451,25 @@ public enum Storage {
             let result = try await body(ctx)
 
             try Task.checkCancellation()
+
             let endEpoch = await _logoutRegistry.currentEpoch()
-            if endEpoch != startingEpoch { throw CancellationError() }
+            if endEpoch != startingEpoch {
+                throw CancellationError()
+            }
 
             return result
         }
 
-        let token = await _logoutRegistry.registerCanceller { task.cancel() }
-        defer { Task { await _logoutRegistry.unregister(token) } }
+        await _logoutRegistry.setCanceller({ task.cancel() }, for: registration.id)
 
-        return try await task.value
+        do {
+            let value = try await task.value
+            await _logoutRegistry.finishOperation(registration.id)
+            return value
+        } catch {
+            await _logoutRegistry.finishOperation(registration.id)
+            throw error
+        }
     }
 
     internal static func reset() async throws {
@@ -262,15 +485,89 @@ public enum Storage {
     }
 
     internal static func databaseUpgraded() async throws {
-        try nukePersistentStoreFiles(at: Storage.storeURL)
+        let oldURL = Storage.storeURL
+
+        Storage.container = makeEphemeralContainer()
+
+        setActiveStoreFilename(freshStoreFilename())
         resetDatabaseKeystore()
         Storage.rebuildSharedContainer()
+
+        scheduleDeferredStoreCleanup(oldURL)
+    }
+    
+    private static let pendingStoreCleanupURLsKey = "PreferabliSDK.pendingStoreCleanupURLs"
+
+    @MainActor
+    private static func scheduleDeferredStoreCleanup(_ url: URL) {
+        enqueueStoreCleanup(url)
+
+        Task.detached(priority: .background) {
+            try? await Task.sleep(for: .seconds(10))
+
+            await MainActor.run {
+                cleanupPendingStores()
+            }
+        }
+    }
+
+    @MainActor
+    private static func enqueueStoreCleanup(_ url: URL) {
+        var paths = Storage.getKeyStore().stringArray(forKey: pendingStoreCleanupURLsKey) ?? []
+        let path = url.path
+
+        if !paths.contains(path) {
+            paths.append(path)
+            Storage.getKeyStore().set(paths, forKey: pendingStoreCleanupURLsKey)
+        }
+    }
+
+    @MainActor
+    public static func cleanupPendingStores() {
+        let currentPath = Storage.storeURL.path
+
+        var paths = Storage.getKeyStore().stringArray(forKey: pendingStoreCleanupURLsKey) ?? []
+        paths.removeAll { path in
+            guard path != currentPath else { return false }
+
+            do {
+                try nukePersistentStoreFiles(at: URL(fileURLWithPath: path))
+                return true
+            } catch {
+                NSLog("[PreferabliDataSDK] Deferred store cleanup failed for \(path): \(error)")
+                return false
+            }
+        }
+
+        Storage.getKeyStore().set(paths, forKey: pendingStoreCleanupURLsKey)
     }
     
     public static func logoutReset() async throws {
-        try nukePersistentStoreFiles(at: Storage.storeURL)
+        let oldURL = Storage.storeURL
+
+        Storage.container = makeEphemeralContainer()
+
+        setActiveStoreFilename(freshStoreFilename())
         resetDatabaseKeystore()
         Storage.rebuildSharedContainer()
+
+        scheduleDeferredStoreCleanup(oldURL)
+    }
+    
+    @MainActor
+    private static func makeEphemeralContainer() -> ModelContainer {
+        let schema = makeSchema()
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+
+        do {
+            return try ModelContainer(
+                for: schema,
+                migrationPlan: nil,
+                configurations: [config]
+            )
+        } catch {
+            fatalError("[PreferabliDataSDK] Unable to create ephemeral ModelContainer: \(error)")
+        }
     }
     
     internal static func resetDatabaseKeystore() {
@@ -393,6 +690,7 @@ private enum ModelRegistry {
         add(Market.self)
         
         add(CTABucketItem.self)
+        add(CTABucketItemAssociation.self)
         add(CTABucket.self)
         add(CTABucketAssociation.self)
         add(CTAPage.self)

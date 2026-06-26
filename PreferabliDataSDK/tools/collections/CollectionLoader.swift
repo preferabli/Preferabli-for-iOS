@@ -75,6 +75,7 @@ public enum BuiltInCollection: CollectionSpec {
     case ratings
     case wishlist
     case jumpstart
+    case skips
     case custom(
         idKey: String,
         tagType: TagType? = nil,
@@ -89,6 +90,7 @@ public enum BuiltInCollection: CollectionSpec {
         case .ratings:   return "ratings_id"
         case .wishlist:  return "wishlist_id"
         case .jumpstart: return "jumpstart_id"
+        case .skips: return "skips_id"
         case .custom(let idKey, _, _, _, _, _): return idKey
         }
     }
@@ -107,6 +109,7 @@ public enum BuiltInCollection: CollectionSpec {
         case .ratings:   return .RATING
         case .wishlist:  return .WISHLIST
         case .jumpstart: return .COLLECTION   // not tag-filtered; we use CollectionOrder
+        case .skips: return .SKIPPED
         case .custom(_, let tt, _, _, _, _): return tt
         }
     }
@@ -127,7 +130,7 @@ public enum BuiltInCollection: CollectionSpec {
 
     public var loadMode: CollectionLoadMode {
         switch self {
-        case .ratings, .wishlist:
+        case .ratings, .wishlist, .skips:
             return .tags
         case .jumpstart:
             return .orderings

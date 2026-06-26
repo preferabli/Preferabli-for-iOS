@@ -18,7 +18,8 @@ public final class MarketTraitAssociation: HasIntID, HasTimestamps {
     public var updated_at: Date = Foundation.Date.now
 
     public var order: Int?
-    
+    public var is_filter_option: Bool?
+
     @Relationship public var market: Market
     @Relationship(deleteRule: .nullify, inverse: \MarketTrait.market_trait_associations) public var market_trait: MarketTrait
 
