@@ -218,6 +218,7 @@ public class Preferabli {
         let versionCode = keyStore.integer(forKey: "versionCode")
         let lastDatabaseBuildNumber = keyStore.integer(forKey: "lastDatabaseBuildNumber")
         let pendingStoreCleanupURLs = keyStore.stringArray(forKey: "PreferabliSDK.pendingStoreCleanupURLs")
+        let activeStoreFilename = keyStore.string(forKey: "PreferabliSDK.activeStoreFilename")
 
         keyStore.removePersistentDomain(forName: "Preferabli")
 
@@ -229,6 +230,9 @@ public class Preferabli {
         keyStore.set(lastDatabaseBuildNumber, forKey: "lastDatabaseBuildNumber")
         if let pendingStoreCleanupURLs {
             keyStore.set(pendingStoreCleanupURLs, forKey: "PreferabliSDK.pendingStoreCleanupURLs")
+        }
+        if let activeStoreFilename {
+            keyStore.set(activeStoreFilename, forKey: "PreferabliSDK.activeStoreFilename")
         }
 
         try await Storage.logoutReset()
@@ -469,6 +473,20 @@ public class Preferabli {
                 loadUserData()
             }
             
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    public func deletePreferabliUser() async throws {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            
+            Analytics.track( ["event" : "delete_user"])
+
+            try await api.getAlamo().delete(APIEndpoints.user(id: Preferabli.USER_ID))
+                                            
         } catch {
             handleError(error: error)
             throw error
@@ -1207,23 +1225,23 @@ public class Preferabli {
             
             let needsVenues = try await Storage.withBackgroundContext { ctx, save in
                 var needsVenues = [Int]()
-                
+
                 for expDTO in searchResponse {
                     if let venueId = expDTO.preferabli_venue_id {
                         guard let venue = try Storage.fetchById(Venue.self, id: venueId, in: ctx) else {
                             needsVenues.append(venueId)
                             continue
                         }
-                    } else {
-                        continue
                     }
                 }
-                
+
                 return needsVenues
             }
-            
+
+            let uniqueVenueIDs = Array(Set(needsVenues))
+
             var venueResponses = [VenueDTO]()
-            for venueId in needsVenues {
+            for venueId in uniqueVenueIDs {
                 let body: VenueDTO = try await api.getAlamo().get(APIEndpoints.venue(id: venueId))
                 venueResponses.append(body)
             }
@@ -1234,24 +1252,23 @@ public class Preferabli {
 
                 for venueResponse in venueResponsesFinal {
                     try Storage.upsertVenue(from: venueResponse, in: ctx)
-
                 }
+
                 try save()
 
                 for expDTO in searchResponse {
-                    if let venueId = expDTO.preferabli_venue_id {
-                        guard let venue = try Storage.fetchById(Venue.self, id: venueId, in: ctx) else {
-                            continue
-                        }
-                        
-                        let experience = try Storage.upsertExperience(from: expDTO, venue: venue, in: ctx)
-                        experienceIds.append(experience.id)
-
-                    } else {
+                    guard let venueId = expDTO.preferabli_venue_id,
+                          let venue = try Storage.fetchById(Venue.self, id: venueId, in: ctx)
+                    else {
                         continue
                     }
+
+                    let experience = try Storage.upsertExperience(from: expDTO, venue: venue, in: ctx)
+                    experienceIds.append(experience.id)
                 }
-                
+
+                try save()
+
                 return experienceIds
             }
             
@@ -1891,41 +1908,68 @@ public class Preferabli {
         }
     }
     
-    public func productsForFood(recipeId : Int) async throws -> [Int]
-    {
+    public func productsForFood(
+        recipeId: Int,
+        product_categories: [ProductCategory]? = nil,
+        product_subcategories: [ProductSubcategory]? = nil,
+        product_types: [ProductType]? = nil
+    ) async throws -> [Int] {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
-            
+
             Analytics.track(["event": "flttt"])
-            
+
             var params: SParams = [
                 "recipe_id": recipeId,
                 "collection_id": Preferabli.PRIMARY_INVENTORY_ID
             ]
-            
+
+            if let product_categories {
+                let categories = product_categories.map { $0.getCategoryName() }
+                if !categories.isEmpty {
+                    params["product_categories"] = categories
+                }
+            }
+
+            if let product_subcategories {
+                let subcategories = product_subcategories.map { $0.getSubcategoryName() }
+                if !subcategories.isEmpty {
+                    params["product_subcategories"] = subcategories
+                }
+            }
+
+            if let product_types {
+                let types = product_types.map { $0.getTypeName() }
+                if !types.isEmpty {
+                    params["types"] = types
+                }
+            }
+
             if Preferabli.isPreferabliUserLoggedIn() {
                 params["user_id"] = PreferabliTools.getPreferabliUserId()
             } else if Preferabli.isCustomerLoggedIn() {
                 params["channel_customer_id"] = PreferabliTools.getCustomerId()
             }
-            
-            let body: FLTTTResponseDTO = try await api.getAlamo().get(APIEndpoints.flttt, sparams: params)
-            
+
+            let body: FLTTTResponseDTO = try await api.getAlamo().get(
+                APIEndpoints.flttt,
+                sparams: params
+            )
+
             let productIDs = try Storage.withContext { ctx, save in
                 var productIDs = [Int]()
-                
+
                 for item in body.products {
                     let product = try Storage.upsertProduct(from: item, in: ctx)
                     productIDs.append(product.id)
                 }
-                
+
                 try save()
-                
                 return productIDs
             }
-            
+
             return productIDs
-            
+
         } catch {
             handleError(error: error)
             throw error
@@ -2138,6 +2182,32 @@ public class Preferabli {
             handleError(error: error)
             throw error
         }
+    }
+    
+    public func favoriteExperienceOnServerOnly(experienceId: Int) async throws {
+        try await canWeContinue(needsToBeLoggedIn: true)
+
+        Analytics.track(["event": "favorite_experience"])
+
+        _ = try await api.getAlamo().postNoBody(
+            APIEndpoints.favoriteExperience(
+                id: PreferabliTools.getPreferabliUserId(),
+                experienceId: experienceId
+            )
+        )
+    }
+
+    public func unfavoriteExperienceOnServerOnly(experienceId: Int) async throws {
+        try await canWeContinue(needsToBeLoggedIn: true)
+
+        Analytics.track(["event": "unfavorite_experience"])
+
+        _ = try await api.getAlamo().delete(
+            APIEndpoints.favoriteExperience(
+                id: PreferabliTools.getPreferabliUserId(),
+                experienceId: experienceId
+            )
+        )
     }
     
     public func unfavoriteVenue(venueId : Int) async throws

@@ -484,14 +484,15 @@ public enum Storage {
         }
     }
 
+    @MainActor
     internal static func databaseUpgraded() async throws {
         let oldURL = Storage.storeURL
 
-        Storage.container = makeEphemeralContainer()
-
         setActiveStoreFilename(freshStoreFilename())
         resetDatabaseKeystore()
-        Storage.rebuildSharedContainer()
+
+        let newContainer = makeContainer()
+        Storage.container = newContainer
 
         scheduleDeferredStoreCleanup(oldURL)
     }
@@ -542,14 +543,15 @@ public enum Storage {
         Storage.getKeyStore().set(paths, forKey: pendingStoreCleanupURLsKey)
     }
     
+    @MainActor
     public static func logoutReset() async throws {
         let oldURL = Storage.storeURL
 
-        Storage.container = makeEphemeralContainer()
-
         setActiveStoreFilename(freshStoreFilename())
         resetDatabaseKeystore()
-        Storage.rebuildSharedContainer()
+
+        let newContainer = makeContainer()
+        Storage.container = newContainer
 
         scheduleDeferredStoreCleanup(oldURL)
     }
