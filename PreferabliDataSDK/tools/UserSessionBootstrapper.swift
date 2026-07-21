@@ -72,18 +72,28 @@ final class UserSessionBootstrapper {
             }
 
             // Heavy work off-main
+            
+            // Affiliate state controls Explore routing, so sync it independently
+            // from profile and collection bootstrap.
+            let affiliateTask = Task { @MainActor [weak self, weak preferabli] in
+                guard let self, let preferabli else { return }
+                await self.refreshAffiliatesIfNeeded(preferabli: preferabli, force: false)
+            }
+
             do {
-                await CollectionLoader.shared.ensureWarm(BuiltInCollection.wishlist)
-                await CollectionLoader.shared.ensureLoaded(BuiltInCollection.ratings, timeout: 10)
-                
-                await preferabli.profileHelper.recomputeHasTasteProfileGateIfPossible()
+                await CollectionLoader.shared.ensureWarm(
+                    BuiltInCollection.wishlist
+                )
+
+                await CollectionLoader.shared.ensureLoaded(
+                    BuiltInCollection.ratings,
+                    timeout: 10
+                )
+
+                await preferabli.profileHelper
+                    .recomputeHasTasteProfileGateIfPossible()
 
                 _ = try await preferabli.getProfile()
-                
-                await refreshAffiliatesIfNeeded(
-                    preferabli: preferabli,
-                    force: force
-                )
 
                 await preferabli.profileStatsCoordinator.ensureStatsReady(
                     forceRefreshProfile: false,
@@ -91,18 +101,22 @@ final class UserSessionBootstrapper {
                     timeout: 10
                 )
 
-                // Kick cellar warmup concurrently (NOT detached; just a child task)
                 Task(priority: .background) { [weak preferabli] in
                     guard let preferabli else { return }
-                    await CellarWarmup.warmCellars(preferabli: preferabli)
+
+                    await CellarWarmup.warmCellars(
+                        preferabli: preferabli
+                    )
                 }
 
-                self.sessionBootstrappedOnce = true
-                PostLoginWarmupGate.markComplete()
-
             } catch {
-                // Silent by design
+                // Silent by design.
             }
+
+            await affiliateTask.value
+
+            self.sessionBootstrappedOnce = true
+            PostLoginWarmupGate.markComplete()
         }
 
         self.sessionBootstrapTask = t
@@ -117,10 +131,16 @@ final class UserSessionBootstrapper {
         guard AffiliateRefreshGate.shouldRefresh(force: force) else { return }
 
         do {
-            _ = try await preferabli.getAffiliates()
+            let affiliateCodes = try await preferabli.getAffiliates()
+
+            Storage.getKeyStore().set(
+                affiliateCodes,
+                forKey: "affiliateCodes"
+            )
+
             AffiliateRefreshGate.markRefreshed()
         } catch {
-            // Silent by design — do NOT block bootstrap or show errors
+            // Silent by design — affiliate loading should not block bootstrap.
         }
     }
 

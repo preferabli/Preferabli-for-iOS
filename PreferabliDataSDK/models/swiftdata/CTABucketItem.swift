@@ -9,6 +9,7 @@ public final class CTABucketItem: Identifiable, HasIntID, HasImage {
     public var created_at: Date = Foundation.Date.now
     public var updated_at: Date = Foundation.Date.now
 
+    public var is_centered: Bool?
     public var badge_icon: String?
     public var badge_color_hex_primary: String?
     public var badge_color_hex_secondary: String?
@@ -17,10 +18,12 @@ public final class CTABucketItem: Identifiable, HasIntID, HasImage {
     public var text_color_hex: String?
     public var gradient_css: String?
     public var badge_gradient_css: String?
+    public var badge_text_color_hex: String?
     public var deeplink_url: String?
     public var badge_title: String?
     public var title: String?
     public var desc: String?
+    public var half_gradient: Bool?
     
     @Relationship(deleteRule: .nullify) public var primary_image: Media?
     @Relationship(deleteRule: .nullify) public var sub_image_1: Media?

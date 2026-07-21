@@ -631,6 +631,13 @@ private enum ModelRegistry {
         }
         
         // try to order these children -> parents
+
+        // Itinerary associations/children must be wiped before their parent records,
+        // and before the Venue, Experience, MarketTrait, Market, and Media targets.
+        add(ItineraryItemAssociation.self)
+        add(ItineraryMarketTrait.self)
+        add(ItineraryItem.self)
+        add(Itinerary.self)
         
         add(ExperienceType.self)
         add(ExperiencePrice.self)
@@ -657,6 +664,7 @@ private enum ModelRegistry {
         add(Profile.self)
         
         add(Search.self)
+        add(Occasion.self)
         add(PushNotificationReceipt.self)
         
         add(VenueHour.self)
@@ -736,6 +744,12 @@ public struct StorageFacade {
         public func experiences(withIDs ids: [Int]) -> Predicate<Experience> { ids.isEmpty ? #Predicate { _ in false } : #Predicate { p in ids.contains(p.id) } }
         
         public func venues(withIDs ids: [Int]) -> Predicate<Venue> { ids.isEmpty ? #Predicate { _ in false } : #Predicate { p in ids.contains(p.id) } }
+
+        public func itineraries(forMarketID marketID: Int) -> Predicate<Itinerary> {
+            #Predicate<Itinerary> { itinerary in
+                itinerary.market_id == marketID
+            }
+        }
         
         public func tags(for spec: CollectionSpec) -> (predicate: Predicate<Tag>, sort: [SortDescriptor<Tag>]) {
             let cid = Storage.getKeyStore().integer(forKey: spec.idKey)
@@ -839,7 +853,7 @@ extension Storage {
         key: String,
         in ctx: ModelContext
     ) throws -> T? where T: AnyObject {
-        // This is intentionally specialized below for VenueMarketTrait.
+        // Key-backed SwiftData models use the specialized overloads below.
         fatalError("Use specialized fetchByKey implementations.")
     }
 
@@ -849,6 +863,18 @@ extension Storage {
         in ctx: ModelContext
     ) throws -> VenueMarketTrait? {
         var fd = FetchDescriptor<VenueMarketTrait>(predicate: VenueMarketTrait.predicate(forKey: key))
+        fd.fetchLimit = 1
+        return try ctx.fetch(fd).first
+    }
+
+    nonisolated static func fetchByKey(
+        _ type: ItineraryMarketTrait.Type,
+        key: String,
+        in ctx: ModelContext
+    ) throws -> ItineraryMarketTrait? {
+        var fd = FetchDescriptor<ItineraryMarketTrait>(
+            predicate: ItineraryMarketTrait.predicate(forKey: key)
+        )
         fd.fetchLimit = 1
         return try ctx.fetch(fd).first
     }

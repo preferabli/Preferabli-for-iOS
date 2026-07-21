@@ -25,6 +25,7 @@ public final class MarketTrait: HasIntID, HasTimestamps {
     
     @Relationship(deleteRule: .cascade) public var market_trait_associations: [MarketTraitAssociation]?
     @Relationship(deleteRule: .cascade) public var venue_market_traits: [VenueMarketTrait]?
+    @Relationship(deleteRule: .cascade) public var itinerary_market_traits: [ItineraryMarketTrait]?
 
     public init(id: Int) {
         self.id = id

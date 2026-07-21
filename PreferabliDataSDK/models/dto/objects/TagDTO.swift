@@ -22,6 +22,7 @@ public struct TagDTO: Decodable, Sendable {
     public let user_id: Int?
     public let value: String?
     public let bin: String?
+    public let occasion: String?
     public let variant_id: Int
     public let quantity: Int?
     public let format_ml: Int?

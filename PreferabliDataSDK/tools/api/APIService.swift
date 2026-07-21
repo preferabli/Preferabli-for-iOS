@@ -148,13 +148,37 @@ internal actor APIService {
     }
 
     /// Performs a single shared refresh no matter how many 401s arrive at once.
-    internal func refreshSessionIfNeeded() async throws {
+    ///
+    /// `failedAuthorizationHeader` is the Authorization header from the request
+    /// that received the 401. If the stored access token has already changed,
+    /// another request has refreshed the session and no new refresh is needed.
+    internal func refreshSessionIfNeeded(
+        failedAuthorizationHeader: String?
+    ) async throws {
+
+        // A refresh is currently running, so join it.
         if let refreshTask {
             return try await refreshTask.value
         }
 
+        let failedAccessToken = bearerToken(from: failedAuthorizationHeader)
+        let currentAccessToken = Storage.getKeyStore()
+            .string(forKey: "access_token")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // This 401 came from an older access token. A refresh completed between
+        // the original request being sent and this 401 being processed.
+        if let failedAccessToken,
+           let currentAccessToken,
+           !currentAccessToken.isEmpty,
+           failedAccessToken != currentAccessToken {
+            return
+        }
+
         let task = Task<Void, Error> {
-            let refreshToken = Storage.getKeyStore().string(forKey: "refresh_token") ?? ""
+            let refreshToken = Storage.getKeyStore()
+                .string(forKey: "refresh_token") ?? ""
+
             if refreshToken.isEmptyOrWhitespace() {
                 throw PreferabliException(
                     type: .InvalidAccessToken,
@@ -168,7 +192,10 @@ internal actor APIService {
             ]
 
             let session = try await self.getAlamo(requiresAccessToken: false)
-            let sessionResponse = try await session.post(APIEndpoints.sessions, json: params)
+            let sessionResponse = try await session.post(
+                APIEndpoints.sessions,
+                json: params
+            )
 
             if sessionResponse.error == nil,
                let http = sessionResponse.response,
@@ -176,6 +203,7 @@ internal actor APIService {
                let data = sessionResponse.data {
 
                 let obj = try APIService.continueOrThrowJSONException(data: data)
+
                 guard let dict = obj as? [String: Any] else {
                     throw PreferabliException(
                         type: .JSONError,
@@ -190,24 +218,32 @@ internal actor APIService {
             }
 
             let status = sessionResponse.response?.statusCode ?? 0
-            var msg = "[\(APIEndpoints.sessions)] Token refresh failed with status \(status)."
+            var message = "[\(APIEndpoints.sessions)] Token refresh failed with status \(status)."
+
             if let raw = sessionResponse.data, !raw.isEmpty {
                 let snippet = String(decoding: raw.prefix(1000), as: UTF8.self)
-                msg += "\n── Refresh Raw (first 1000 bytes) ──\n\(snippet)\n────────"
+                message += """
+                
+                ── Refresh Raw (first 1000 bytes) ──
+                \(snippet)
+                ────────
+                """
             }
 
-            throw PreferabliException(type: .InvalidAccessToken, message: msg, code: status)
+            throw PreferabliException(
+                type: .InvalidAccessToken,
+                message: message,
+                code: status
+            )
         }
 
         refreshTask = task
 
-        do {
-            try await task.value
+        defer {
             refreshTask = nil
-        } catch {
-            refreshTask = nil
-            throw error
         }
+
+        try await task.value
     }
 
     /// Ensures we only run the forced-logout cleanup once even if many requests fail together.
@@ -274,6 +310,20 @@ private final class LoggingAdapter: RequestAdapter {
 }
 
 extension APIService {
+    
+    private func bearerToken(from authorizationHeader: String?) -> String? {
+        guard let authorizationHeader else { return nil }
+
+        let prefix = "Bearer "
+        guard authorizationHeader.hasPrefix(prefix) else {
+            return nil
+        }
+
+        let token = String(authorizationHeader.dropFirst(prefix.count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return token.isEmpty ? nil : token
+    }
 
     private static func buildReplayRequest(from original: URLRequest) async -> URLRequest {
         var replay = original
@@ -374,7 +424,12 @@ extension APIService {
                 }
 
                 do {
-                    try await api.refreshSessionIfNeeded()
+                    let failedAuthorizationHeader =
+                        response.request?.value(forHTTPHeaderField: "Authorization")
+
+                    try await api.refreshSessionIfNeeded(
+                        failedAuthorizationHeader: failedAuthorizationHeader
+                    )
 
                     guard let originalRequest = response.request else {
                         throw makeErr(
@@ -411,22 +466,51 @@ extension APIService {
 
             do {
                 let obj = try continueOrThrowJSONException(data: data)
+
                 guard let dict = obj as? [String: Any] else {
-                    throw makeErr(.APIError, code: http.statusCode, message: "API error body was not a dictionary.")
+                    throw makeErr(
+                        .APIError,
+                        code: http.statusCode,
+                        message: "API error body was not a dictionary."
+                    )
                 }
 
                 let apiError = APIError(map: dict)
-                if apiError.message != nil {
-                    var msg = "[\(endpoint)] \(PreferabliException(error: apiError).getMessage())"
-                    let snippet = String(decoding: data.prefix(1000), as: UTF8.self)
-                    msg += "\n── Raw (first 1000 bytes) ──\n\(snippet)\n────────"
-                    throw PreferabliException(type: .APIError, message: msg, code: http.statusCode)
-                } else {
-                    throw makeErr(.APIError, code: http.statusCode, message: "HTTP \(http.statusCode) without API error message.")
+
+                if let message = apiError.message,
+                   !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+
+                    // Log all debugging context internally, but do not expose it to the UI.
+                    APILog.response.error(
+                        """
+                        API error \(http.statusCode) at \(endpoint)
+                        \(String(decoding: data.prefix(1000), as: UTF8.self))
+                        """
+                    )
+
+                    throw PreferabliException(
+                        type: .APIError,
+                        message: message,
+                        code: apiError.code ?? http.statusCode
+                    )
                 }
-            } catch let e as PreferabliException {
-                let msg = "[\(endpoint)] \(e.getMessage())"
-                throw PreferabliException(type: e.type, message: msg, code: http.statusCode)
+
+                throw makeErr(
+                    .APIError,
+                    code: http.statusCode,
+                    message: "HTTP \(http.statusCode) without API error message."
+                )
+
+            } catch let error as PreferabliException {
+                // Preserve the original clean API message.
+                throw error
+
+            } catch {
+                throw makeErr(
+                    .JSONError,
+                    code: http.statusCode,
+                    message: "Unable to decode API error response."
+                )
             }
         }
 
@@ -485,7 +569,9 @@ extension APIService {
 // MARK: - API Endpoints
 
 internal struct APIEndpoints {
-    internal static let baseUrl = "https://api.preferabli.com/api/en/7.1/"
+    internal static let baseUrl = Bundle.main.object(
+        forInfoDictionaryKey: "baseURL"
+    ) as? String ?? "https://api.preferabli.com/api/en/7.1/"
 
     internal static let sessions = baseUrl + "sessions"
     internal static let getRec = baseUrl + "recs"
@@ -527,6 +613,8 @@ internal struct APIEndpoints {
     internal static let affiliateCodes = baseUrl + "tastefuli/affiliates-for-codes"
     internal static let contents = baseUrl + "content"
     internal static let personalities = baseUrl + "personalities"
+    internal static let itineraries = baseUrl + "itineraries"
+    internal static let predictOrder = baseUrl + "predictorder"
 
     internal static func content(id: Int) -> String {
         contents + "/\(id)"
@@ -540,8 +628,21 @@ internal struct APIEndpoints {
         personalities + "/\(id)"
     }
 
+    /// The API currently expects `market_id` with two k characters.
+    internal static func itinerariesForMarket(id: Int) -> String {
+        itineraries + "?market_id=\(id)"
+    }
+
+    internal static func itinerary(id: Int) -> String {
+        itineraries + "/\(id)"
+    }
+    
     internal static func personalityContentAssociations(id: Int) -> String {
         personalities + "/\(id)/content-associations"
+    }
+    
+    internal static func personalityItineraries(id: Int) -> String {
+        personalities + "/\(id)/itineraries"
     }
     
     internal static let genAISeedLambda = "law7au2zlfnm6i3tvmebboj6ry0yotlj"

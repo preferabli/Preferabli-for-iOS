@@ -59,6 +59,15 @@ public final class Variant: HasIntID, HasTimestamps, HasTombstone {
         #Predicate<Variant> { $0.id == id }
     }
     
+    /// The normalized price tier for this variant.
+    public var priceTier: PriceTier? {
+        guard let numDollarSigns = num_dollar_signs else {
+            return nil
+        }
+
+        return PriceTier(rawValue: numDollarSigns)
+    }
+    
     var most_recent_rating: Tag? {
         var date = Date(timeIntervalSince1970: 0)
         var mostRecentRating: Tag?
@@ -102,7 +111,7 @@ public final class Variant: HasIntID, HasTimestamps, HasTombstone {
     /// - $$$$ = $50 to $74.99 | $110 - $160
     /// - $$$$$ = $75 and up | > $160
     public func getPrice() -> String {
-        return PriceTier.init(rawValue: num_dollar_signs ?? 0)?.label ?? ""
+        priceTier?.label ?? ""
     }
     
     /// All the variant's tags of type ``TagType/PURCHASE`` for the current user.
@@ -175,15 +184,17 @@ public final class Variant: HasIntID, HasTimestamps, HasTombstone {
 }
 
 public enum PriceTier: Int, CaseIterable, Hashable, Identifiable, Sendable {
-    case one = 1, two = 2, three = 3, four = 4, five = 5
-    public var id: Int { rawValue }
+    case one = 1
+    case two = 2
+    case three = 3
+    case four = 4
+    case five = 5
+
+    public var id: Int {
+        rawValue
+    }
+
     public var label: String {
-        switch self {
-        case .one:  return "$"
-        case .two:  return "$$"
-        case .three:return "$$$"
-        case .four: return "$$$$"
-        case .five: return "$$$$$"
-        }
+        String(repeating: "$", count: rawValue)
     }
 }

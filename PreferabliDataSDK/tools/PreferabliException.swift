@@ -37,16 +37,16 @@ public struct PreferabliException: Error, LocalizedError {
     /// A detailed description of what went wrong.
     /// - Returns: a string description.
     public func getMessage() -> String {
-        var mesageToReturn = message
-        if (message.isEmptyOrWhitespace) {
-            mesageToReturn = type.getMessage()
+        if let message,
+           !message.isEmptyOrWhitespace() {
+            return message
         }
 
-        return mesageToReturn!
+        return type.getMessage()
     }
-    
+
     public var errorDescription: String? {
-        type.getMessage()
+        getMessage()
     }
     
     /// Gets an error code if available. Useful especially in case of  ``PreferabliExceptionType/APIError``.

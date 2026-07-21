@@ -49,6 +49,7 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
     public var url_youtube: String?
     public var zip_code: String?
     public var notes: String?
+    public var reservations_provider_enabled: Bool?
     public var is_partner: Bool?
     
     // local only
@@ -82,59 +83,6 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
     public init(id: Int, name: String) {
         self.id = id
         self.name = name
-    }
-
-    public init(
-        address_l1: String? = nil,
-        address_l2: String? = nil,
-        city: String? = nil,
-        country: String? = nil,
-        display_name: String? = nil,
-        id: Int,
-        lat: Double? = nil,
-        lon: Double? = nil,
-        primary_inventory_id: Int? = nil,
-        featured_collection_id: Int? = nil,
-        is_virtual: Bool? = nil,
-        name: String,
-        phone: String? = nil,
-        email_address: String? = nil,
-        state: String? = nil,
-        url: String? = nil,
-        url_facebook: String? = nil,
-        url_instagram: String? = nil,
-        url_twitter: String? = nil,
-        url_youtube: String? = nil,
-        zip_code: String? = nil,
-        notes: String? = nil,
-        collections: [Collection] = [],
-        active_delivery_methods: [DeliveryMethod] = [],
-        images: [Media] = [],
-        hours: [VenueHour] = []
-    ) {
-        self.address_l1 = address_l1
-        self.address_l2 = address_l2
-        self.city = city
-        self.country = country
-        self.id = id
-        self.lat = lat
-        self.lon = lon
-        self.primary_inventory_id = primary_inventory_id
-        self.featured_collection_id = featured_collection_id
-        self.name = name
-        self.phone = phone
-        self.email_address = email_address
-        self.state = state
-        self.url = url
-        self.url_facebook = url_facebook
-        self.url_instagram = url_instagram
-        self.url_twitter = url_twitter
-        self.url_youtube = url_youtube
-        self.zip_code = zip_code
-        self.notes = notes
-        self.active_delivery_methods = active_delivery_methods
-        self.images = images
-        self.hours = hours
     }
     
     @Transient

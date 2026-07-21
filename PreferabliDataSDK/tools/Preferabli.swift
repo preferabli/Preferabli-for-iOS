@@ -1041,29 +1041,35 @@ public class Preferabli {
         }
     }
     
-    public func getAffiliates() async throws -> [Int] {
+    public func getAffiliates() async throws -> [String] {
         do {
             try await canWeContinue(needsToBeLoggedIn: true)
             Analytics.track(["event": "get_affiliates"])
 
-            let response: [AffiliateDTO] = try await api.getAlamo().get(APIEndpoints.affiliates)
+            let response: [AffiliateDTO] = try await api
+                .getAlamo()
+                .get(APIEndpoints.affiliates)
 
-            let ids : [Int] = try await Storage.withBackgroundContext { ctx, save in
-                var idsToReturn = [Int]()
+            try await Storage.withBackgroundContext { ctx, save in
                 for affiliateDTO in response {
-                    try Storage.upsertAffiliate(from: affiliateDTO, in: ctx)
-                    idsToReturn.append(Int(affiliateDTO.id))
+                    try Storage.upsertAffiliate(
+                        from: affiliateDTO,
+                        in: ctx
+                    )
                 }
 
                 try save()
-                return idsToReturn
             }
 
-            if response.isEmpty {
-                throw PreferabliException.init(type: .BadData, message: "No affiliate(s) found.", code: 404)
-            }
-            
-            return ids
+            return response
+                .compactMap(\.affiliate_code)
+                .map {
+                    $0.trimmingCharacters(
+                        in: .whitespacesAndNewlines
+                    )
+                }
+                .filter { !$0.isEmpty }
+                .uniquedCaseInsensitive()
 
         } catch {
             handleError(error: error)
@@ -1444,6 +1450,32 @@ public class Preferabli {
             
             return productIds
             
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    /// Creates a preference-predicted version of a collection and persists it.
+    ///
+    /// - Parameter collectionId: The source collection whose products should be
+    ///   ordered using the current user's preference profile.
+    /// - Returns: The ID of the newly generated collection version.
+    @discardableResult
+    public func predictOrder(
+        collectionId: Int
+    ) async throws -> Int {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+
+            Analytics.track([
+                "event": "predict_collection_order",
+                "collection_id": collectionId
+            ])
+
+            return try await PredictedOrderLoader.shared.load(
+                collectionId: collectionId
+            )
         } catch {
             handleError(error: error)
             throw error
@@ -2618,6 +2650,52 @@ public class Preferabli {
         }
     }
     
+    public func getProduct(force_refresh : Bool = false, productHash : String) async throws
+    {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            
+            Analytics.track(["event": "product_refresh"])
+            
+            var needsRefresh = true
+            
+            if (!force_refresh) {
+                try Storage.withContext { ctx, save in
+                    
+                    let fd = FetchDescriptor<Product>(
+                        predicate: #Predicate<Product> {
+                            $0.product_hash == productHash
+                        }
+                    )
+
+                    let results = try ctx.fetch(fd)
+                    
+                    if let product = results.first {
+                        needsRefresh = PreferabliTools.hasMinutesPassed(minutes: 60, startDate: Storage.getKeyStore().object(forKey: "lastCalledProduct\(product.id)") as? Date)
+                    }
+                }
+            }
+            
+            if needsRefresh {
+                let body: [ProductDTO] = try await api.getAlamo().get(APIEndpoints.products, sparams: ["hashes" : [productHash]])
+                
+                try Storage.withContext { ctx, save in
+                    if let first = body.first {
+                        try Storage.upsertProduct(from: first, in: ctx)
+                        
+                        try save()
+                        
+                        Storage.getKeyStore().set(Date(), forKey: "lastCalledProduct\(first.id)")
+                    }
+                }
+            }
+            
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
     public func getExperience(force_refresh : Bool = false, venue_id : Int, experience_id : Int) async throws -> Int
     {
         do {
@@ -3469,9 +3547,9 @@ public class Preferabli {
     ///   - price: price of the product rated. Defaults to *nil*.
     ///   - quantity: quantity purchased of the product rated. Defaults to *nil*.
     ///   - format_ml: size of the product rated. Defaults to *nil*.
-    public func rateProduct(product_id : Int, year : Int, rating : RatingLevel, location : String? = nil, notes : String? = nil, price : Decimal? = nil, format_ml : Int? = nil) async throws {
+    public func rateProduct(product_id : Int, year : Int, rating : RatingLevel, occasion : String? = nil, location : String? = nil, notes : String? = nil, price : Decimal? = nil, format_ml : Int? = nil) async throws {
         Analytics.track( ["event" : "rate_product"])
-        try await createOrEditTagActual(product_id: product_id, year: year, collection_id: Storage.getKeyStore().integer(forKey: "ratings_id"), value: rating.getValue(), tag_type: .RATING, location: location, notes: notes, price: price, quantity: nil, format_ml: format_ml)
+        try await createOrEditTagActual(product_id: product_id, year: year, collection_id: Storage.getKeyStore().integer(forKey: "ratings_id"), value: rating.getValue(), tag_type: .RATING, occasion: occasion, location: location, notes: notes, price: price, quantity: nil, format_ml: format_ml)
     }
     
     /// Toggles the wishlist status of a ``Product``. Creates a ``Tag`` of type ``TagType/WISHLIST`` if none already exists. Deletes the wishlist tag if it already does. User must be logged in to run this call.
@@ -3585,6 +3663,7 @@ public class Preferabli {
         collection_id: Int,
         value: String? = nil,
         tag_type: TagType?,
+        occasion: String? = nil,
         location: String? = nil,
         notes: String? = nil,
         price: Decimal? = nil,
@@ -3643,6 +3722,7 @@ public class Preferabli {
                     user_id: PreferabliTools.getPreferabliUserId(),
                     value: value,
                     bin: bin,
+                    occasion: occasion,
                     variant_id: variant.id,
                     quantity: quantity,
                     format_ml: format_ml,
@@ -3878,6 +3958,7 @@ public class Preferabli {
         tag_id : Int,
         year : Int,
         rating : RatingLevel? = nil,
+        occasion : String? = nil,
         location : String? = nil,
         notes : String? = nil,
         price : Decimal? = nil,
@@ -4842,6 +4923,193 @@ extension Preferabli {
 
             return body.map(\.id)
 
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+    
+    @discardableResult
+    public func getPersonalityItineraries(
+        force_refresh: Bool = false,
+        personality_id: Int,
+        limit: Int = 25,
+        offset: Int = 0
+    ) async throws -> [Int] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track([
+                "event": "personality_itineraries_refresh",
+                "personality_id": personality_id,
+                "limit": limit,
+                "offset": offset
+            ])
+
+            let params: SParams = [
+                "limit": limit,
+                "offset": offset
+            ]
+
+            let body: [ItineraryDTO] = try await api
+                .getAlamo()
+                .get(APIEndpoints.personalityItineraries(id: personality_id), sparams: params)
+
+            try await Storage.withBackgroundContext { ctx, save in
+                
+
+                
+                for itineraryDTO in body {
+                    
+                    guard let market = try Storage.fetchById(
+                        Market.self,
+                        id: itineraryDTO.market_id,
+                        in: ctx
+                    ) else {
+                        throw PreferabliException(
+                            type: .BadSwiftData,
+                            message: "Could not save itinerary \(itineraryDTO.id) because Market \(itineraryDTO.market_id) is not stored locally. Fetch markets before itineraries.",
+                            code: 661
+                        )
+                    }
+                    
+                    _ = try Storage.upsertItinerary(from: itineraryDTO, market: market, in: ctx)
+                }
+                
+                try save()
+            }
+
+            return body.map(\.id)
+
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+}
+
+extension Preferabli {
+
+    /// Fetches the complete itinerary list for a market and stores it in SwiftData.
+    ///
+    /// The server does not return the Market relationship, so `market_id` is resolved
+    /// locally and supplied to every itinerary upsert.
+    ///
+    /// - Returns: itinerary ids in the same order as the API response.
+    @discardableResult
+    public func getItineraries(market_id: Int) async throws -> [Int] {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+
+            Analytics.track([
+                "event": "get_itineraries",
+                "market_id": market_id
+            ])
+
+            let body: [ItineraryDTO] = try await api
+                .getAlamo()
+                .get(APIEndpoints.itinerariesForMarket(id: market_id))
+
+            let itineraryIDs = try await Storage.withBackgroundContext { ctx, save in
+                guard let market = try Storage.fetchById(
+                    Market.self,
+                    id: market_id,
+                    in: ctx
+                ) else {
+                    throw PreferabliException(
+                        type: .BadSwiftData,
+                        message: "Could not get itineraries because Market \(market_id) is not stored locally. Fetch markets before itineraries.",
+                        code: 660
+                    )
+                }
+
+                let itineraries = try Storage.upsertItineraries(
+                    from: body,
+                    market: market,
+                    replaceExisting: true,
+                    in: ctx
+                )
+
+                try save()
+                return itineraries.map(\.id)
+            }
+
+            return itineraryIDs
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    /// Fetches one itinerary by id and stores it in SwiftData.
+    ///
+    /// `market_id` is required only for the local SwiftData relationship; it is not
+    /// added to the `/itineraries/:id` request.
+    ///
+    /// - Returns: the itinerary id for use with SwiftData queries.
+    public func getItinerary(
+        force_refresh: Bool = false,
+        itinerary_id: Int
+    ) async throws -> Int {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+
+            Analytics.track([
+                "event": "itinerary_refresh",
+                "itinerary_id": itinerary_id
+            ])
+
+            var needsRefresh = true
+
+            if !force_refresh {
+                try Storage.withContext { ctx, _ in
+                    if let itinerary = try Storage.fetchById(
+                        Itinerary.self,
+                        id: itinerary_id,
+                        in: ctx
+                    ) {
+                        needsRefresh = PreferabliTools.hasMinutesPassed(
+                            minutes: 60,
+                            startDate: Storage.getKeyStore().object(
+                                forKey: "lastCalledItinerary\(itinerary_id)"
+                            ) as? Date
+                        )
+                    }
+                }
+            }
+
+            if needsRefresh {
+                let body: ItineraryDTO = try await api
+                    .getAlamo()
+                    .get(APIEndpoints.itinerary(id: itinerary_id))
+
+                try await Storage.withBackgroundContext { ctx, save in
+                    guard let market = try Storage.fetchById(
+                        Market.self,
+                        id: body.market_id,
+                        in: ctx
+                    ) else {
+                        throw PreferabliException(
+                            type: .BadSwiftData,
+                            message: "Could not get itinerary \(itinerary_id) because Market \(body.market_id) is not stored locally. Fetch markets before itineraries.",
+                            code: 661
+                        )
+                    }
+
+                    _ = try Storage.upsertItinerary(
+                        from: body,
+                        market: market,
+                        in: ctx
+                    )
+
+                    try save()
+                    Storage.getKeyStore().set(
+                        Date(),
+                        forKey: "lastCalledItinerary\(itinerary_id)"
+                    )
+                }
+            }
+
+            return itinerary_id
         } catch {
             handleError(error: error)
             throw error

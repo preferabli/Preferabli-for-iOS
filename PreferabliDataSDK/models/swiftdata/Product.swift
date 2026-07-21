@@ -109,7 +109,7 @@ public final class Product: HasIntID, HasTimestamps, HasImage {
         guard let hash = product_hash else {
             return nil
         }
-        return "https://tastefuli.com/links/products/\(id)"
+        return "https://tastefuli.com/links/products/\(hash)"
     }
 
     /// All of the product tags of type ``TagType/PURCHASE`` for the current user.
@@ -196,6 +196,11 @@ public final class Product: HasIntID, HasTimestamps, HasImage {
         return nil
     }
     
+    /// The price tier of the product's cached most-recent variant.
+    public var priceTier: PriceTier? {
+        cachedMostRecentVariant?.priceTier
+    }
+    
     /// Returns grape if one exists
     public var grapeSanitized: String? {
         guard let g = grape,
@@ -267,9 +272,9 @@ public final class Product: HasIntID, HasTimestamps, HasImage {
     /// - $$$$ = $50 to $74.99 | $110 - $160
     /// - $$$$$ = $75 and up | > $160
     public func getPrice() -> String {
-        return cachedMostRecentVariant?.getPrice() ?? ""
+        priceTier?.label ?? ""
     }
-
+    
     /// Gets a ``Variant`` of a product by its id.
     /// - Parameter id: a variant id.
     /// - Returns: the corresponding variant. Returns *nil* if this product does not contain the variant.

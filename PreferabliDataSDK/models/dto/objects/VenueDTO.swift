@@ -58,6 +58,7 @@ public struct VenueDTO: Decodable, Sendable {
     public let video_poster: MediaDTO?
     public let logo: MediaDTO?
     public let primary_image: MediaDTO?
+    public let reservations_provider_enabled: Bool?
     public let is_partner: Bool?
     public let market_ids: [Int]?
 }

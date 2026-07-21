@@ -32,6 +32,7 @@ public final class Tag: HasIntID, HasTimestamps, HasTombstone {
     public var type: String?
     public var user_id: Int?
     public var value: String?
+    public var occasion: String?
     public var bin: String?
     public var variant_id: Int
     public var product_id: Int
@@ -69,8 +70,11 @@ public final class Tag: HasIntID, HasTimestamps, HasTombstone {
         let subcategory = product.subcategory ?? ""
         let type = product.type ?? ""
         let year = String(variant.year)
-
-        self.searchableContent = "\(name) \(brand) \(grape) \(region) \(category) \(subcategory) \(type) \(year)".lowercased()
+        let comment = comment ?? ""
+        let location = location ?? ""
+        let occasion = occasion ?? ""
+        
+        self.searchableContent = "\(name) \(brand) \(grape) \(region) \(category) \(subcategory) \(type) \(year) \(comment) \(location) \(occasion)".lowercased()
     }
     
     // Lets us know is the Tag is a Rating or not
@@ -79,10 +83,10 @@ public final class Tag: HasIntID, HasTimestamps, HasTombstone {
     }
     
     var isAppealingRating: Bool {
-            guard tag_type == .RATING, !isTombstoned else { return false }
-            guard let lvl = rating_level else { return false }
-            return lvl == .LOVE || lvl == .LIKE
-        }
+        guard tag_type == .RATING, !isTombstoned else { return false }
+        guard let lvl = rating_level else { return false }
+        return lvl == .LOVE || lvl == .LIKE
+    }
     
     // Lets us know is the Tag is a Wishlist or not
     public func isWishlist() -> Bool {
@@ -140,7 +144,7 @@ public final class Tag: HasIntID, HasTimestamps, HasTombstone {
 public enum ServingFormat : String, CaseIterable, Identifiable {
     
     public var id: String { rawValue }
-
+    
     case GLASS
     case HALF_BOTTLE
     case BOTTLE

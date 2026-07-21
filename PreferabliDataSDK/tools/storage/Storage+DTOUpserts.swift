@@ -324,6 +324,7 @@ extension Storage {
         t.updated_at = dto.updated_at ?? t.updated_at
         t.user_id = dto.user_id ?? t.user_id
         t.value = dto.value ?? t.value
+        t.occasion = dto.occasion ?? t.occasion
         t.bin = dto.bin ?? t.bin
         t.variant_id = dto.variant_id ?? t.variant_id
         t.quantity = dto.quantity ?? t.quantity
@@ -520,7 +521,7 @@ extension Storage {
         experience.badge_color_hex = dto.badge_color_hex ?? experience.badge_color_hex
         experience.badge_text_color_hex = dto.badge_text_color_hex ?? experience.badge_text_color_hex
         experience.badge_gradient_css = dto.badge_gradient_css ?? experience.badge_gradient_css
-        experience.primary_inventory_id = dto.primary_inventory_id ?? experience.primary_inventory_id
+        experience.collection_id = dto.collection_id ?? experience.collection_id
         experience.preferabli_image_url = dto.preferabli_image_url ?? experience.preferabli_image_url
         experience.is_booking_link_external = dto.is_booking_link_external ?? experience.is_booking_link_external
         
@@ -744,6 +745,7 @@ extension Storage {
         if v.url_instagram != dto.url_instagram { v.url_instagram = dto.url_instagram }
         if v.url_twitter != dto.url_twitter { v.url_twitter = dto.url_twitter }
         if v.url_youtube != dto.url_youtube { v.url_youtube = dto.url_youtube }
+        if v.reservations_provider_enabled != dto.reservations_provider_enabled { v.reservations_provider_enabled = dto.reservations_provider_enabled }
 
         if v.zip_code != dto.zip_code { v.zip_code = dto.zip_code }
         if v.notes != dto.notes { v.notes = dto.notes }
@@ -930,7 +932,8 @@ extension Storage {
         if v.url_instagram != dto.url_instagram { v.url_instagram = dto.url_instagram }
         if v.url_twitter != dto.url_twitter { v.url_twitter = dto.url_twitter }
         if v.url_youtube != dto.url_youtube { v.url_youtube = dto.url_youtube }
-
+        if v.reservations_provider_enabled != dto.reservations_provider_enabled { v.reservations_provider_enabled = dto.reservations_provider_enabled }
+        
         if v.zip_code != dto.zip_code { v.zip_code = dto.zip_code }
         if v.notes != dto.notes { v.notes = dto.notes }
 
@@ -2381,7 +2384,10 @@ extension Storage {
             // Fields
             b.badge_icon = dto.badge_icon
             b.badge_color_hex_primary = dto.badge_color_hex_primary
+            b.is_centered = dto.is_centered
+            b.half_gradient = dto.half_gradient
             b.badge_color_hex_secondary = dto.badge_color_hex_secondary
+            b.badge_text_color_hex = dto.badge_text_color_hex
             b.badge_gradient_css = dto.badge_gradient_css
             b.text_color_hex = dto.text_color_hex
             b.color_hex_secondary = dto.color_hex_secondary
@@ -4043,6 +4049,515 @@ extension Storage {
     }
 
     nonisolated private static func deleteMissing<T: HasIntID>(
+        _ existing: [T],
+        keeping keepIDs: Set<Int>,
+        in ctx: ModelContext
+    ) throws {
+        for object in existing where !keepIDs.contains(object.id) {
+            try checkCancelled()
+            try checkCancelledBeforeRelationshipWrite()
+            ctx.delete(object)
+        }
+    }
+}
+
+extension Storage {
+
+    // MARK: - Itinerary collection
+
+    /// Treats the market itinerary endpoint as the source of truth for that market.
+    @discardableResult
+    nonisolated static func upsertItineraries(
+        from dtos: [ItineraryDTO],
+        market: Market,
+        replaceExisting: Bool = true,
+        in ctx: ModelContext
+    ) throws -> [Itinerary] {
+
+        try checkCancelled()
+
+        if replaceExisting {
+            let marketID = market.id
+            let keepIDs = Set(dtos.map(\.id))
+            let descriptor = FetchDescriptor<Itinerary>(
+                predicate: #Predicate<Itinerary> { itinerary in
+                    itinerary.market_id == marketID
+                }
+            )
+
+            for existing in try ctx.fetch(descriptor) where !keepIDs.contains(existing.id) {
+                try checkCancelled()
+                try checkCancelledBeforeRelationshipWrite()
+                ctx.delete(existing)
+            }
+        }
+
+        var itineraries: [Itinerary] = []
+        itineraries.reserveCapacity(dtos.count)
+
+        for dto in dtos {
+            try checkCancelled()
+            itineraries.append(
+                try upsertItinerary(from: dto, market: market, in: ctx)
+            )
+        }
+
+        return itineraries
+    }
+
+    // MARK: - Itinerary
+
+    @discardableResult
+    nonisolated static func upsertItinerary(
+        from dto: ItineraryDTO,
+        market: Market,
+        in ctx: ModelContext
+    ) throws -> Itinerary {
+
+        try checkCancelled()
+
+        let itinerary = try fetchOrInsert(Itinerary.self, id: dto.id, in: ctx) {
+            Itinerary(id: dto.id, market: market)
+        }
+
+        itinerary.created_at = dto.created_at ?? itinerary.created_at
+        itinerary.updated_at = dto.updated_at ?? itinerary.updated_at
+        itinerary.name = dto.name
+        itinerary.desc = dto.description
+        itinerary.market_id = market.id
+        itinerary.badge_title = dto.badge_title
+        itinerary.badge_icon = dto.badge_icon
+        itinerary.badge_gradient_css = dto.badge_gradient_css
+        itinerary.badge_text_color_hex = dto.badge_text_color_hex
+        itinerary.badge_color_hex_primary = dto.badge_color_hex_primary
+        itinerary.badge_color_hex_secondary = dto.badge_color_hex_secondary
+        itinerary.color_hex_primary = dto.color_hex_primary
+
+
+        try checkCancelledBeforeRelationshipWrite()
+        if itinerary.market?.id != market.id {
+            itinerary.market = market
+        }
+        
+        if let personalityDTO = dto.curator_personality {
+            try checkCancelled()
+            let personality = try upsertPersonality(from: personalityDTO, in: ctx)
+
+            try checkCancelledBeforeRelationshipWrite()
+            if itinerary.curator_personality !== personality {
+                itinerary.curator_personality = personality
+            }
+        } else if itinerary.curator_personality != nil {
+            try checkCancelledBeforeRelationshipWrite()
+            itinerary.curator_personality = nil
+        }
+
+        // The full itinerary payload is authoritative for primary_image; nil clears it.
+        if let imageDTO = dto.primary_image {
+            try checkCancelled()
+            let image = try upsertMedia(from: imageDTO, in: ctx)
+
+            try checkCancelledBeforeRelationshipWrite()
+            if itinerary.primary_image !== image {
+                itinerary.primary_image = image
+            }
+        } else if itinerary.primary_image != nil {
+            try checkCancelledBeforeRelationshipWrite()
+            itinerary.primary_image = nil
+        }
+
+        // Optional arrays only replace local data when the field is present. This keeps a
+        // lightweight list response from erasing relationships hydrated by the detail call.
+        if let imageDTOs = dto.images {
+            var images: [Media] = []
+            images.reserveCapacity(imageDTOs.count)
+
+            for imageDTO in imageDTOs {
+                try checkCancelled()
+                images.append(try upsertMedia(from: imageDTO, in: ctx))
+            }
+
+            if !itinerarySameIntIDs(itinerary.images, images) {
+                try checkCancelledBeforeRelationshipWrite()
+                itinerary.images = images
+            }
+        }
+
+        if let itemDTOs = dto.itinerary_items {
+            var items: [ItineraryItem] = []
+            items.reserveCapacity(itemDTOs.count)
+
+            for itemDTO in itemDTOs {
+                try checkCancelled()
+                items.append(
+                    try upsertItineraryItem(
+                        from: itemDTO,
+                        itinerary: itinerary,
+                        in: ctx
+                    )
+                )
+            }
+
+            try deleteMissingItineraryIntIDs(
+                itinerary.itinerary_items,
+                keeping: Set(items.map(\.id)),
+                in: ctx
+            )
+
+            if !itinerarySameIntIDs(itinerary.itinerary_items, items) {
+                try checkCancelledBeforeRelationshipWrite()
+                itinerary.itinerary_items = items
+            }
+        }
+        
+        if let highlightDTOs = dto.highlights {
+            var items: [ItineraryHighlight] = []
+            items.reserveCapacity(highlightDTOs.count)
+
+            for highlightDTO in highlightDTOs {
+                try checkCancelled()
+                items.append(
+                    try upsertItineraryHighlight(
+                        from: highlightDTO,
+                        itinerary: itinerary,
+                        in: ctx
+                    )
+                )
+            }
+
+            try deleteMissingItineraryIntIDs(
+                itinerary.highlights,
+                keeping: Set(items.map(\.id)),
+                in: ctx
+            )
+
+            if !itinerarySameIntIDs(itinerary.highlights, items) {
+                try checkCancelledBeforeRelationshipWrite()
+                itinerary.highlights = items
+            }
+        }
+
+        if let traitDTOs = dto.market_trait_associations {
+            var links: [ItineraryMarketTrait] = []
+            links.reserveCapacity(traitDTOs.count)
+
+            for traitDTO in traitDTOs {
+                try checkCancelled()
+
+                if let link = try upsertItineraryMarketTrait(
+                    from: traitDTO,
+                    itinerary: itinerary,
+                    in: ctx
+                ) {
+                    links.append(link)
+                }
+            }
+
+            let keepKeys = Set(links.map(\.key))
+            for existing in itinerary.market_trait_associations where !keepKeys.contains(existing.key) {
+                try checkCancelled()
+                try checkCancelledBeforeRelationshipWrite()
+                ctx.delete(existing)
+            }
+
+            if !itinerarySameKeys(itinerary.market_trait_associations, links) {
+                try checkCancelledBeforeRelationshipWrite()
+                itinerary.market_trait_associations = links
+            }
+        }
+
+        return itinerary
+    }
+    
+    @discardableResult
+    nonisolated static func upsertItineraryHighlight(
+        from dto: ItineraryHighlightDTO,
+        itinerary: Itinerary,
+        in ctx: ModelContext
+    ) throws -> ItineraryHighlight {
+
+        try checkCancelled()
+
+        let item = try fetchOrInsert(ItineraryHighlight.self, id: dto.id, in: ctx) {
+            ItineraryHighlight(id: dto.id, itinerary: itinerary)
+        }
+
+        item.name = dto.name
+        item.desc = dto.description
+        item.order = dto.order
+        item.icon_url = dto.icon_url
+
+        return item
+    }
+
+    // MARK: - ItineraryItem
+
+    @discardableResult
+    nonisolated static func upsertItineraryItem(
+        from dto: ItineraryItemDTO,
+        itinerary: Itinerary,
+        in ctx: ModelContext
+    ) throws -> ItineraryItem {
+
+        try checkCancelled()
+
+        let item = try fetchOrInsert(ItineraryItem.self, id: dto.id, in: ctx) {
+            ItineraryItem(id: dto.id, itinerary: itinerary)
+        }
+
+        item.created_at = dto.created_at ?? item.created_at
+        item.updated_at = dto.updated_at ?? item.updated_at
+        item.time = dto.time
+        item.name = dto.name
+        item.desc = dto.description
+        item.order = dto.order
+        item.itinerary_id = itinerary.id
+        item.local_tip = dto.local_tip
+        item.benefit = dto.benefit
+        item.other_options = dto.other_options
+        item.type = dto.type
+
+
+        try checkCancelledBeforeRelationshipWrite()
+        if item.itinerary?.id != itinerary.id {
+            item.itinerary = itinerary
+        }
+
+        // Venues are handled first so embedded experiences can resolve their venue.
+        if let associationDTOs = dto.item_associations {
+            var associations: [ItineraryItemAssociation] = []
+            associations.reserveCapacity(associationDTOs.count)
+
+            for associationDTO in associationDTOs {
+                try checkCancelled()
+                associations.append(
+                    try upsertItineraryItemAssociation(
+                        from: associationDTO,
+                        item: item,
+                        in: ctx
+                    )
+                )
+            }
+
+            try deleteMissingItineraryIntIDs(
+                item.item_associations,
+                keeping: Set(associations.map(\.id)),
+                in: ctx
+            )
+
+            if !itinerarySameIntIDs(item.item_associations, associations) {
+                try checkCancelledBeforeRelationshipWrite()
+                item.item_associations = associations
+            }
+        }
+
+        return item
+    }
+
+    // MARK: - ItineraryMarketTrait
+
+    @discardableResult
+    nonisolated static func upsertItineraryMarketTrait(
+        from dto: ItineraryMarketTraitDTO,
+        itinerary: Itinerary,
+        in ctx: ModelContext
+    ) throws -> ItineraryMarketTrait? {
+
+        try checkCancelled()
+
+        guard let traitID = dto.market_trait?.id ?? dto.market_trait_id else {
+            return nil
+        }
+
+        let trait: MarketTrait
+        if let traitDTO = dto.market_trait {
+            trait = try upsertMarketTraitReference(from: traitDTO, in: ctx)
+        } else {
+            trait = try fetchOrInsert(MarketTrait.self, id: traitID, in: ctx) {
+                MarketTrait(id: traitID)
+            }
+        }
+
+        let key = ItineraryMarketTrait.makeKey(
+            itineraryID: itinerary.id,
+            marketTraitID: trait.id
+        )
+
+        let link: ItineraryMarketTrait
+        if let existing = try Storage.fetchByKey(
+            ItineraryMarketTrait.self,
+            key: key,
+            in: ctx
+        ) {
+            link = existing
+        } else {
+            let created = ItineraryMarketTrait(
+                key: key,
+                itinerary: itinerary,
+                market_trait: trait
+            )
+            ctx.insert(created)
+            link = created
+        }
+
+        link.key = key
+        link.remote_id = dto.id
+        link.created_at = dto.created_at ?? link.created_at
+        link.updated_at = dto.updated_at ?? link.updated_at
+        link.order = dto.order
+        link.itinerary_id = itinerary.id
+        link.market_trait_id = trait.id
+
+        try checkCancelledBeforeRelationshipWrite()
+        if link.itinerary.id != itinerary.id {
+            link.itinerary = itinerary
+        }
+        if link.market_trait.id != trait.id {
+            link.market_trait = trait
+        }
+
+        return link
+    }
+
+    // MARK: - ItineraryItemVenueAssociation
+
+    @discardableResult
+    nonisolated static func upsertItineraryItemAssociation(
+        from dto: ItineraryItemAssociationDTO,
+        item: ItineraryItem,
+        in ctx: ModelContext
+    ) throws -> ItineraryItemAssociation {
+
+        try checkCancelled()
+
+        let association = try fetchOrInsert(
+            ItineraryItemAssociation.self,
+            id: dto.id,
+            in: ctx
+        ) {
+            ItineraryItemAssociation(id: dto.id, itinerary_item: item)
+        }
+
+        association.created_at = dto.created_at ?? association.created_at
+        association.updated_at = dto.updated_at ?? association.updated_at
+        association.order = dto.order
+        association.itinerary_item_id = item.id
+
+        try checkCancelledBeforeRelationshipWrite()
+        if association.itinerary_item?.id != item.id {
+            association.itinerary_item = item
+        }
+
+        let resolvedVenue: Venue?
+        if let venueDTO = dto.venue {
+            if let upsertedVenue = try upsertVenue(from: venueDTO, in: ctx) {
+                resolvedVenue = upsertedVenue
+            } else {
+                resolvedVenue = try Storage.fetchById(
+                    Venue.self,
+                    id: venueDTO.id,
+                    in: ctx
+                )
+            }
+        } else {
+            resolvedVenue = nil
+        }
+
+        association.venue_id = dto.venue?.id
+
+        try checkCancelledBeforeRelationshipWrite()
+        if association.venue?.id != resolvedVenue?.id {
+            association.venue = resolvedVenue
+        }
+        
+        let experienceID = dto.experience?.id
+        association.experience_id = experienceID
+
+        let resolvedExperience: Experience?
+
+        if let experienceDTO = dto.experience {
+            let existingExperience = try Storage.fetchById(
+                Experience.self,
+                id: experienceDTO.id,
+                in: ctx
+            )
+
+            let requestedVenueID = experienceDTO.preferabli_venue_id
+            let venueFromDTO = try Storage.fetchById(
+                Venue.self,
+                id: requestedVenueID,
+                in: ctx
+            )
+
+            let existingVenue: Venue?
+            if let requestedVenueID {
+                existingVenue = existingExperience?.venue.id == requestedVenueID
+                    ? existingExperience?.venue
+                    : nil
+            } else {
+                existingVenue = existingExperience?.venue
+            }
+
+            let venue = venueFromDTO ?? existingVenue
+
+            if let venue {
+                resolvedExperience = try upsertExperience(
+                    from: experienceDTO,
+                    venue: venue,
+                    in: ctx
+                )
+            } else {
+                // Preserve an already-hydrated relationship if this lightweight payload does
+                // not include enough information to create the required Experience -> Venue link.
+                resolvedExperience = existingExperience
+            }
+        } else {
+            resolvedExperience = try Storage.fetchById(
+                Experience.self,
+                id: experienceID,
+                in: ctx
+            )
+        }
+
+        try checkCancelledBeforeRelationshipWrite()
+        if association.experience?.id != resolvedExperience?.id {
+            association.experience = resolvedExperience
+        }
+
+        return association
+    }
+
+    // MARK: - Private comparison/deletion helpers
+
+    @inline(__always)
+    nonisolated private static func itinerarySameIntIDs<T: HasIntID>(
+        _ lhs: [T],
+        _ rhs: [T]
+    ) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+
+        for (left, right) in zip(lhs, rhs) where left.id != right.id {
+            return false
+        }
+
+        return true
+    }
+
+    @inline(__always)
+    nonisolated private static func itinerarySameKeys(
+        _ lhs: [ItineraryMarketTrait],
+        _ rhs: [ItineraryMarketTrait]
+    ) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+
+        for (left, right) in zip(lhs, rhs) where left.key != right.key {
+            return false
+        }
+
+        return true
+    }
+
+    nonisolated private static func deleteMissingItineraryIntIDs<T: HasIntID>(
         _ existing: [T],
         keeping keepIDs: Set<Int>,
         in ctx: ModelContext
