@@ -18,6 +18,8 @@ public final class Experience: HasIntID, HasImage {
     public var brand_id: Int?
     public var cuvee_experience: Bool?
     public var experience_description: String?
+    public var experience_description_secondary: String?
+    public var reservation_required: Bool?
     public var discount_code: String?
     public var duration: Int?
     public var experience_type: String?
@@ -65,10 +67,6 @@ public final class Experience: HasIntID, HasImage {
     @Relationship(deleteRule: .nullify)
     public var venue: Venue
 
-
-    @Relationship(deleteRule: .cascade, inverse: \ExperienceBenefit.experience)
-    public var benefits: [ExperienceBenefit] = []
-
     @Relationship(deleteRule: .cascade, inverse: \ExperienceOperationHoursNormal.experience)
     public var operation_hours_normals: [ExperienceOperationHoursNormal] = []
 
@@ -92,32 +90,11 @@ public final class Experience: HasIntID, HasImage {
     }
     
     public func getImage(width: Int, height: Int, quality: Int = 80) -> URL? {
-        PreferabliTools.getImageUrl(image: preferabli_image_url ?? header_image_url ?? benefits.first?.image_url, width: width, height: height, quality: quality)
+        PreferabliTools.getImageUrl(image: preferabli_image_url ?? header_image_url, width: width, height: height, quality: quality)
     }
 
     public func getPlaceholderImage() -> String? {
         nil
-    }
-}
-
-@Model
-public final class ExperienceBenefit: HasIntID {
-    @Attribute(.unique) public var id: Int
-
-    public var experience_id: Int?
-    public var benefit_description: String?
-    public var image_url: String?
-    public var subtitle: String?
-    public var title: String?
-    
-    public var experience: Experience?
-
-    public init(id: Int) {
-        self.id = id
-    }
-    
-    public static func predicate(forID id: Int) -> Predicate<ExperienceBenefit> {
-        #Predicate<ExperienceBenefit> { $0.id == id }
     }
 }
 

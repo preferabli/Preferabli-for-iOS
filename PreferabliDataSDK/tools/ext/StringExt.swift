@@ -122,9 +122,26 @@ extension Optional where Wrapped: Swift.Collection {
     }
 }
 
+private enum HTMLListType {
+    case unordered
+    case ordered(currentNumber: Int)
+}
+
+private enum HTMLHeadingLevel {
+    case h1
+    case h2
+    case h3
+}
+
 extension String {
     public func formattedHTMLString(
-        baseColor: Color = .black
+        baseColor: Color = .black,
+        linkColor: Color,
+        regularFont: Font,
+        boldFont: Font,
+        heading1Font: Font,
+        heading2Font: Font,
+        heading3Font: Font
     ) -> AttributedString {
         var html = trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -139,56 +156,596 @@ extension String {
             .replacingOccurrences(of: "&nbsp;", with: " ")
 
         var result = AttributedString()
-        var isBold = false
 
-        let pattern = #"(<[^>]+>|[^<]+)"#
-        let regex = try? NSRegularExpression(pattern: pattern)
+        var boldDepth = 0
+        var underlineDepth = 0
+        var strikethroughDepth = 0
+        var ignoredContentDepth = 0
 
-        let nsRange = NSRange(html.startIndex..<html.endIndex, in: html)
+        var currentHeading: HTMLHeadingLevel?
+        var currentLinkURL: URL?
+        var listStack: [HTMLListType] = []
 
-        regex?.enumerateMatches(in: html, range: nsRange) { match, _, _ in
-            guard
-                let match,
-                let range = Range(match.range, in: html)
-            else { return }
+        func selectedFont() -> Font {
+            switch currentHeading {
+            case .h1:
+                return heading1Font
 
-            let token = String(html[range])
-            let lower = token.lowercased()
+            case .h2:
+                return heading2Font
 
-            switch lower {
-            case "<strong>", "<b>":
-                isBold = true
+            case .h3:
+                return heading3Font
 
-            case "</strong>", "</b>":
-                isBold = false
-
-            case "<br>", "<br/>", "<br />", "</p>":
-                result.append(AttributedString("\n\n"))
-
-            default:
-                guard !token.hasPrefix("<") else { return }
-
-                var piece = AttributedString(token.htmlEntityDecoded)
-                piece.foregroundColor = baseColor
-
-                if isBold {
-                    piece.font = .system(.body).bold()
-                }
-
-                result.append(piece)
+            case nil:
+                return boldDepth > 0
+                    ? boldFont
+                    : regularFont
             }
         }
+
+        func makePiece(
+            _ text: String,
+            font: Font
+        ) -> AttributedString {
+            var piece = AttributedString(text)
+            piece.foregroundColor = baseColor
+            piece.font = font
+            return piece
+        }
+
+        func trailingNewlineCount() -> Int {
+            result.characters
+                .reversed()
+                .prefix { $0.isNewline }
+                .count
+        }
+
+        func appendNewline() {
+            guard !result.characters.isEmpty else {
+                return
+            }
+
+            guard trailingNewlineCount() == 0 else {
+                return
+            }
+
+            result.append(
+                makePiece(
+                    "\n",
+                    font: regularFont
+                )
+            )
+        }
+
+        func appendParagraphBreak() {
+            guard !result.characters.isEmpty else {
+                return
+            }
+
+            let currentTrailingNewlines = trailingNewlineCount()
+
+            guard currentTrailingNewlines < 2 else {
+                return
+            }
+
+            result.append(
+                makePiece(
+                    String(
+                        repeating: "\n",
+                        count: 2 - currentTrailingNewlines
+                    ),
+                    font: regularFont
+                )
+            )
+        }
+
+        func appendListItemPrefix() {
+            if !result.characters.isEmpty {
+                appendNewline()
+            }
+
+            let indentation = String(
+                repeating: "    ",
+                count: max(0, listStack.count - 1)
+            )
+
+            let prefix: String
+
+            if let lastIndex = listStack.indices.last {
+                switch listStack[lastIndex] {
+                case .unordered:
+                    prefix = "\(indentation)• "
+
+                case .ordered(let currentNumber):
+                    let nextNumber = currentNumber + 1
+
+                    listStack[lastIndex] = .ordered(
+                        currentNumber: nextNumber
+                    )
+
+                    prefix = "\(indentation)\(nextNumber). "
+                }
+            } else {
+                prefix = "• "
+            }
+
+            result.append(
+                makePiece(
+                    prefix,
+                    font: regularFont
+                )
+            )
+        }
+
+        func trimTrailingNewlines() {
+            while result.characters.last?.isNewline == true {
+                result.characters.removeLast()
+            }
+        }
+
+        func parsedTag(from token: String) -> (
+            name: String,
+            isClosing: Bool
+        )? {
+            let lowercasedToken = token
+                .lowercased()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard lowercasedToken.hasPrefix("<") else {
+                return nil
+            }
+
+            let isClosing = lowercasedToken.hasPrefix("</")
+            let pattern = #"^</?\s*([a-z0-9]+)"#
+
+            guard
+                let regex = try? NSRegularExpression(
+                    pattern: pattern,
+                    options: [.caseInsensitive]
+                ),
+                let match = regex.firstMatch(
+                    in: lowercasedToken,
+                    range: NSRange(
+                        lowercasedToken.startIndex..<lowercasedToken.endIndex,
+                        in: lowercasedToken
+                    )
+                ),
+                match.numberOfRanges > 1,
+                let nameRange = Range(
+                    match.range(at: 1),
+                    in: lowercasedToken
+                )
+            else {
+                return nil
+            }
+
+            return (
+                name: String(lowercasedToken[nameRange]),
+                isClosing: isClosing
+            )
+        }
+
+        func hyperlinkURL(from anchorTag: String) -> URL? {
+            let pattern = #"\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
+
+            guard let regex = try? NSRegularExpression(
+                pattern: pattern,
+                options: [.caseInsensitive]
+            ) else {
+                return nil
+            }
+
+            let range = NSRange(
+                anchorTag.startIndex..<anchorTag.endIndex,
+                in: anchorTag
+            )
+
+            guard let match = regex.firstMatch(
+                in: anchorTag,
+                range: range
+            ) else {
+                return nil
+            }
+
+            var href: String?
+
+            for captureIndex in 1..<match.numberOfRanges {
+                let captureRange = match.range(at: captureIndex)
+
+                guard
+                    captureRange.location != NSNotFound,
+                    let swiftRange = Range(
+                        captureRange,
+                        in: anchorTag
+                    )
+                else {
+                    continue
+                }
+
+                href = String(anchorTag[swiftRange])
+                break
+            }
+
+            guard let href else {
+                return nil
+            }
+
+            let decodedHref = href
+                .htmlEntityDecoded
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard
+                !decodedHref.isEmpty,
+                let url = URL(string: decodedHref),
+                let scheme = url.scheme?.lowercased()
+            else {
+                return nil
+            }
+
+            let supportedSchemes: Set<String> = [
+                "http",
+                "https",
+                "mailto",
+                "tel",
+                "tastefuliapp"
+            ]
+
+            guard supportedSchemes.contains(scheme) else {
+                return nil
+            }
+
+            return url
+        }
+
+        let pattern = #"(<[^>]+>|[^<]+)"#
+
+        guard let regex = try? NSRegularExpression(
+            pattern: pattern,
+            options: [.caseInsensitive]
+        ) else {
+            return makePiece(
+                html.htmlEntityDecoded,
+                font: regularFont
+            )
+        }
+
+        let fullRange = NSRange(
+            html.startIndex..<html.endIndex,
+            in: html
+        )
+
+        regex.enumerateMatches(
+            in: html,
+            range: fullRange
+        ) { match, _, _ in
+            guard
+                let match,
+                let swiftRange = Range(
+                    match.range,
+                    in: html
+                )
+            else {
+                return
+            }
+
+            let token = String(html[swiftRange])
+
+            if let tag = parsedTag(from: token) {
+                let ignoredContentTags: Set<String> = [
+                    "head",
+                    "script",
+                    "style"
+                ]
+
+                if ignoredContentTags.contains(tag.name) {
+                    if tag.isClosing {
+                        ignoredContentDepth = max(
+                            0,
+                            ignoredContentDepth - 1
+                        )
+                    } else {
+                        ignoredContentDepth += 1
+                    }
+
+                    return
+                }
+
+                guard ignoredContentDepth == 0 else {
+                    return
+                }
+
+                switch tag.name {
+                case "strong", "b":
+                    if tag.isClosing {
+                        boldDepth = max(
+                            0,
+                            boldDepth - 1
+                        )
+                    } else {
+                        boldDepth += 1
+                    }
+
+                case "u":
+                    if tag.isClosing {
+                        underlineDepth = max(
+                            0,
+                            underlineDepth - 1
+                        )
+                    } else {
+                        underlineDepth += 1
+                    }
+
+                case "s", "del", "strike":
+                    if tag.isClosing {
+                        strikethroughDepth = max(
+                            0,
+                            strikethroughDepth - 1
+                        )
+                    } else {
+                        strikethroughDepth += 1
+                    }
+
+                case "i", "em":
+                    // Goli does not have an italic font.
+                    // Keep the text but ignore italic styling.
+                    break
+
+                case "a":
+                    if tag.isClosing {
+                        currentLinkURL = nil
+                    } else {
+                        currentLinkURL = hyperlinkURL(
+                            from: token
+                        )
+                    }
+
+                case "h1":
+                    if tag.isClosing {
+                        currentHeading = nil
+                        appendParagraphBreak()
+                    } else {
+                        if !result.characters.isEmpty {
+                            appendParagraphBreak()
+                        }
+
+                        currentHeading = .h1
+                    }
+
+                case "h2":
+                    if tag.isClosing {
+                        currentHeading = nil
+                        appendParagraphBreak()
+                    } else {
+                        if !result.characters.isEmpty {
+                            appendParagraphBreak()
+                        }
+
+                        currentHeading = .h2
+                    }
+
+                case "h3":
+                    if tag.isClosing {
+                        currentHeading = nil
+                        appendParagraphBreak()
+                    } else {
+                        if !result.characters.isEmpty {
+                            appendParagraphBreak()
+                        }
+
+                        currentHeading = .h3
+                    }
+
+                case "br":
+                    appendNewline()
+
+                case "p", "div":
+                    if tag.isClosing {
+                        appendParagraphBreak()
+                    } else if !result.characters.isEmpty {
+                        appendParagraphBreak()
+                    }
+
+                case "ul":
+                    if tag.isClosing {
+                        if !listStack.isEmpty {
+                            listStack.removeLast()
+                        }
+
+                        appendParagraphBreak()
+                    } else {
+                        listStack.append(.unordered)
+                    }
+
+                case "ol":
+                    if tag.isClosing {
+                        if !listStack.isEmpty {
+                            listStack.removeLast()
+                        }
+
+                        appendParagraphBreak()
+                    } else {
+                        listStack.append(
+                            .ordered(currentNumber: 0)
+                        )
+                    }
+
+                case "li":
+                    if tag.isClosing {
+                        appendNewline()
+                    } else {
+                        appendListItemPrefix()
+                    }
+
+                default:
+                    break
+                }
+
+                return
+            }
+
+            guard ignoredContentDepth == 0 else {
+                return
+            }
+
+            let decodedText = token.htmlEntityDecoded
+
+            guard !decodedText.isEmpty else {
+                return
+            }
+
+            var piece = makePiece(
+                decodedText,
+                font: selectedFont()
+            )
+
+            if underlineDepth > 0 || currentLinkURL != nil {
+                piece.underlineStyle = .single
+            }
+
+            if strikethroughDepth > 0 {
+                piece.strikethroughStyle = .single
+            }
+
+            if let currentLinkURL {
+                piece.link = currentLinkURL
+                piece.foregroundColor = linkColor
+            }
+
+            result.append(piece)
+        }
+
+        trimTrailingNewlines()
 
         return result
     }
 
     private var htmlEntityDecoded: String {
-        self
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&apos;", with: "'")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
+        var decoded = self
+
+        let namedEntities: [String: String] = [
+            "&amp;": "&",
+            "&quot;": "\"",
+            "&apos;": "'",
+            "&lt;": "<",
+            "&gt;": ">",
+            "&nbsp;": " ",
+            "&bull;": "•",
+            "&copy;": "©",
+            "&reg;": "®",
+            "&trade;": "™",
+            "&hellip;": "…",
+            "&ndash;": "–",
+            "&mdash;": "—",
+            "&lsquo;": "‘",
+            "&rsquo;": "’",
+            "&ldquo;": "“",
+            "&rdquo;": "”",
+            "&euro;": "€",
+            "&pound;": "£",
+            "&yen;": "¥",
+            "&cent;": "¢",
+            "&deg;": "°",
+            "&plusmn;": "±",
+            "&times;": "×",
+            "&divide;": "÷"
+        ]
+
+        for (entity, replacement) in namedEntities {
+            decoded = decoded.replacingOccurrences(
+                of: entity,
+                with: replacement,
+                options: [.caseInsensitive]
+            )
+        }
+
+        decoded = decoded.decodingNumericHTMLEntities()
+
+        return decoded
+    }
+
+    private func decodingNumericHTMLEntities() -> String {
+        let pattern = #"&#(?:x([0-9a-fA-F]+)|([0-9]+));"#
+
+        guard let regex = try? NSRegularExpression(
+            pattern: pattern
+        ) else {
+            return self
+        }
+
+        var output = self
+
+        let matches = regex.matches(
+            in: output,
+            range: NSRange(
+                output.startIndex..<output.endIndex,
+                in: output
+            )
+        )
+
+        for match in matches.reversed() {
+            guard
+                let fullRange = Range(
+                    match.range(at: 0),
+                    in: output
+                )
+            else {
+                continue
+            }
+
+            let hexValue: String?
+
+            if match.range(at: 1).location != NSNotFound,
+               let range = Range(
+                   match.range(at: 1),
+                   in: output
+               ) {
+                hexValue = String(output[range])
+            } else {
+                hexValue = nil
+            }
+
+            let decimalValue: String?
+
+            if match.range(at: 2).location != NSNotFound,
+               let range = Range(
+                   match.range(at: 2),
+                   in: output
+               ) {
+                decimalValue = String(output[range])
+            } else {
+                decimalValue = nil
+            }
+
+            let scalarValue: UInt32?
+
+            if let hexValue {
+                scalarValue = UInt32(
+                    hexValue,
+                    radix: 16
+                )
+            } else if let decimalValue {
+                scalarValue = UInt32(
+                    decimalValue,
+                    radix: 10
+                )
+            } else {
+                scalarValue = nil
+            }
+
+            guard
+                let scalarValue,
+                let scalar = UnicodeScalar(scalarValue)
+            else {
+                continue
+            }
+
+            output.replaceSubrange(
+                fullRange,
+                with: String(Character(scalar))
+            )
+        }
+
+        return output
     }
 }

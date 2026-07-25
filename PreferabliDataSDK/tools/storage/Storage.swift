@@ -642,7 +642,6 @@ private enum ModelRegistry {
         add(ExperienceType.self)
         add(ExperiencePrice.self)
         add(ExperienceOperationHoursNormal.self)
-        add(ExperienceBenefit.self)
         add(Experience.self)
         add(Affiliate.self)
         

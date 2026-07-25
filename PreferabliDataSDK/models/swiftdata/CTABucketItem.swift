@@ -24,6 +24,7 @@ public final class CTABucketItem: Identifiable, HasIntID, HasImage {
     public var title: String?
     public var desc: String?
     public var half_gradient: Bool?
+    public var badge_placement: String?
     
     @Relationship(deleteRule: .nullify) public var primary_image: Media?
     @Relationship(deleteRule: .nullify) public var sub_image_1: Media?

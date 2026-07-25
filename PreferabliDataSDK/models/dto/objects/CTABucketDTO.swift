@@ -51,6 +51,7 @@ public struct CTABucketItemDTO: Decodable, Sendable {
     public let id: Int
     public let is_centered: Bool?
     public let half_gradient: Bool?
+    public let badge_placement: String?
     public let badge_icon: String?
     public let badge_color_hex_primary: String?
     public let badge_color_hex_secondary: String?

@@ -491,6 +491,8 @@ extension Storage {
         experience.brand_id = dto.brand_id ?? experience.brand_id
         experience.cuvee_experience = dto.cuvee_experience ?? experience.cuvee_experience
         experience.experience_description = dto.description ?? experience.experience_description
+        experience.experience_description_secondary = dto.description_secondary ?? experience.experience_description_secondary
+        experience.reservation_required = dto.reservation_required ?? experience.reservation_required
         experience.discount_code = dto.discount_code ?? experience.discount_code
         experience.duration = dto.duration ?? experience.duration
         experience.experience_type = dto.experience_type ?? experience.experience_type
@@ -533,21 +535,6 @@ extension Storage {
         try checkCancelledBeforeRelationshipWrite()
         if experience.venue.id != venue.id {
             experience.venue = venue
-        }
-
-        // MARK: Benefits
-        if let benefitDTOs = dto.experience_benefits {
-            var newBenefits: [ExperienceBenefit] = []
-            newBenefits.reserveCapacity(benefitDTOs.count)
-
-            for benefitDTO in benefitDTOs {
-                try checkCancelled()
-                let benefit = try upsertExperienceBenefit(from: benefitDTO, experience: experience, in: ctx)
-                newBenefits.append(benefit)
-            }
-
-            try checkCancelledBeforeRelationshipWrite()
-            experience.benefits = newBenefits
         }
 
         // MARK: Operation Hours Normals
@@ -596,29 +583,6 @@ extension Storage {
         }
 
         return experience
-    }
-
-    @discardableResult
-    nonisolated static func upsertExperienceBenefit(
-        from dto: ExperienceBenefitDTO,
-        experience: Experience,
-        in ctx: ModelContext
-    ) throws -> ExperienceBenefit {
-
-        try checkCancelled()
-
-        let benefit = try fetchOrInsert(ExperienceBenefit.self, id: dto.id, in: ctx) {
-            ExperienceBenefit(id: dto.id)
-        }
-
-        benefit.id = dto.id
-        benefit.experience_id = dto.experience_id ?? experience.id
-        benefit.benefit_description = dto.description ?? benefit.benefit_description
-        benefit.image_url = dto.image_url ?? benefit.image_url
-        benefit.subtitle = dto.subtitle ?? benefit.subtitle
-        benefit.title = dto.title ?? benefit.title
-
-        return benefit
     }
 
     @discardableResult
@@ -2386,6 +2350,7 @@ extension Storage {
             b.badge_color_hex_primary = dto.badge_color_hex_primary
             b.is_centered = dto.is_centered
             b.half_gradient = dto.half_gradient
+            b.badge_placement = dto.badge_placement
             b.badge_color_hex_secondary = dto.badge_color_hex_secondary
             b.badge_text_color_hex = dto.badge_text_color_hex
             b.badge_gradient_css = dto.badge_gradient_css

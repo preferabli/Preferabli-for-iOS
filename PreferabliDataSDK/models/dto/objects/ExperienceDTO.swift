@@ -15,6 +15,8 @@ public struct ExperienceDTO: Decodable, Sendable {
     public let preferabli_venue_id: Int?
     public let cuvee_experience: Bool?
     public let description: String?
+    public let description_secondary: String?
+    public let reservation_required: Bool?
     public let discount_code: String?
     public let duration: Int?
     public let experience_type: String?
@@ -50,7 +52,6 @@ public struct ExperienceDTO: Decodable, Sendable {
     public let preferabli_image_url: String?
     public let is_booking_link_external: Bool?
 
-    public let experience_benefits: [ExperienceBenefitDTO]?
     public let operation_hours_normal: [ExperienceOperationHoursNormalDTO]?
     public let experience_prices: [ExperiencePriceDTO]?
     public let experience_types: [ExperienceTypeDTO]?
@@ -63,6 +64,8 @@ public struct ExperienceDTO: Decodable, Sendable {
         case preferabli_venue_id
         case cuvee_experience
         case description
+        case description_secondary
+        case reservation_required
         case discount_code
         case duration
         case experience_type
@@ -98,28 +101,9 @@ public struct ExperienceDTO: Decodable, Sendable {
         case badge_gradient_css
         case preferabli_image_url
         
-        case experience_benefits = "benefits"
         case operation_hours_normal
         case experience_prices = "prices"
         case experience_types
-    }
-}
-
-public struct ExperienceBenefitDTO: Decodable, Sendable {
-    public let id: Int
-    public let experience_id: Int?
-    public let description: String?
-    public let image_url: String?
-    public let subtitle: String?
-    public let title: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id = "experience_benefits_id"
-        case experience_id
-        case description
-        case image_url
-        case subtitle
-        case title
     }
 }
 
