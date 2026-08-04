@@ -20,6 +20,10 @@ public final class VenueMarketTrait {
     /// Order as returned by VenueMarketTraitDTO
     public var order: Int?
 
+    /// Locally marks an association removed by the latest API response.
+    /// Keep the model alive because another ModelContext may still reference it.
+    public var isTombstoned: Bool = false
+
     /// Denormalized ids (useful for filtering without relationship predicates).
     public var venue_id: Int
     public var trait_id: Int

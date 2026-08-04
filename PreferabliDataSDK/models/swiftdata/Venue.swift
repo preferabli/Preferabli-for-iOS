@@ -162,21 +162,31 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
     public func primaryVenueCategoryTrait(in market: Market? = nil) -> MarketTrait? {
         let scopeMarketId = market?.id
 
-        let candidates = venue_market_traits.compactMap { link -> (order: Int, trait: MarketTrait)? in
-            // Scope: if market provided, match it; else accept any market
-            if let mid = scopeMarketId, link.market_id != mid { return nil }
+        let candidates = activeVenueMarketTraits.compactMap {
+            link -> (order: Int, trait: MarketTrait)? in
 
-            guard link.trait.type ?? "" == "venue_category"
-            else { return nil }
+            if let mid = scopeMarketId, link.market_id != mid {
+                return nil
+            }
 
-            // Treat nil order as "very large" so it sorts last
-            let ord = link.order ?? Int.max
-            return (ord, link.trait)
+            guard link.trait.type ?? "" == "venue_category" else {
+                return nil
+            }
+
+            return (
+                order: link.order ?? Int.max,
+                trait: link.trait
+            )
         }
 
         return candidates.min(by: { $0.order < $1.order })?.trait
     }
     
+    @Transient
+    public var activeVenueMarketTraits: [VenueMarketTrait] {
+        venue_market_traits.filter { !$0.isTombstoned }
+    }    
+
     public func getImage(width : Int, height : Int, quality : Int = 80) -> URL? {
         let imagePath : String?
         if (primary_image == nil) {

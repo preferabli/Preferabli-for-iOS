@@ -26,6 +26,7 @@ public final class Experience: HasIntID, HasImage {
     public var header_image_url: String?
     public var min_availability_notice_days: Int?
     public var name: String
+    public var no_published_hours: Bool?
     public var number_of_wines_poured: Int?
     public var order: Int?
     public var prepayment_required: Bool?
@@ -135,6 +136,7 @@ public final class ExperiencePrice: HasIntID {
     public var min_count: Int?
     public var partner_ref: Int?
     public var price: Double?
+    public var price_is_external: Bool?
     public var price_type: String?
     public var stripe_product_price_id: String?
     public var price_on_request: Bool?

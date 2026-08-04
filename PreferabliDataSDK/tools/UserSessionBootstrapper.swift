@@ -77,7 +77,7 @@ final class UserSessionBootstrapper {
             // from profile and collection bootstrap.
             let affiliateTask = Task { @MainActor [weak self, weak preferabli] in
                 guard let self, let preferabli else { return }
-                await self.refreshAffiliatesIfNeeded(preferabli: preferabli, force: false)
+                await self.refreshAffiliatesIfNeeded(preferabli: preferabli, force: force)
             }
 
             do {
@@ -227,7 +227,7 @@ public enum CellarWarmup {
 }
 
 private enum AffiliateRefreshGate {
-    static let key = "affiliates.lastRefreshDate"
+    static let key = "lastCalledAffiliates"
     static let maxDays = 60
 
     static func shouldRefresh(force: Bool) -> Bool {

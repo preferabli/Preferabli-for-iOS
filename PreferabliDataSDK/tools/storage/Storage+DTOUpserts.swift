@@ -37,31 +37,30 @@ extension Storage {
         let product: Product
         if let pid = tempProductId, let temp = try Storage.fetchById(Product.self, id: pid, in: ctx) {
             product = temp
-            product.id = dto.id
+            if product.id != dto.id { product.id = dto.id }
         } else {
             product = try fetchOrInsert(Product.self, id: dto.id, in: ctx) { Product(id: dto.id) }
         }
 
         try checkCancelled()
 
-        product.name = dto.name
+        if product.name != dto.name { product.name = dto.name }
         product.created_at = dto.created_at ?? product.created_at
         product.updated_at = dto.updated_at ?? product.updated_at
-        product.brand = dto.brand
-        product.decant = dto.decant
-        product.grape = dto.grape
-        product.brand_lat = dto.brand_lat
-        product.brand_lon = dto.brand_lon
-        product.show_year_dropdown = dto.show_year_dropdown
-        product.recommendable = dto.recommendable
-        product.region = dto.region
-        product.type = dto.type
-        product.category = dto.category
-        product.subcategory = dto.subcategory
-        product.brand_id = dto.brand_id
-        product.product_hash = dto.hash
-        product.country_code = dto.country_code
-
+        if product.brand != dto.brand { product.brand = dto.brand }
+        if product.decant != dto.decant { product.decant = dto.decant }
+        if product.grape != dto.grape { product.grape = dto.grape }
+        if product.brand_lat != dto.brand_lat { product.brand_lat = dto.brand_lat }
+        if product.brand_lon != dto.brand_lon { product.brand_lon = dto.brand_lon }
+        if product.show_year_dropdown != dto.show_year_dropdown { product.show_year_dropdown = dto.show_year_dropdown }
+        if product.recommendable != dto.recommendable { product.recommendable = dto.recommendable }
+        if product.region != dto.region { product.region = dto.region }
+        if product.type != dto.type { product.type = dto.type }
+        if product.category != dto.category { product.category = dto.category }
+        if product.subcategory != dto.subcategory { product.subcategory = dto.subcategory }
+        if product.brand_id != dto.brand_id { product.brand_id = dto.brand_id }
+        if product.product_hash != dto.hash { product.product_hash = dto.hash }
+        if product.country_code != dto.country_code { product.country_code = dto.country_code }
         // Primary image
         if let imgDTO = dto.primary_image {
             try checkCancelled()
@@ -167,31 +166,30 @@ extension Storage {
         try checkCancelled()
 
         profile.refreshed_at = Date()
-        profile.trait1Name  = dto.trait1Name
-        profile.trait2Name  = dto.trait2Name
-        profile.trait3Name  = dto.trait3Name
-        profile.trait4Name  = dto.trait4Name
-        profile.trait1Level = dto.trait1Level
-        profile.trait2Level = dto.trait2Level
-        profile.trait3Level = dto.trait3Level
-        profile.trait4Level = dto.trait4Level
-        profile.flavor1Name = dto.flavor1Name
-        profile.flavor2Name = dto.flavor2Name
-        profile.flavor3Name = dto.flavor3Name
-        profile.flavor4Name = dto.flavor4Name
-        profile.flavor1Image = dto.flavor1Image
-        profile.flavor2Image = dto.flavor2Image
-        profile.flavor3Image = dto.flavor3Image
-        profile.flavor4Image = dto.flavor4Image
-        profile.food_category_1_name         = dto.food_category_1_name
-        profile.food_category_2_name         = dto.food_category_2_name
-        profile.food_category_3_name         = dto.food_category_3_name
-        profile.food_category_4_name         = dto.food_category_4_name
-        profile.food_category_1_icon_png_url = dto.food_category_1_icon_png_url
-        profile.food_category_2_icon_png_url = dto.food_category_2_icon_png_url
-        profile.food_category_3_icon_png_url = dto.food_category_3_icon_png_url
-        profile.food_category_4_icon_png_url = dto.food_category_4_icon_png_url
-
+        if profile.trait1Name != dto.trait1Name { profile.trait1Name = dto.trait1Name }
+        if profile.trait2Name != dto.trait2Name { profile.trait2Name = dto.trait2Name }
+        if profile.trait3Name != dto.trait3Name { profile.trait3Name = dto.trait3Name }
+        if profile.trait4Name != dto.trait4Name { profile.trait4Name = dto.trait4Name }
+        if profile.trait1Level != dto.trait1Level { profile.trait1Level = dto.trait1Level }
+        if profile.trait2Level != dto.trait2Level { profile.trait2Level = dto.trait2Level }
+        if profile.trait3Level != dto.trait3Level { profile.trait3Level = dto.trait3Level }
+        if profile.trait4Level != dto.trait4Level { profile.trait4Level = dto.trait4Level }
+        if profile.flavor1Name != dto.flavor1Name { profile.flavor1Name = dto.flavor1Name }
+        if profile.flavor2Name != dto.flavor2Name { profile.flavor2Name = dto.flavor2Name }
+        if profile.flavor3Name != dto.flavor3Name { profile.flavor3Name = dto.flavor3Name }
+        if profile.flavor4Name != dto.flavor4Name { profile.flavor4Name = dto.flavor4Name }
+        if profile.flavor1Image != dto.flavor1Image { profile.flavor1Image = dto.flavor1Image }
+        if profile.flavor2Image != dto.flavor2Image { profile.flavor2Image = dto.flavor2Image }
+        if profile.flavor3Image != dto.flavor3Image { profile.flavor3Image = dto.flavor3Image }
+        if profile.flavor4Image != dto.flavor4Image { profile.flavor4Image = dto.flavor4Image }
+        if profile.food_category_1_name != dto.food_category_1_name { profile.food_category_1_name = dto.food_category_1_name }
+        if profile.food_category_2_name != dto.food_category_2_name { profile.food_category_2_name = dto.food_category_2_name }
+        if profile.food_category_3_name != dto.food_category_3_name { profile.food_category_3_name = dto.food_category_3_name }
+        if profile.food_category_4_name != dto.food_category_4_name { profile.food_category_4_name = dto.food_category_4_name }
+        if profile.food_category_1_icon_png_url != dto.food_category_1_icon_png_url { profile.food_category_1_icon_png_url = dto.food_category_1_icon_png_url }
+        if profile.food_category_2_icon_png_url != dto.food_category_2_icon_png_url { profile.food_category_2_icon_png_url = dto.food_category_2_icon_png_url }
+        if profile.food_category_3_icon_png_url != dto.food_category_3_icon_png_url { profile.food_category_3_icon_png_url = dto.food_category_3_icon_png_url }
+        if profile.food_category_4_icon_png_url != dto.food_category_4_icon_png_url { profile.food_category_4_icon_png_url = dto.food_category_4_icon_png_url }
         return profile
     }
 
@@ -220,11 +218,10 @@ extension Storage {
         try checkCancelled()
 
         data.refreshed_at = Date()
-        data.title  = dto.title
-        data.confidence_code = dto.confidence_code
-        data.details = dto.details
-        data.formatted_predict_rating = dto.formatted_predict_rating
-
+        if data.title != dto.title { data.title = dto.title }
+        if data.confidence_code != dto.confidence_code { data.confidence_code = dto.confidence_code }
+        if data.details != dto.details { data.details = dto.details }
+        if data.formatted_predict_rating != dto.formatted_predict_rating { data.formatted_predict_rating = dto.formatted_predict_rating }
         return data
     }
 
@@ -250,22 +247,21 @@ extension Storage {
                       in: ctx
                   ) {
             v = temp
-            v.id = dto.id
+            if v.id != dto.id { v.id = dto.id }
         } else {
             v = Variant(id: dto.id, year: dto.year, product: product)
             ctx.insert(v)
         }
 
-        v.year = dto.year
-
+        if v.year != dto.year { v.year = dto.year }
         try checkCancelledBeforeRelationshipWrite()
         v.product = product
 
         v.created_at = dto.created_at ?? v.created_at
         v.updated_at = dto.updated_at ?? v.updated_at
-        v.num_dollar_signs = dto.num_dollar_signs ?? v.num_dollar_signs
-        v.price = dto.price ?? v.price
-        v.recommendable = dto.recommendable ?? v.recommendable
+        if v.num_dollar_signs != dto.num_dollar_signs { v.num_dollar_signs = dto.num_dollar_signs }
+        if v.price != dto.price { v.price = dto.price }
+        if v.recommendable != dto.recommendable { v.recommendable = dto.recommendable }
         v.isTombstoned = false
 
         if let imgDTO = dto.primary_image {
@@ -305,35 +301,34 @@ extension Storage {
         let t: Tag
         if let tid = tempTagId, let temp = try Storage.fetchById(Tag.self, id: tid, in: ctx) {
             t = temp
-            t.id = dto.id
+            if t.id != dto.id { t.id = dto.id }
         } else {
             t = try fetchOrInsert(Tag.self, id: dto.id, in: ctx) { Tag(id: dto.id, collection_id: dto.collection_id, variant: variant) }
         }
 
         try checkCancelled()
 
-        t.collection_id = dto.collection_id ?? t.collection_id
-        t.comment = dto.comment ?? t.comment
+        if t.collection_id != dto.collection_id { t.collection_id = dto.collection_id }
+        if t.comment != dto.comment { t.comment = dto.comment }
         t.created_at = dto.created_at ?? t.created_at
-        t.location = dto.location ?? t.location
-        t.badge = dto.badge ?? t.badge
-        t.tagged_in_collection_id = dto.tagged_in_collection_id ?? t.tagged_in_collection_id
-        t.tagged_in_channel_id = dto.tagged_in_channel_id ?? t.tagged_in_channel_id
-        t.tagged_in_channel_name = dto.tagged_in_channel_name ?? t.tagged_in_channel_name
-        t.type = dto.type ?? t.type
+        if t.location != dto.location { t.location = dto.location }
+        if t.badge != dto.badge { t.badge = dto.badge }
+        if t.tagged_in_collection_id != dto.tagged_in_collection_id { t.tagged_in_collection_id = dto.tagged_in_collection_id }
+        if t.tagged_in_channel_id != dto.tagged_in_channel_id { t.tagged_in_channel_id = dto.tagged_in_channel_id }
+        if t.tagged_in_channel_name != dto.tagged_in_channel_name { t.tagged_in_channel_name = dto.tagged_in_channel_name }
+        if t.type != dto.type { t.type = dto.type }
         t.updated_at = dto.updated_at ?? t.updated_at
-        t.user_id = dto.user_id ?? t.user_id
-        t.value = dto.value ?? t.value
-        t.occasion = dto.occasion ?? t.occasion
-        t.bin = dto.bin ?? t.bin
-        t.variant_id = dto.variant_id ?? t.variant_id
-        t.quantity = dto.quantity ?? t.quantity
-        t.format_ml = dto.format_ml ?? t.format_ml
-        t.price = dto.price ?? t.price
-        t.customer_id = dto.customer_id ?? t.customer_id
-
+        if t.user_id != dto.user_id { t.user_id = dto.user_id }
+        if t.value != dto.value { t.value = dto.value }
+        if t.occasion != dto.occasion { t.occasion = dto.occasion }
+        if t.bin != dto.bin { t.bin = dto.bin }
+        if t.variant_id != dto.variant_id { t.variant_id = dto.variant_id }
+        if t.quantity != dto.quantity { t.quantity = dto.quantity }
+        if t.format_ml != dto.format_ml { t.format_ml = dto.format_ml }
+        if t.price != dto.price { t.price = dto.price }
+        if t.customer_id != dto.customer_id { t.customer_id = dto.customer_id }
         let product = variant.product
-        let newDate = t.created_at ?? .now
+        let newDate = t.created_at
 
         // These are just pointer assignments but still relationship-ish cached refs.
         try checkCancelledBeforeRelationshipWrite()
@@ -368,11 +363,10 @@ extension Storage {
             Media(id: dto.id)
         }
 
-        m.id = dto.id
-        m.path = dto.path ?? m.path
-        m.type = dto.type ?? m.type
-        m.mime_type = dto.mime_type ?? m.mime_type
-
+        if m.id != dto.id { m.id = dto.id }
+        if m.path != dto.path { m.path = dto.path }
+        if m.type != dto.type { m.type = dto.type }
+        if m.mime_type != dto.mime_type { m.mime_type = dto.mime_type }
         if let posterDTO = dto.poster {
             try checkCancelled()
 
@@ -404,11 +398,10 @@ extension Storage {
         try checkCancelled()
 
         let m = try fetchOrInsert(Media.self, id: dto.id, in: ctx) { Media(id: dto.id) }
-        m.id = dto.id
-        m.path = dto.path ?? m.path
-        m.type = dto.type ?? m.type
-        m.mime_type = dto.mime_type ?? m.mime_type
-        
+        if m.id != dto.id { m.id = dto.id }
+        if m.path != dto.path { m.path = dto.path }
+        if m.type != dto.type { m.type = dto.type }
+        if m.mime_type != dto.mime_type { m.mime_type = dto.mime_type }
         return m
     }
     
@@ -424,19 +417,18 @@ extension Storage {
             Affiliate(id: dto.id)
         }
 
-        affiliate.affiliate_code = dto.affiliate_code ?? affiliate.affiliate_code
-        affiliate.affiliate_param = dto.affiliate_param ?? affiliate.affiliate_param
-        affiliate.affiliate_description = dto.description ?? affiliate.affiliate_description
-        affiliate.filter_visible = dto.filter_visible ?? affiliate.filter_visible
-        affiliate.header_image_url = dto.header_image_url ?? affiliate.header_image_url
-        affiliate.logo_image_url = dto.logo_image_url ?? affiliate.logo_image_url
-        affiliate.market_id = dto.market_id ?? affiliate.market_id
-        affiliate.name = dto.name ?? affiliate.name
-        affiliate.order = dto.order ?? affiliate.order
-        affiliate.slug = dto.slug ?? affiliate.slug
-        affiliate.title = dto.title ?? affiliate.title
-        affiliate.visible = dto.visible ?? affiliate.visible
-
+        if affiliate.affiliate_code != dto.affiliate_code { affiliate.affiliate_code = dto.affiliate_code }
+        if affiliate.affiliate_param != dto.affiliate_param { affiliate.affiliate_param = dto.affiliate_param }
+        if affiliate.affiliate_description != dto.description { affiliate.affiliate_description = dto.description }
+        if affiliate.filter_visible != dto.filter_visible { affiliate.filter_visible = dto.filter_visible }
+        if affiliate.header_image_url != dto.header_image_url { affiliate.header_image_url = dto.header_image_url }
+        if affiliate.logo_image_url != dto.logo_image_url { affiliate.logo_image_url = dto.logo_image_url }
+        if affiliate.market_id != dto.market_id { affiliate.market_id = dto.market_id }
+        if affiliate.name != dto.name { affiliate.name = dto.name }
+        if affiliate.order != dto.order { affiliate.order = dto.order }
+        if affiliate.slug != dto.slug { affiliate.slug = dto.slug }
+        if affiliate.title != dto.title { affiliate.title = dto.title }
+        if affiliate.visible != dto.visible { affiliate.visible = dto.visible }
         if let experienceDTOs = dto.experiences {
             var newExperiences: [Experience] = []
             newExperiences.reserveCapacity(experienceDTOs.count)
@@ -483,50 +475,49 @@ extension Storage {
 
         try checkCancelled()
 
-        experience.id = dto.id
-        experience.name = dto.name
-
-        experience.booking_link = dto.booking_link ?? experience.booking_link
-        experience.booking_terms = dto.booking_terms ?? experience.booking_terms
-        experience.brand_id = dto.brand_id ?? experience.brand_id
-        experience.cuvee_experience = dto.cuvee_experience ?? experience.cuvee_experience
-        experience.experience_description = dto.description ?? experience.experience_description
-        experience.experience_description_secondary = dto.description_secondary ?? experience.experience_description_secondary
-        experience.reservation_required = dto.reservation_required ?? experience.reservation_required
-        experience.discount_code = dto.discount_code ?? experience.discount_code
-        experience.duration = dto.duration ?? experience.duration
-        experience.experience_type = dto.experience_type ?? experience.experience_type
-        experience.header_image_url = dto.header_image_url ?? experience.header_image_url
-        experience.min_availability_notice_days = dto.min_availability_notice_days ?? experience.min_availability_notice_days
-        experience.number_of_wines_poured = dto.number_of_wines_poured ?? experience.number_of_wines_poured
-        experience.order = dto.order ?? experience.order
-        experience.prepayment_required = dto.prepayment_required ?? experience.prepayment_required
-        experience.price = dto.price ?? experience.price
-        experience.qualifier = dto.qualifier ?? experience.qualifier
-        experience.qualifier_text = dto.qualifier_text ?? experience.qualifier_text
-        experience.qualifier_title = dto.qualifier_title ?? experience.qualifier_title
-        experience.reservation_api = dto.reservation_api ?? experience.reservation_api
-        experience.reservation_notice = dto.reservation_notice ?? experience.reservation_notice
-        experience.reservation_options = dto.reservation_options ?? experience.reservation_options
-        experience.reservation_type = dto.reservation_type ?? experience.reservation_type
-        experience.show_upgrade = dto.show_upgrade ?? experience.show_upgrade
-        experience.stripe_product_id = dto.stripe_product_id ?? experience.stripe_product_id
-        experience.terms_and_conditions = dto.terms_and_conditions ?? experience.terms_and_conditions
-        experience.unit_label = dto.unit_label ?? experience.unit_label
-        experience.upgrade_experience_id = dto.upgrade_experience_id ?? experience.upgrade_experience_id
-        experience.visible = dto.visible ?? experience.visible
-        experience.wt_nft_id = dto.wt_nft_id ?? experience.wt_nft_id
-        experience.reservations_provider = dto.reservations_provider ?? experience.reservations_provider
-        experience.cancellation_fee = dto.cancellation_fee ?? experience.cancellation_fee
-        experience.badge_title = dto.badge_title ?? experience.badge_title
-        experience.badge_subtitle = dto.badge_subtitle ?? experience.badge_subtitle
-        experience.badge_color_hex = dto.badge_color_hex ?? experience.badge_color_hex
-        experience.badge_text_color_hex = dto.badge_text_color_hex ?? experience.badge_text_color_hex
-        experience.badge_gradient_css = dto.badge_gradient_css ?? experience.badge_gradient_css
-        experience.collection_id = dto.collection_id ?? experience.collection_id
-        experience.preferabli_image_url = dto.preferabli_image_url ?? experience.preferabli_image_url
-        experience.is_booking_link_external = dto.is_booking_link_external ?? experience.is_booking_link_external
-        
+        if experience.id != dto.id { experience.id = dto.id }
+        if experience.name != dto.name { experience.name = dto.name }
+        if experience.booking_link != dto.booking_link { experience.booking_link = dto.booking_link }
+        if experience.booking_terms != dto.booking_terms { experience.booking_terms = dto.booking_terms }
+        if experience.brand_id != dto.brand_id { experience.brand_id = dto.brand_id }
+        if experience.cuvee_experience != dto.cuvee_experience { experience.cuvee_experience = dto.cuvee_experience }
+        if experience.experience_description != dto.description { experience.experience_description = dto.description }
+        if experience.experience_description_secondary != dto.description_secondary { experience.experience_description_secondary = dto.description_secondary }
+        if experience.reservation_required != dto.reservation_required { experience.reservation_required = dto.reservation_required }
+        if experience.discount_code != dto.discount_code { experience.discount_code = dto.discount_code }
+        if experience.duration != dto.duration { experience.duration = dto.duration }
+        if experience.experience_type != dto.experience_type { experience.experience_type = dto.experience_type }
+        if experience.header_image_url != dto.header_image_url { experience.header_image_url = dto.header_image_url }
+        if experience.min_availability_notice_days != dto.min_availability_notice_days { experience.min_availability_notice_days = dto.min_availability_notice_days }
+        if experience.no_published_hours != dto.no_published_hours { experience.no_published_hours = dto.no_published_hours }
+        if experience.number_of_wines_poured != dto.number_of_wines_poured { experience.number_of_wines_poured = dto.number_of_wines_poured }
+        if experience.order != dto.order { experience.order = dto.order }
+        if experience.prepayment_required != dto.prepayment_required { experience.prepayment_required = dto.prepayment_required }
+        if experience.price != dto.price { experience.price = dto.price }
+        if experience.qualifier != dto.qualifier { experience.qualifier = dto.qualifier }
+        if experience.qualifier_text != dto.qualifier_text { experience.qualifier_text = dto.qualifier_text }
+        if experience.qualifier_title != dto.qualifier_title { experience.qualifier_title = dto.qualifier_title }
+        if experience.reservation_api != dto.reservation_api { experience.reservation_api = dto.reservation_api }
+        if experience.reservation_notice != dto.reservation_notice { experience.reservation_notice = dto.reservation_notice }
+        if experience.reservation_options != dto.reservation_options { experience.reservation_options = dto.reservation_options }
+        if experience.reservation_type != dto.reservation_type { experience.reservation_type = dto.reservation_type }
+        if experience.show_upgrade != dto.show_upgrade { experience.show_upgrade = dto.show_upgrade }
+        if experience.stripe_product_id != dto.stripe_product_id { experience.stripe_product_id = dto.stripe_product_id }
+        if experience.terms_and_conditions != dto.terms_and_conditions { experience.terms_and_conditions = dto.terms_and_conditions }
+        if experience.unit_label != dto.unit_label { experience.unit_label = dto.unit_label }
+        if experience.upgrade_experience_id != dto.upgrade_experience_id { experience.upgrade_experience_id = dto.upgrade_experience_id }
+        if experience.visible != dto.visible { experience.visible = dto.visible }
+        if experience.wt_nft_id != dto.wt_nft_id { experience.wt_nft_id = dto.wt_nft_id }
+        if experience.reservations_provider != dto.reservations_provider { experience.reservations_provider = dto.reservations_provider }
+        if experience.cancellation_fee != dto.cancellation_fee { experience.cancellation_fee = dto.cancellation_fee }
+        if experience.badge_title != dto.badge_title { experience.badge_title = dto.badge_title }
+        if experience.badge_subtitle != dto.badge_subtitle { experience.badge_subtitle = dto.badge_subtitle }
+        if experience.badge_color_hex != dto.badge_color_hex { experience.badge_color_hex = dto.badge_color_hex }
+        if experience.badge_text_color_hex != dto.badge_text_color_hex { experience.badge_text_color_hex = dto.badge_text_color_hex }
+        if experience.badge_gradient_css != dto.badge_gradient_css { experience.badge_gradient_css = dto.badge_gradient_css }
+        if experience.collection_id != dto.collection_id { experience.collection_id = dto.collection_id }
+        if experience.preferabli_image_url != dto.preferabli_image_url { experience.preferabli_image_url = dto.preferabli_image_url }
+        if experience.is_booking_link_external != dto.is_booking_link_external { experience.is_booking_link_external = dto.is_booking_link_external }
         // inside Storage.upsertExperience(...)
         if experience.isTombstoned {
             experience.isTombstoned = false
@@ -598,13 +589,12 @@ extension Storage {
             ExperienceOperationHoursNormal(id: dto.id)
         }
 
-        hours.id = dto.id
-        hours.day_of_week = dto.day_of_week ?? hours.day_of_week
+        if hours.id != dto.id { hours.id = dto.id }
+        if hours.day_of_week != dto.day_of_week { hours.day_of_week = dto.day_of_week }
         hours.end_times = dto.end_times ?? hours.end_times
         hours.experience_id = dto.experience_id ?? experience.id
-        hours.increment = dto.increment ?? hours.increment
+        if hours.increment != dto.increment { hours.increment = dto.increment }
         hours.start_times = dto.start_times ?? hours.start_times
-
         return hours
     }
 
@@ -621,23 +611,23 @@ extension Storage {
             ExperiencePrice(id: dto.id)
         }
 
-        price.id = dto.id
-        price.active = dto.active ?? price.active
-        price.age_range = dto.age_range ?? price.age_range
-        price.experience_economics = dto.experience_economics ?? price.experience_economics
+        if price.id != dto.id { price.id = dto.id }
+        if price.active != dto.active { price.active = dto.active }
+        if price.age_range != dto.age_range { price.age_range = dto.age_range }
+        if price.experience_economics != dto.experience_economics { price.experience_economics = dto.experience_economics }
         price.experience_id = dto.experience_id ?? experience.id
-        price.experience_tier = dto.experience_tier ?? price.experience_tier
-        price.guest_increment = dto.guest_increment ?? price.guest_increment
-        price.price_on_request = dto.price_on_request ?? price.price_on_request
-        price.incentive_type_id = dto.incentive_type_id ?? price.incentive_type_id
-        price.list_price = dto.list_price ?? price.list_price
-        price.max_count = dto.max_count ?? price.max_count
-        price.min_count = dto.min_count ?? price.min_count
-        price.partner_ref = dto.partner_ref ?? price.partner_ref
-        price.price = dto.price ?? price.price
-        price.price_type = dto.price_type ?? price.price_type
-        price.stripe_product_price_id = dto.stripe_product_price_id ?? price.stripe_product_price_id
-
+        if price.experience_tier != dto.experience_tier { price.experience_tier = dto.experience_tier }
+        if price.guest_increment != dto.guest_increment { price.guest_increment = dto.guest_increment }
+        if price.price_on_request != dto.price_on_request { price.price_on_request = dto.price_on_request }
+        if price.incentive_type_id != dto.incentive_type_id { price.incentive_type_id = dto.incentive_type_id }
+        if price.list_price != dto.list_price { price.list_price = dto.list_price }
+        if price.max_count != dto.max_count { price.max_count = dto.max_count }
+        if price.min_count != dto.min_count { price.min_count = dto.min_count }
+        if price.partner_ref != dto.partner_ref { price.partner_ref = dto.partner_ref }
+        if price.price != dto.price { price.price = dto.price }
+        if price.price_is_external != dto.price_is_external { price.price_is_external = dto.price_is_external }
+        if price.price_type != dto.price_type { price.price_type = dto.price_type }
+        if price.stripe_product_price_id != dto.stripe_product_price_id { price.stripe_product_price_id = dto.stripe_product_price_id }
         return price
     }
 
@@ -654,18 +644,17 @@ extension Storage {
             ExperienceType(id: dto.id)
         }
 
-        type.id = dto.id
-        type.filter_order = dto.filter_order ?? type.filter_order
-        type.filter_visible = dto.filter_visible ?? type.filter_visible
-        type.highlight = dto.highlight ?? type.highlight
-        type.home_order = dto.home_order ?? type.home_order
-        type.home_visible = dto.home_visible ?? type.home_visible
-        type.icon_url = dto.icon_url ?? type.icon_url
-        type.image_url = dto.image_url ?? type.image_url
-        type.market_id = dto.market_id ?? type.market_id
-        type.preferabli_market_trait_id = dto.preferabli_market_trait_id ?? type.preferabli_market_trait_id
-        type.name = dto.name ?? type.name
-
+        if type.id != dto.id { type.id = dto.id }
+        if type.filter_order != dto.filter_order { type.filter_order = dto.filter_order }
+        if type.filter_visible != dto.filter_visible { type.filter_visible = dto.filter_visible }
+        if type.highlight != dto.highlight { type.highlight = dto.highlight }
+        if type.home_order != dto.home_order { type.home_order = dto.home_order }
+        if type.home_visible != dto.home_visible { type.home_visible = dto.home_visible }
+        if type.icon_url != dto.icon_url { type.icon_url = dto.icon_url }
+        if type.image_url != dto.image_url { type.image_url = dto.image_url }
+        if type.market_id != dto.market_id { type.market_id = dto.market_id }
+        if type.preferabli_market_trait_id != dto.preferabli_market_trait_id { type.preferabli_market_trait_id = dto.preferabli_market_trait_id }
+        if type.name != dto.name { type.name = dto.name }
         return type
     }
 
@@ -955,10 +944,17 @@ extension Storage {
         if let venueTraitDTOs = dto.market_trait_associations {
             let scopeMarketID = market?.id
 
-            let resolved: [(order: Int?, trait: MarketTraitDTO)] = venueTraitDTOs.compactMap { row in
-                guard let trait = row.market_trait else { return nil }
-                return (row.order, trait)
-            }
+            let resolved: [(order: Int?, trait: MarketTraitDTO)] =
+                venueTraitDTOs.compactMap { row in
+                    guard let trait = row.market_trait else {
+                        return nil
+                    }
+
+                    return (
+                        order: row.order,
+                        trait: trait
+                    )
+                }
 
             let keepKeys = Set(
                 resolved.map {
@@ -970,22 +966,18 @@ extension Storage {
                 }
             )
 
-            if !v.venue_market_traits.isEmpty {
-                for link in v.venue_market_traits {
-                    try checkCancelled()
+            // Do not physically delete missing associations. A different ModelContext
+            // may still hold the corresponding VenueMarketTrait instance.
+            for link in v.venue_market_traits
+            where link.market_id == scopeMarketID {
+                try checkCancelled()
 
-                    guard link.market_id == scopeMarketID else { continue }
+                let shouldBeTombstoned = !keepKeys.contains(link.key)
 
-                    if !keepKeys.contains(link.key) {
-                        try checkCancelledBeforeRelationshipWrite()
-                        ctx.delete(link)
-                        batch.venueMarketTraitsByKey[link.key] = nil
-                    }
+                if link.isTombstoned != shouldBeTombstoned {
+                    link.isTombstoned = shouldBeTombstoned
                 }
             }
-
-            var newScopedLinks: [VenueMarketTrait] = []
-            newScopedLinks.reserveCapacity(resolved.count)
 
             for (order, traitDTO) in resolved {
                 try checkCancelled()
@@ -1011,17 +1003,13 @@ extension Storage {
                     in: ctx
                 )
 
-                if link.order != order { link.order = order }
+                if link.order != order {
+                    link.order = order
+                }
 
-                newScopedLinks.append(link)
-            }
-
-            let preserved = v.venue_market_traits.filter { $0.market_id != scopeMarketID }
-            let currentScoped = v.venue_market_traits.filter { $0.market_id == scopeMarketID }
-
-            if !sameVenueMarketTraitKeys(currentScoped, newScopedLinks) {
-                try checkCancelledBeforeRelationshipWrite()
-                v.venue_market_traits = preserved + newScopedLinks
+                if link.isTombstoned {
+                    link.isTombstoned = false
+                }
             }
         }
 
@@ -1081,10 +1069,10 @@ extension Storage {
         try checkCancelled()
 
         let h = try fetchOrInsert(VenueHour.self, id: dto.id, in: ctx) { VenueHour(id: dto.id) }
-        h.weekday = dto.weekday ?? h.weekday
-        h.open_time = dto.open_time ?? h.open_time
-        h.close_time = dto.close_time ?? h.close_time
-        h.is_closed = dto.is_closed ?? h.is_closed
+        if h.weekday != dto.weekday { h.weekday = dto.weekday }
+        if h.open_time != dto.open_time { h.open_time = dto.open_time }
+        if h.close_time != dto.close_time { h.close_time = dto.close_time }
+        if h.is_closed != dto.is_closed { h.is_closed = dto.is_closed }
         return h
     }
 
@@ -1094,12 +1082,12 @@ extension Storage {
         try checkCancelled()
 
         let d = try fetchOrInsert(DeliveryMethod.self, id: dto.id, in: ctx) { DeliveryMethod(id: dto.id) }
-        d.shipping_type = dto.shipping_type ?? d.shipping_type
-        d.state_abbreviation = dto.state_abbreviation ?? d.state_abbreviation
-        d.state_display_name = dto.state_display_name ?? d.state_display_name
-        d.country = dto.country ?? d.country
-        d.shipping_cost_note = dto.shipping_cost_note ?? d.shipping_cost_note
-        d.shipping_speed_note = dto.shipping_speed_note ?? d.shipping_speed_note
+        if d.shipping_type != dto.shipping_type { d.shipping_type = dto.shipping_type }
+        if d.state_abbreviation != dto.state_abbreviation { d.state_abbreviation = dto.state_abbreviation }
+        if d.state_display_name != dto.state_display_name { d.state_display_name = dto.state_display_name }
+        if d.country != dto.country { d.country = dto.country }
+        if d.shipping_cost_note != dto.shipping_cost_note { d.shipping_cost_note = dto.shipping_cost_note }
+        if d.shipping_speed_note != dto.shipping_speed_note { d.shipping_speed_note = dto.shipping_speed_note }
         return d
     }
 
@@ -1112,38 +1100,37 @@ extension Storage {
 
         let c = try fetchOrInsert(Collection.self, id: dto.id, in: ctx) { Collection(id: dto.id) }
 
-        c.channel_id = dto.channel_id ?? c.channel_id
-        c.sort_channel_id = dto.sort_channel_id ?? c.sort_channel_id
-        c.code = dto.code ?? c.code
-        c.desc = dto.description ?? c.desc
-        c.end_date = dto.end_date ?? c.end_date
+        if c.channel_id != dto.channel_id { c.channel_id = dto.channel_id }
+        if c.sort_channel_id != dto.sort_channel_id { c.sort_channel_id = dto.sort_channel_id }
+        if c.code != dto.code { c.code = dto.code }
+        if c.desc != dto.description { c.desc = dto.description }
+        if c.end_date != dto.end_date { c.end_date = dto.end_date }
         c.updated_at = dto.updated_at ?? c.updated_at
-        c.auto_wili = dto.auto_wili ?? c.auto_wili
-        c.is_pinned = dto.is_pinned ?? c.is_pinned
-        c.display_time = dto.display_time ?? c.display_time
-        c.is_browsable = dto.is_browsable ?? c.is_browsable
-        c.is_my_cellar = dto.is_my_cellar ?? c.is_my_cellar
-        c.lbs_order = dto.lbs_order ?? c.lbs_order
-        c.product_count = dto.product_count ?? c.product_count
-        c.name = dto.name ?? c.name
-        c.badge_method = dto.badge_method ?? c.badge_method
-        c.currency = dto.currency ?? c.currency
-        c.timezone = dto.timezone ?? c.timezone
-        c.published = dto.published ?? c.published
-        c.archived = dto.archived ?? c.archived
-        c.display_price = dto.display_price ?? c.display_price
-        c.display_quantity = dto.display_quantity ?? c.display_quantity
-        c.display_bin = dto.display_bin ?? c.display_bin
-        c.has_predict_order = dto.has_predict_order ?? c.has_predict_order
-        c.is_randomized = dto.is_randomized ?? c.is_randomized
-        c.display_group_headings = dto.display_group_headings ?? c.display_group_headings
-        c.is_blind = dto.is_blind ?? c.is_blind
-        c.start_date = dto.start_date ?? c.start_date
+        if c.auto_wili != dto.auto_wili { c.auto_wili = dto.auto_wili }
+        if c.is_pinned != dto.is_pinned { c.is_pinned = dto.is_pinned }
+        if c.display_time != dto.display_time { c.display_time = dto.display_time }
+        if c.is_browsable != dto.is_browsable { c.is_browsable = dto.is_browsable }
+        if c.is_my_cellar != dto.is_my_cellar { c.is_my_cellar = dto.is_my_cellar }
+        if c.lbs_order != dto.lbs_order { c.lbs_order = dto.lbs_order }
+        if c.product_count != dto.product_count { c.product_count = dto.product_count }
+        if c.name != dto.name { c.name = dto.name }
+        if c.badge_method != dto.badge_method { c.badge_method = dto.badge_method }
+        if c.currency != dto.currency { c.currency = dto.currency }
+        if c.timezone != dto.timezone { c.timezone = dto.timezone }
+        if c.published != dto.published { c.published = dto.published }
+        if c.archived != dto.archived { c.archived = dto.archived }
+        if c.display_price != dto.display_price { c.display_price = dto.display_price }
+        if c.display_quantity != dto.display_quantity { c.display_quantity = dto.display_quantity }
+        if c.display_bin != dto.display_bin { c.display_bin = dto.display_bin }
+        if c.has_predict_order != dto.has_predict_order { c.has_predict_order = dto.has_predict_order }
+        if c.is_randomized != dto.is_randomized { c.is_randomized = dto.is_randomized }
+        if c.display_group_headings != dto.display_group_headings { c.display_group_headings = dto.display_group_headings }
+        if c.is_blind != dto.is_blind { c.is_blind = dto.is_blind }
+        if c.start_date != dto.start_date { c.start_date = dto.start_date }
         c.created_at = dto.created_at ?? c.created_at
-        c.venue_id = dto.venue_id ?? c.venue_id
-        c.sort_channel_name = dto.sort_channel_name ?? c.sort_channel_name
-        c.location_based_recs = dto.location_based_recs ?? c.location_based_recs
-
+        if c.venue_id != dto.venue_id { c.venue_id = dto.venue_id }
+        if c.sort_channel_name != dto.sort_channel_name { c.sort_channel_name = dto.sort_channel_name }
+        if c.location_based_recs != dto.location_based_recs { c.location_based_recs = dto.location_based_recs }
         // Primary image (fix duplicated block + handle nil)
         if let img = dto.primary_image {
             try checkCancelled()
@@ -1189,9 +1176,8 @@ extension Storage {
 
         v.created_at = dto.created_at ?? v.created_at
         v.updated_at = dto.updated_at ?? v.updated_at
-        v.name       = dto.name       ?? v.name
-        v.order      = dto.order      ?? v.order
-
+        if v.name != dto.name { v.name = dto.name }
+        if v.order != dto.order { v.order = dto.order }
         try checkCancelledBeforeRelationshipWrite()
         if v.collection.id != collection.id {
             v.collection = collection
@@ -1226,12 +1212,11 @@ extension Storage {
             CollectionGroup(id: dto.id, version: version)
         }
 
-        g.created_at      = dto.created_at      ?? g.created_at
-        g.updated_at      = dto.updated_at      ?? g.updated_at
-        g.name            = dto.name            ?? g.name
-        g.order           = dto.order           ?? g.order
-        g.orderings_count = dto.orderings_count ?? g.orderings_count
-
+        g.created_at = dto.created_at ?? g.created_at
+        g.updated_at = dto.updated_at ?? g.updated_at
+        if g.name != dto.name { g.name = dto.name }
+        if g.order != dto.order { g.order = dto.order }
+        if g.orderings_count != dto.orderings_count { g.orderings_count = dto.orderings_count }
         try checkCancelledBeforeRelationshipWrite()
         if g.version.id != version.id {
             g.version = version
@@ -1254,7 +1239,7 @@ extension Storage {
             CollectionOrder(
                 id: dto.id,
                 tag_id: tag.id,
-                order: dto.order ?? 0,
+                order: dto.order,
                 group: group,
                 tag: tag
             )
@@ -1262,8 +1247,7 @@ extension Storage {
 
         o.created_at = dto.created_at ?? o.created_at
         o.updated_at = dto.updated_at ?? o.updated_at
-        o.order = dto.order
-        
+        if o.order != dto.order { o.order = dto.order }
         // inside Storage.upsertCollectionOrder(from:group:tag:in:)
         o.collectionID = group.version.collection.id
         o.groupID      = group.id
@@ -1287,9 +1271,9 @@ extension Storage {
         try checkCancelled()
 
         let t = try fetchOrInsert(CollectionTrait.self, id: dto.id, in: ctx) { CollectionTrait(id: dto.id) }
-        t.name = dto.name ?? t.name
-        t.order = dto.order ?? t.order
-        t.restrict_to_ring_it = dto.restrict_to_ring_it ?? t.restrict_to_ring_it
+        if t.name != dto.name { t.name = dto.name }
+        if t.order != dto.order { t.order = dto.order }
+        if t.restrict_to_ring_it != dto.restrict_to_ring_it { t.restrict_to_ring_it = dto.restrict_to_ring_it }
         return t
     }
 
@@ -1302,28 +1286,25 @@ extension Storage {
 
         let p = try fetchOrInsert(Profile.self, id: dto.id, in: ctx) { Profile(id: dto.id) }
 
-        p.user_id = dto.user_id
-        p.customer_id = dto.customer_id
-
-        p.score = dto.score
-        p.score_red       = dto.score_red
-        p.score_white     = dto.score_white
-        p.score_rose      = dto.score_rose
-        p.score_sparkling = dto.score_sparkling
-        p.score_fortified = dto.score_fortified
-        p.score_whiskey   = dto.score_whiskey
-        p.score_tequila   = dto.score_tequila
-        p.score_vodka     = dto.score_vodka
-        p.score_gin       = dto.score_gin
-        p.score_rum       = dto.score_rum
-        p.score_sake      = dto.score_sake
-        p.score_cocktail  = dto.score_cocktail
-        p.score_beer      = dto.score_beer
-        p.score_cheese    = dto.score_cheese
-
+        if p.user_id != dto.user_id { p.user_id = dto.user_id }
+        if p.customer_id != dto.customer_id { p.customer_id = dto.customer_id }
+        if p.score != dto.score { p.score = dto.score }
+        if p.score_red != dto.score_red { p.score_red = dto.score_red }
+        if p.score_white != dto.score_white { p.score_white = dto.score_white }
+        if p.score_rose != dto.score_rose { p.score_rose = dto.score_rose }
+        if p.score_sparkling != dto.score_sparkling { p.score_sparkling = dto.score_sparkling }
+        if p.score_fortified != dto.score_fortified { p.score_fortified = dto.score_fortified }
+        if p.score_whiskey != dto.score_whiskey { p.score_whiskey = dto.score_whiskey }
+        if p.score_tequila != dto.score_tequila { p.score_tequila = dto.score_tequila }
+        if p.score_vodka != dto.score_vodka { p.score_vodka = dto.score_vodka }
+        if p.score_gin != dto.score_gin { p.score_gin = dto.score_gin }
+        if p.score_rum != dto.score_rum { p.score_rum = dto.score_rum }
+        if p.score_sake != dto.score_sake { p.score_sake = dto.score_sake }
+        if p.score_cocktail != dto.score_cocktail { p.score_cocktail = dto.score_cocktail }
+        if p.score_beer != dto.score_beer { p.score_beer = dto.score_beer }
+        if p.score_cheese != dto.score_cheese { p.score_cheese = dto.score_cheese }
         p.created_at = dto.created_at ?? p.created_at
         p.updated_at = dto.updated_at ?? p.updated_at
-
         for pStyle in dto.preference_styles {
             try checkCancelled()
             _ = try upsertProfileStyle(from: pStyle, profile: p, in: ctx)
@@ -1341,18 +1322,17 @@ extension Storage {
             ProfileStyle(id: dto.id, style_id: dto.style_id)
         }
 
-        ps.conflict = dto.conflict ?? ps.conflict
-        ps.order_profile = dto.order_profile ?? ps.order_profile
-        ps.order_recommend = dto.order_recommend ?? ps.order_recommend
-        ps.rating = dto.rating ?? ps.rating
-        ps.strength = dto.strength ?? ps.strength
-        ps.style_id = dto.style_id ?? ps.style_id
-        ps.recommend = dto.recommend ?? ps.recommend
-        ps.refine = dto.refine ?? ps.refine
-        ps.keywords = dto.keywords ?? ps.keywords
+        if ps.conflict != dto.conflict { ps.conflict = dto.conflict }
+        if ps.order_profile != dto.order_profile { ps.order_profile = dto.order_profile }
+        if ps.order_recommend != dto.order_recommend { ps.order_recommend = dto.order_recommend }
+        if ps.rating != dto.rating { ps.rating = dto.rating }
+        if ps.strength != dto.strength { ps.strength = dto.strength }
+        if ps.style_id != dto.style_id { ps.style_id = dto.style_id }
+        if ps.recommend != dto.recommend { ps.recommend = dto.recommend }
+        if ps.refine != dto.refine { ps.refine = dto.refine }
+        if ps.keywords != dto.keywords { ps.keywords = dto.keywords }
         ps.created_at = dto.created_at ?? ps.created_at
         ps.updated_at = dto.updated_at ?? ps.updated_at
-
         try checkCancelledBeforeRelationshipWrite()
         ps.profile = profile
 
@@ -1379,10 +1359,9 @@ extension Storage {
             UserCollection(id: dto.id, collection_id: dto.collection_id, collection: collection)
         }
 
-        uc.relationship_type = dto.relationship_type ?? uc.relationship_type
+        if uc.relationship_type != dto.relationship_type { uc.relationship_type = dto.relationship_type }
         uc.created_at = dto.created_at ?? uc.created_at
         uc.updated_at = dto.updated_at ?? uc.updated_at
-
         try checkCancelledBeforeRelationshipWrite()
         if uc.collection.id != collection.id { uc.collection = collection }
 
@@ -1397,17 +1376,16 @@ extension Storage {
         try checkCancelled()
 
         let f = try fetchOrInsert(Food.self, id: dto.id, in: ctx) { Food(id: dto.id) }
-        f.name = dto.name ?? f.name
-        f.keywords = dto.keywords ?? f.keywords
+        if f.name != dto.name { f.name = dto.name }
+        if f.keywords != dto.keywords { f.keywords = dto.keywords }
         f.created_at = dto.created_at ?? f.created_at
         f.updated_at = dto.updated_at ?? f.updated_at
-        f.food_category_id = dto.food_category_id ?? f.food_category_id
-        f.food_category_name = dto.food_category_name ?? f.food_category_name
-        f.food_category_icon_svg_url = dto.food_category_icon_svg_url ?? f.food_category_icon_svg_url
-        f.food_category_url = dto.food_category_url ?? f.food_category_url
-        f.primary_image_url = dto.primary_image_url ?? f.primary_image_url
-        f.desc = dto.description ?? f.desc
-
+        if f.food_category_id != dto.food_category_id { f.food_category_id = dto.food_category_id }
+        if f.food_category_name != dto.food_category_name { f.food_category_name = dto.food_category_name }
+        if f.food_category_icon_svg_url != dto.food_category_icon_svg_url { f.food_category_icon_svg_url = dto.food_category_icon_svg_url }
+        if f.food_category_url != dto.food_category_url { f.food_category_url = dto.food_category_url }
+        if f.primary_image_url != dto.primary_image_url { f.primary_image_url = dto.primary_image_url }
+        if f.desc != dto.description { f.desc = dto.description }
         return f
     }
 
@@ -1421,12 +1399,12 @@ extension Storage {
         let c = try fetchOrInsert(Customer.self, id: dto.id, in: ctx) { Customer(id: dto.id) }
         c.created_at = dto.created_at ?? c.created_at
         c.updated_at = dto.updated_at ?? c.updated_at
-        c.avatar_url = dto.avatar_url ?? c.avatar_url
-        c.merchant_user_email_address = dto.merchant_user_email_address ?? c.merchant_user_email_address
-        c.merchant_user_id = dto.merchant_user_id ?? c.merchant_user_id
-        c.merchant_user_name = dto.merchant_user_name ?? c.merchant_user_name
-        c.merchant_user_display_name = dto.merchant_user_display_name ?? c.merchant_user_display_name
-        c.role = dto.role ?? c.role
+        if c.avatar_url != dto.avatar_url { c.avatar_url = dto.avatar_url }
+        if c.merchant_user_email_address != dto.merchant_user_email_address { c.merchant_user_email_address = dto.merchant_user_email_address }
+        if c.merchant_user_id != dto.merchant_user_id { c.merchant_user_id = dto.merchant_user_id }
+        if c.merchant_user_name != dto.merchant_user_name { c.merchant_user_name = dto.merchant_user_name }
+        if c.merchant_user_display_name != dto.merchant_user_display_name { c.merchant_user_display_name = dto.merchant_user_display_name }
+        if c.role != dto.role { c.role = dto.role }
         return c
     }
 
@@ -1463,56 +1441,53 @@ extension Storage {
 
         try checkCancelled()
 
-        r.id = dto.id
-
+        if r.id != dto.id { r.id = dto.id }
         // MARK: - Top-level fields
-        r.customer_slug = dto.customer_slug ?? r.customer_slug
-        r.date = Storage.normalizeAPIDateString(dto.date) ?? r.date
-        r.status = dto.status ?? r.status
+        if r.customer_slug != dto.customer_slug { r.customer_slug = dto.customer_slug }
+        if r.date != Storage.normalizeAPIDateString(dto.date) { r.date = Storage.normalizeAPIDateString(dto.date) }
+        if r.status != dto.status { r.status = dto.status }
         r.requested_times = dto.requested_times ?? r.requested_times
         r.times_available = dto.times_available ?? r.times_available
-
         // MARK: - Brand snapshot
         if let brandDTO = dto.brand {
             r.brand_id = brandDTO.id
             r.venue_id = brandDTO.venue_id
-            r.brand_name = brandDTO.name ?? r.brand_name
-            r.brand_logo_image_url = brandDTO.logo_image_url ?? r.brand_logo_image_url
+            if r.brand_name != brandDTO.name { r.brand_name = brandDTO.name }
+            if r.brand_logo_image_url != brandDTO.logo_image_url { r.brand_logo_image_url = brandDTO.logo_image_url }
         }
 
         // MARK: - Experience snapshot
         if let experienceDTO = dto.experience {
             r.experience_id = experienceDTO.id
-            r.experience_name = experienceDTO.name ?? r.experience_name
-            r.experience_header_image_url = experienceDTO.header_image_url ?? r.experience_header_image_url
-            r.experience_preferabli_image_url = experienceDTO.preferabli_image_url ?? r.experience_preferabli_image_url
+            if r.experience_name != experienceDTO.name { r.experience_name = experienceDTO.name }
+            if r.experience_header_image_url != experienceDTO.header_image_url { r.experience_header_image_url = experienceDTO.header_image_url }
+            if r.experience_preferabli_image_url != experienceDTO.preferabli_image_url { r.experience_preferabli_image_url = experienceDTO.preferabli_image_url }
         }
 
         // MARK: - Booking snapshot
         if let bookingDTO = dto.concierge_reservation_booking {
-            r.booking_id = bookingDTO.id ?? r.booking_id
-            r.booking_account_id = bookingDTO.account_id ?? r.booking_account_id
-            r.booking_confirmation_ref = bookingDTO.booking_confirmation_ref ?? r.booking_confirmation_ref
-            r.booking_type = bookingDTO.booking_type ?? r.booking_type
-            r.booking_brand_id = bookingDTO.brand_id ?? r.booking_brand_id
-            r.booking_venue_id = bookingDTO.venue_id ?? r.booking_venue_id
-            r.booking_confirmed_time = bookingDTO.confirmed_time ?? r.booking_confirmed_time
-            r.booking_created_on = Storage.parseDate(bookingDTO.created_on) ?? r.booking_created_on
-            r.booking_updated_on = Storage.parseDate(bookingDTO.updated_on) ?? r.booking_updated_on
-            r.booking_customer_slug = bookingDTO.customer_slug ?? r.booking_customer_slug
-            r.booking_date = Storage.normalizeAPIDateString(bookingDTO.date) ?? r.booking_date
-            r.booking_experience_id = bookingDTO.experience_id ?? r.booking_experience_id
-            r.booking_modification_link = bookingDTO.modification_link ?? r.booking_modification_link
-            r.booking_payment_method_id = bookingDTO.payment_method_id ?? r.booking_payment_method_id
-            r.booking_request_id = bookingDTO.request_id ?? r.booking_request_id
-            r.booking_specific_requests = bookingDTO.specific_requests ?? r.booking_specific_requests
-            r.booking_status = bookingDTO.status ?? r.booking_status
-
+            if r.booking_id != bookingDTO.id { r.booking_id = bookingDTO.id }
+            if r.booking_account_id != bookingDTO.account_id { r.booking_account_id = bookingDTO.account_id }
+            if r.booking_confirmation_ref != bookingDTO.booking_confirmation_ref { r.booking_confirmation_ref = bookingDTO.booking_confirmation_ref }
+            if r.booking_type != bookingDTO.booking_type { r.booking_type = bookingDTO.booking_type }
+            if r.booking_brand_id != bookingDTO.brand_id { r.booking_brand_id = bookingDTO.brand_id }
+            if r.booking_venue_id != bookingDTO.venue_id { r.booking_venue_id = bookingDTO.venue_id }
+            if r.booking_confirmed_time != bookingDTO.confirmed_time { r.booking_confirmed_time = bookingDTO.confirmed_time }
+            if r.booking_created_on != Storage.parseDate(bookingDTO.created_on) { r.booking_created_on = Storage.parseDate(bookingDTO.created_on) }
+            if r.booking_updated_on != Storage.parseDate(bookingDTO.updated_on) { r.booking_updated_on = Storage.parseDate(bookingDTO.updated_on) }
+            if r.booking_customer_slug != bookingDTO.customer_slug { r.booking_customer_slug = bookingDTO.customer_slug }
+            if r.booking_date != Storage.normalizeAPIDateString(bookingDTO.date) { r.booking_date = Storage.normalizeAPIDateString(bookingDTO.date) }
+            if r.booking_experience_id != bookingDTO.experience_id { r.booking_experience_id = bookingDTO.experience_id }
+            if r.booking_modification_link != bookingDTO.modification_link { r.booking_modification_link = bookingDTO.modification_link }
+            if r.booking_payment_method_id != bookingDTO.payment_method_id { r.booking_payment_method_id = bookingDTO.payment_method_id }
+            if r.booking_request_id != bookingDTO.request_id { r.booking_request_id = bookingDTO.request_id }
+            if r.booking_specific_requests != bookingDTO.specific_requests { r.booking_specific_requests = bookingDTO.specific_requests }
+            if r.booking_status != bookingDTO.status { r.booking_status = bookingDTO.status }
             if dto.experience == nil, let bookingExperienceDTO = bookingDTO.experience {
                 r.experience_id = bookingExperienceDTO.id
-                r.experience_name = bookingExperienceDTO.name ?? r.experience_name
-                r.experience_header_image_url = bookingExperienceDTO.header_image_url ?? r.experience_header_image_url
-                r.experience_preferabli_image_url = bookingExperienceDTO.preferabli_image_url ?? r.experience_preferabli_image_url
+                if r.experience_name != bookingExperienceDTO.name { r.experience_name = bookingExperienceDTO.name }
+                if r.experience_header_image_url != bookingExperienceDTO.header_image_url { r.experience_header_image_url = bookingExperienceDTO.header_image_url }
+                if r.experience_preferabli_image_url != bookingExperienceDTO.preferabli_image_url { r.experience_preferabli_image_url = bookingExperienceDTO.preferabli_image_url }
             }
         }
 
@@ -1566,26 +1541,25 @@ extension Storage {
 
         guest.key = key
         guest.reservation_id = reservation.id
-        guest.concierge_reservation_request = dto.concierge_reservation_request ?? guest.concierge_reservation_request
-        guest.experience_price_id = dto.experience_price_id ?? guest.experience_price_id
-        guest.quantity = dto.quantity ?? guest.quantity
-
+        if guest.concierge_reservation_request != dto.concierge_reservation_request { guest.concierge_reservation_request = dto.concierge_reservation_request }
+        if guest.experience_price_id != dto.experience_price_id { guest.experience_price_id = dto.experience_price_id }
+        if guest.quantity != dto.quantity { guest.quantity = dto.quantity }
         if let priceDTO = dto.experience_price {
-            guest.price_active = priceDTO.active ?? guest.price_active
-            guest.price_age_range = priceDTO.age_range ?? guest.price_age_range
-            guest.price_experience_economics = priceDTO.experience_economics ?? guest.price_experience_economics
-            guest.price_experience_id = priceDTO.experience_id ?? guest.price_experience_id
-            guest.price_experience_tier = priceDTO.experience_tier ?? guest.price_experience_tier
-            guest.price_guest_increment = priceDTO.guest_increment ?? guest.price_guest_increment
-            guest.price_price_on_request = priceDTO.price_on_request ?? guest.price_price_on_request
-            guest.price_incentive_type_id = priceDTO.incentive_type_id ?? guest.price_incentive_type_id
-            guest.price_list_price = priceDTO.list_price ?? guest.price_list_price
-            guest.price_max_count = priceDTO.max_count ?? guest.price_max_count
-            guest.price_min_count = priceDTO.min_count ?? guest.price_min_count
-            guest.price_partner_ref = priceDTO.partner_ref ?? guest.price_partner_ref
-            guest.price_price = priceDTO.price ?? guest.price_price
-            guest.price_price_type = priceDTO.price_type ?? guest.price_price_type
-            guest.price_stripe_product_price_id = priceDTO.stripe_product_price_id ?? guest.price_stripe_product_price_id
+            if guest.price_active != priceDTO.active { guest.price_active = priceDTO.active }
+            if guest.price_age_range != priceDTO.age_range { guest.price_age_range = priceDTO.age_range }
+            if guest.price_experience_economics != priceDTO.experience_economics { guest.price_experience_economics = priceDTO.experience_economics }
+            if guest.price_experience_id != priceDTO.experience_id { guest.price_experience_id = priceDTO.experience_id }
+            if guest.price_experience_tier != priceDTO.experience_tier { guest.price_experience_tier = priceDTO.experience_tier }
+            if guest.price_guest_increment != priceDTO.guest_increment { guest.price_guest_increment = priceDTO.guest_increment }
+            if guest.price_price_on_request != priceDTO.price_on_request { guest.price_price_on_request = priceDTO.price_on_request }
+            if guest.price_incentive_type_id != priceDTO.incentive_type_id { guest.price_incentive_type_id = priceDTO.incentive_type_id }
+            if guest.price_list_price != priceDTO.list_price { guest.price_list_price = priceDTO.list_price }
+            if guest.price_max_count != priceDTO.max_count { guest.price_max_count = priceDTO.max_count }
+            if guest.price_min_count != priceDTO.min_count { guest.price_min_count = priceDTO.min_count }
+            if guest.price_partner_ref != priceDTO.partner_ref { guest.price_partner_ref = priceDTO.partner_ref }
+            if guest.price_price != priceDTO.price { guest.price_price = priceDTO.price }
+            if guest.price_price_type != priceDTO.price_type { guest.price_price_type = priceDTO.price_type }
+            if guest.price_stripe_product_price_id != priceDTO.stripe_product_price_id { guest.price_stripe_product_price_id = priceDTO.stripe_product_price_id }
         }
 
         return guest
@@ -1608,11 +1582,10 @@ extension Storage {
 
             try checkCancelled()
 
-            reservation.id = dto.id
-            reservation.customer_email = dto.customer_email ?? reservation.customer_email
-            reservation.customer_name = dto.customer_name ?? reservation.customer_name
-            reservation.customer_phone = dto.customer_phone ?? reservation.customer_phone
-
+            if reservation.id != dto.id { reservation.id = dto.id }
+            if reservation.customer_email != dto.customer_email { reservation.customer_email = dto.customer_email }
+            if reservation.customer_name != dto.customer_name { reservation.customer_name = dto.customer_name }
+            if reservation.customer_phone != dto.customer_phone { reservation.customer_phone = dto.customer_phone }
             if let itemDTOs = dto.items {
                 var newItems: [BalloonReservationItem] = []
                 newItems.reserveCapacity(itemDTOs.count)
@@ -1639,11 +1612,10 @@ extension Storage {
             try checkCancelled()
 
             let item = BalloonReservationItem()
-            item.meeting_point = dto.meeting_point
-            item.meeting_point_coordinates = dto.meeting_point_coordinates
+            if item.meeting_point != dto.meeting_point { item.meeting_point = dto.meeting_point }
+            if item.meeting_point_coordinates != dto.meeting_point_coordinates { item.meeting_point_coordinates = dto.meeting_point_coordinates }
             item.qty = Int(dto.qty ?? "1")
-            item.sku = dto.sku
-
+            if item.sku != dto.sku { item.sku = dto.sku }
             if let start = dto.start_date {
                 item.start_date = Date(timeIntervalSince1970: TimeInterval(start))
             } else {
@@ -1663,16 +1635,15 @@ extension Storage {
 
         let s = try fetchOrInsert(Style.self, id: dto.id, in: ctx) { Style(id: dto.id, type: dto.type) }
 
-        s.created_at        = dto.created_at ?? s.created_at
-        s.updated_at        = dto.updated_at ?? s.updated_at
-        s.desc              = dto.description
-        s.name              = dto.name
-        s.type              = dto.type
-        s.primary_image_url = dto.primary_image_url
-        s.product_category  = dto.product_category
-        s.is_global = dto.is_global
-        s.show_map = dto.show_map
-
+        s.created_at = dto.created_at ?? s.created_at
+        s.updated_at = dto.updated_at ?? s.updated_at
+        if s.desc != dto.description { s.desc = dto.description }
+        if s.name != dto.name { s.name = dto.name }
+        if s.type != dto.type { s.type = dto.type }
+        if s.primary_image_url != dto.primary_image_url { s.primary_image_url = dto.primary_image_url }
+        if s.product_category != dto.product_category { s.product_category = dto.product_category }
+        if s.is_global != dto.is_global { s.is_global = dto.is_global }
+        if s.show_map != dto.show_map { s.show_map = dto.show_map }
         // Relationship pointer write
         if let ps = profile_style {
             try checkCancelledBeforeRelationshipWrite()
@@ -1704,10 +1675,9 @@ extension Storage {
         let fc = try fetchOrInsert(FoodCategory.self, id: dto.id, in: ctx) { FoodCategory(id: dto.id) }
         fc.created_at = dto.created_at ?? fc.created_at
         fc.updated_at = dto.updated_at ?? fc.updated_at
-        fc.name = dto.name ?? fc.name
-        fc.icon_url = dto.icon_url ?? fc.icon_url
-        fc.icon_svg_url = dto.icon_svg_url ?? fc.icon_svg_url
-        
+        if fc.name != dto.name { fc.name = dto.name }
+        if fc.icon_url != dto.icon_url { fc.icon_url = dto.icon_url }
+        if fc.icon_svg_url != dto.icon_svg_url { fc.icon_svg_url = dto.icon_svg_url }
         return fc
     }
 
@@ -1749,24 +1719,22 @@ extension Storage {
 
         u.created_at = dto.created_at ?? u.created_at
         u.updated_at = dto.updated_at ?? u.updated_at
-
-        u.country = dto.country ?? u.country
-        u.display_name = dto.display_name ?? u.display_name
-        u.email = dto.email ?? u.email
-        u.is_team_preferabli = dto.is_team_preferabli ?? u.is_team_preferabli
-        u.fname = dto.fname ?? u.fname
-        u.lname = dto.lname ?? u.lname
-        u.claim_code = dto.claim_code ?? u.claim_code
-        u.has_merchant_access = dto.has_merchant_access ?? u.has_merchant_access
-        u.has_kiosks = dto.has_kiosks ?? u.has_kiosks
-        u.zip_code = dto.zip_code ?? u.zip_code
-        u.intercom_hmac = dto.intercom_hmac ?? u.intercom_hmac
-        u.rating_collection_id = dto.rating_collection_id ?? u.rating_collection_id
-        u.provided_feedback_at = dto.provided_feedback_at ?? u.provided_feedback_at
-        u.wishlist_collection_id = dto.wishlist_collection_id ?? u.wishlist_collection_id
-        u.avatar_background_color_hex = dto.avatar_background_color_hex ?? u.avatar_background_color_hex
-        u.avatar_text_color_hex = dto.avatar_text_color_hex ?? u.avatar_text_color_hex
-
+        if u.country != dto.country { u.country = dto.country }
+        if u.display_name != dto.display_name { u.display_name = dto.display_name }
+        if u.email != dto.email { u.email = dto.email }
+        if u.is_team_preferabli != dto.is_team_preferabli { u.is_team_preferabli = dto.is_team_preferabli }
+        if u.fname != dto.fname { u.fname = dto.fname }
+        if u.lname != dto.lname { u.lname = dto.lname }
+        if u.claim_code != dto.claim_code { u.claim_code = dto.claim_code }
+        if u.has_merchant_access != dto.has_merchant_access { u.has_merchant_access = dto.has_merchant_access }
+        if u.has_kiosks != dto.has_kiosks { u.has_kiosks = dto.has_kiosks }
+        if u.zip_code != dto.zip_code { u.zip_code = dto.zip_code }
+        if u.intercom_hmac != dto.intercom_hmac { u.intercom_hmac = dto.intercom_hmac }
+        if u.rating_collection_id != dto.rating_collection_id { u.rating_collection_id = dto.rating_collection_id }
+        if u.provided_feedback_at != dto.provided_feedback_at { u.provided_feedback_at = dto.provided_feedback_at }
+        if u.wishlist_collection_id != dto.wishlist_collection_id { u.wishlist_collection_id = dto.wishlist_collection_id }
+        if u.avatar_background_color_hex != dto.avatar_background_color_hex { u.avatar_background_color_hex = dto.avatar_background_color_hex }
+        if u.avatar_text_color_hex != dto.avatar_text_color_hex { u.avatar_text_color_hex = dto.avatar_text_color_hex }
         if let avatarDTO = dto.avatar {
             try checkCancelled()
             let media = try upsertMedia(from: avatarDTO, in: ctx)
@@ -1790,55 +1758,45 @@ extension Storage {
 
         let c = try fetchOrInsert(Channel.self, id: dto.id, in: ctx) { Channel(id: dto.id) }
 
-        c.account_id = dto.account_id ?? c.account_id
-        c.name = dto.name ?? c.name
-        c.description_text = dto.description ?? c.description_text
-        c.order = dto.order ?? c.order
-        c.archived = dto.archived ?? c.archived
-        c.published = dto.published ?? c.published
-
-        c.default_display_vintages = dto.default_display_vintages ?? c.default_display_vintages
-        c.default_display_variants = dto.default_display_variants ?? c.default_display_variants
-        c.default_display_variant_details = dto.display_variant_details ?? c.default_display_variant_details
-        c.default_display_price = dto.default_display_price ?? c.default_display_price
-        c.default_display_quantity = dto.default_display_quantity ?? c.default_display_quantity
-        c.default_display_bin = dto.default_display_bin ?? c.default_display_bin
-        c.default_downweight_previous_recs_duration = dto.default_downweight_previous_recs_duration ?? c.default_downweight_previous_recs_duration
-
-        c.has_download_pdf = dto.has_download_pdf ?? c.has_download_pdf
-        c.has_download_csv = dto.has_download_csv ?? c.has_download_csv
-        c.has_download_xlsx = dto.has_download_xlsx ?? c.has_download_xlsx
-
-        c.is_retailer = dto.is_retailer ?? c.is_retailer
-        c.is_producer = dto.is_producer ?? c.is_producer
-        c.is_restaurant = dto.is_restaurant ?? c.is_restaurant
-        c.is_hospitality = dto.is_hospitality ?? c.is_hospitality
-        c.is_event = dto.is_event ?? c.is_event
-        c.is_verified = dto.is_verified ?? c.is_verified
-
-        c.default_timezone = dto.default_timezone ?? c.default_timezone
-        c.default_currency = dto.default_currency ?? c.default_currency
-        c.default_badge_method = dto.default_badge_method ?? c.default_badge_method
-
-        c.num_dollar_signs_cutoff_1 = dto.num_dollar_signs_cutoff_1 ?? c.num_dollar_signs_cutoff_1
-        c.num_dollar_signs_cutoff_2 = dto.num_dollar_signs_cutoff_2 ?? c.num_dollar_signs_cutoff_2
-        c.num_dollar_signs_cutoff_3 = dto.num_dollar_signs_cutoff_3 ?? c.num_dollar_signs_cutoff_3
-        c.num_dollar_signs_cutoff_4 = dto.num_dollar_signs_cutoff_4 ?? c.num_dollar_signs_cutoff_4
-        c.num_dollar_signs_cutoff_5 = dto.num_dollar_signs_cutoff_5 ?? c.num_dollar_signs_cutoff_5
-
-        c.currency_exchange_multiplier_from_foreign_to_usd =
-        dto.currency_exchange_multiplier_from_foreign_to_usd ?? c.currency_exchange_multiplier_from_foreign_to_usd
-
-        c.featured_collection_id = dto.featured_collection_id ?? c.featured_collection_id
-        c.primary_inventory_id = dto.primary_inventory_id ?? c.primary_inventory_id
-        c.primary_questionnaire_id = dto.primary_questionnaire_id ?? c.primary_questionnaire_id
-        c.default_curation_batch_id = dto.default_curation_batch_id ?? c.default_curation_batch_id
-        c.default_curation_questions_batch_id = dto.default_curation_questions_batch_id ?? c.default_curation_questions_batch_id
-        c.max_number_of_venues = dto.max_number_of_venues ?? c.max_number_of_venues
-
+        if c.account_id != dto.account_id { c.account_id = dto.account_id }
+        if c.name != dto.name { c.name = dto.name }
+        if c.description_text != dto.description { c.description_text = dto.description }
+        if c.order != dto.order { c.order = dto.order }
+        if c.archived != dto.archived { c.archived = dto.archived }
+        if c.published != dto.published { c.published = dto.published }
+        if c.default_display_vintages != dto.default_display_vintages { c.default_display_vintages = dto.default_display_vintages }
+        if c.default_display_variants != dto.default_display_variants { c.default_display_variants = dto.default_display_variants }
+        if c.default_display_variant_details != dto.display_variant_details { c.default_display_variant_details = dto.display_variant_details }
+        if c.default_display_price != dto.default_display_price { c.default_display_price = dto.default_display_price }
+        if c.default_display_quantity != dto.default_display_quantity { c.default_display_quantity = dto.default_display_quantity }
+        if c.default_display_bin != dto.default_display_bin { c.default_display_bin = dto.default_display_bin }
+        if c.default_downweight_previous_recs_duration != dto.default_downweight_previous_recs_duration { c.default_downweight_previous_recs_duration = dto.default_downweight_previous_recs_duration }
+        if c.has_download_pdf != dto.has_download_pdf { c.has_download_pdf = dto.has_download_pdf }
+        if c.has_download_csv != dto.has_download_csv { c.has_download_csv = dto.has_download_csv }
+        if c.has_download_xlsx != dto.has_download_xlsx { c.has_download_xlsx = dto.has_download_xlsx }
+        if c.is_retailer != dto.is_retailer { c.is_retailer = dto.is_retailer }
+        if c.is_producer != dto.is_producer { c.is_producer = dto.is_producer }
+        if c.is_restaurant != dto.is_restaurant { c.is_restaurant = dto.is_restaurant }
+        if c.is_hospitality != dto.is_hospitality { c.is_hospitality = dto.is_hospitality }
+        if c.is_event != dto.is_event { c.is_event = dto.is_event }
+        if c.is_verified != dto.is_verified { c.is_verified = dto.is_verified }
+        if c.default_timezone != dto.default_timezone { c.default_timezone = dto.default_timezone }
+        if c.default_currency != dto.default_currency { c.default_currency = dto.default_currency }
+        if c.default_badge_method != dto.default_badge_method { c.default_badge_method = dto.default_badge_method }
+        if c.num_dollar_signs_cutoff_1 != dto.num_dollar_signs_cutoff_1 { c.num_dollar_signs_cutoff_1 = dto.num_dollar_signs_cutoff_1 }
+        if c.num_dollar_signs_cutoff_2 != dto.num_dollar_signs_cutoff_2 { c.num_dollar_signs_cutoff_2 = dto.num_dollar_signs_cutoff_2 }
+        if c.num_dollar_signs_cutoff_3 != dto.num_dollar_signs_cutoff_3 { c.num_dollar_signs_cutoff_3 = dto.num_dollar_signs_cutoff_3 }
+        if c.num_dollar_signs_cutoff_4 != dto.num_dollar_signs_cutoff_4 { c.num_dollar_signs_cutoff_4 = dto.num_dollar_signs_cutoff_4 }
+        if c.num_dollar_signs_cutoff_5 != dto.num_dollar_signs_cutoff_5 { c.num_dollar_signs_cutoff_5 = dto.num_dollar_signs_cutoff_5 }
+        if c.currency_exchange_multiplier_from_foreign_to_usd != dto.currency_exchange_multiplier_from_foreign_to_usd { c.currency_exchange_multiplier_from_foreign_to_usd = dto.currency_exchange_multiplier_from_foreign_to_usd }
+        if c.featured_collection_id != dto.featured_collection_id { c.featured_collection_id = dto.featured_collection_id }
+        if c.primary_inventory_id != dto.primary_inventory_id { c.primary_inventory_id = dto.primary_inventory_id }
+        if c.primary_questionnaire_id != dto.primary_questionnaire_id { c.primary_questionnaire_id = dto.primary_questionnaire_id }
+        if c.default_curation_batch_id != dto.default_curation_batch_id { c.default_curation_batch_id = dto.default_curation_batch_id }
+        if c.default_curation_questions_batch_id != dto.default_curation_questions_batch_id { c.default_curation_questions_batch_id = dto.default_curation_questions_batch_id }
+        if c.max_number_of_venues != dto.max_number_of_venues { c.max_number_of_venues = dto.max_number_of_venues }
         c.created_at = dto.created_at ?? c.created_at
         c.updated_at = dto.updated_at ?? c.updated_at
-
         if let imgDTO = dto.primary_image {
             try checkCancelled()
             let media = try upsertMedia(from: imgDTO, in: ctx)
@@ -1870,9 +1828,8 @@ extension Storage {
 
                 let cv = try fetchOrInsert(ChannelVenue.self, id: j.id, in: ctx) { ChannelVenue(id: j.id) }
 
-                cv.is_primary = j.is_primary ?? cv.is_primary
-                cv.archived = j.archived ?? cv.archived
-
+                if cv.is_primary != j.is_primary { cv.is_primary = j.is_primary }
+                if cv.archived != j.archived { cv.archived = j.archived }
                 try checkCancelledBeforeRelationshipWrite()
                 if cv.channel?.id != c.id { cv.channel = c }
 
@@ -1965,19 +1922,18 @@ extension Storage {
         try checkCancelled()
 
         // Fields
-        market.name = dto.name ?? market.name
-        market.desc = dto.description ?? market.desc
-        market.image_url = dto.image_url ?? market.image_url
-        market.order = dto.top_level_order ?? market.order
-        market.country_code = dto.country_code ?? market.country_code
-        market.latitude = dto.latitude ?? market.latitude
-        market.longitude = dto.longitude ?? market.longitude
+        if market.name != dto.name { market.name = dto.name }
+        if market.desc != dto.description { market.desc = dto.description }
+        if market.image_url != dto.image_url { market.image_url = dto.image_url }
+        if market.order != dto.top_level_order { market.order = dto.top_level_order }
+        if market.country_code != dto.country_code { market.country_code = dto.country_code }
+        if market.latitude != dto.latitude { market.latitude = dto.latitude }
+        if market.longitude != dto.longitude { market.longitude = dto.longitude }
         market.top_level = dto.top_level_order != nil
-        market.display_appellations = dto.display_appellations ?? market.display_appellations
+        if market.display_appellations != dto.display_appellations { market.display_appellations = dto.display_appellations }
         market.created_at = dto.created_at ?? market.created_at
         market.updated_at = dto.updated_at ?? market.updated_at
-        market.default_span_delta = dto.default_span_delta ?? market.default_span_delta
-
+        if market.default_span_delta != dto.default_span_delta { market.default_span_delta = dto.default_span_delta }
         // Parent
         try checkCancelledBeforeRelationshipWrite()
         if market.parent?.id != parent?.id {
@@ -2019,12 +1975,11 @@ extension Storage {
 
         // 1) Hydrate trait
         let t = try fetchOrInsert(MarketTrait.self, id: dto.id, in: ctx) { MarketTrait(id: dto.id) }
-        t.type = dto.type ?? t.type
-        t.name = dto.name ?? t.name
-        t.icon_url = dto.icon_url ?? t.icon_url
+        if t.type != dto.type { t.type = dto.type }
+        if t.name != dto.name { t.name = dto.name }
+        if t.icon_url != dto.icon_url { t.icon_url = dto.icon_url }
         t.created_at = dto.created_at ?? t.created_at
         t.updated_at = dto.updated_at ?? t.updated_at
-
         // 2) Ensure join row exists (order is not provided by this DTO; keep existing)
         let scopeMarketID = market?.id
         let key = VenueMarketTrait.makeKey(venueID: venue.id, marketID: scopeMarketID, traitID: t.id)
@@ -2042,6 +1997,7 @@ extension Storage {
         link.venue_id = venue.id
         link.trait_id = t.id
         link.market_id = scopeMarketID
+        link.isTombstoned = false
 
         try checkCancelledBeforeRelationshipWrite()
         if link.venue.id != venue.id { link.venue = venue }
@@ -2091,22 +2047,20 @@ extension Storage {
 
             // Hydrate trait using *traitDTO.id* (NOT association id)
             let mt = try fetchOrInsert(MarketTrait.self, id: traitDTO.id, in: ctx) { MarketTrait(id: traitDTO.id) }
-            mt.type = traitDTO.type ?? mt.type
-            mt.name = traitDTO.name ?? mt.name
-            mt.icon_url = traitDTO.icon_url ?? mt.icon_url
+            if mt.type != traitDTO.type { mt.type = traitDTO.type }
+            if mt.name != traitDTO.name { mt.name = traitDTO.name }
+            if mt.icon_url != traitDTO.icon_url { mt.icon_url = traitDTO.icon_url }
             mt.created_at = traitDTO.created_at ?? mt.created_at
             mt.updated_at = traitDTO.updated_at ?? mt.updated_at
-
             // Association row uses *aDTO.id*
             let mta = try fetchOrInsert(MarketTraitAssociation.self, id: aDTO.id, in: ctx) {
                 MarketTraitAssociation(id: aDTO.id, market: market, market_trait: mt)
             }
 
-            mta.order = aDTO.order ?? mta.order
-            mta.is_filter_option = aDTO.is_filter_option ?? mta.is_filter_option
+            if mta.order != aDTO.order { mta.order = aDTO.order }
+            if mta.is_filter_option != aDTO.is_filter_option { mta.is_filter_option = aDTO.is_filter_option }
             mta.created_at = aDTO.created_at ?? mta.created_at
             mta.updated_at = aDTO.updated_at ?? mta.updated_at
-
             try checkCancelledBeforeRelationshipWrite()
             if mta.market.id != market.id { mta.market = market }
             if mta.market_trait.id != mt.id { mta.market_trait = mt }
@@ -2129,12 +2083,11 @@ extension Storage {
 
             g.created_at = dto.created_at ?? g.created_at
             g.updated_at = dto.updated_at ?? g.updated_at
-            g.order = dto.order ?? g.order
-            g.internal_notes = dto.internal_notes ?? g.internal_notes
-            g.name = dto.name ?? g.name
-            g.type = dto.type ?? g.type
-            g.icon_svg_url = dto.icon_svg_url ?? g.icon_svg_url
-            
+            if g.order != dto.order { g.order = dto.order }
+            if g.internal_notes != dto.internal_notes { g.internal_notes = dto.internal_notes }
+            if g.name != dto.name { g.name = dto.name }
+            if g.type != dto.type { g.type = dto.type }
+            if g.icon_svg_url != dto.icon_svg_url { g.icon_svg_url = dto.icon_svg_url }
             // Primary image
             if let imgDTO = dto.primary_image {
                 try checkCancelled()
@@ -2163,12 +2116,11 @@ extension Storage {
 
             r.created_at = dto.created_at ?? r.created_at
             r.updated_at = dto.updated_at ?? r.updated_at
-            r.merchant_recipe_id = dto.merchant_recipe_id ?? r.merchant_recipe_id
-            r.url = dto.url ?? r.url
-            r.primary_image_url = dto.primary_image_url ?? r.primary_image_url
-            r.desc = dto.description ?? r.desc
-            r.name = dto.name ?? r.name
-
+            if r.merchant_recipe_id != dto.merchant_recipe_id { r.merchant_recipe_id = dto.merchant_recipe_id }
+            if r.url != dto.url { r.url = dto.url }
+            if r.primary_image_url != dto.primary_image_url { r.primary_image_url = dto.primary_image_url }
+            if r.desc != dto.description { r.desc = dto.description }
+            if r.name != dto.name { r.name = dto.name }
             if let groupDTOs = dto.recipe_groups {
                 var newGroups: [RecipeGroup] = []
                 newGroups.reserveCapacity(groupDTOs.count)
@@ -2216,8 +2168,7 @@ extension Storage {
         r.isTombstoned = false
         r.created_at = dto.created_at ?? r.created_at
         r.updated_at = dto.updated_at ?? r.updated_at
-        r.order = dto.order ?? r.order
-
+        if r.order != dto.order { r.order = dto.order }
         return r
     }
     
@@ -2231,13 +2182,12 @@ extension Storage {
 
         r.created_at = dto.created_at ?? r.created_at
         r.updated_at = dto.updated_at ?? r.updated_at
-        r.name = dto.name ?? r.name
-        r.type = dto.type ?? r.type
-        r.item_width = dto.item_width ?? r.item_width
-        r.item_height = dto.item_height ?? r.item_height
-        r.item_corner_radius = dto.item_corner_radius ?? r.item_corner_radius
-        r.deeplink_url = dto.deeplink_url ?? r.deeplink_url
-
+        if r.name != dto.name { r.name = dto.name }
+        if r.type != dto.type { r.type = dto.type }
+        if r.item_width != dto.item_width { r.item_width = dto.item_width }
+        if r.item_height != dto.item_height { r.item_height = dto.item_height }
+        if r.item_corner_radius != dto.item_corner_radius { r.item_corner_radius = dto.item_corner_radius }
+        if r.deeplink_url != dto.deeplink_url { r.deeplink_url = dto.deeplink_url }
         if let associations = dto.bucket_item_associations {
             let keepIDs = Set(associations.map(\.id))
 
@@ -2275,10 +2225,10 @@ extension Storage {
 
         r.created_at = dto.created_at ?? r.created_at
         r.updated_at = dto.updated_at ?? r.updated_at
-        r.name = dto.name ?? r.name
-        r.slug = dto.slug ?? r.slug
-        r.market_id = dto.market_id ?? r.market_id
-        r.affiliate_id = dto.affiliate_id ?? r.affiliate_id
+        if r.name != dto.name { r.name = dto.name }
+        if r.slug != dto.slug { r.slug = dto.slug }
+        if r.market_id != dto.market_id { r.market_id = dto.market_id }
+        if r.affiliate_id != dto.affiliate_id { r.affiliate_id = dto.affiliate_id }
         r.isTombstoned = false
 
         if let bucketAssociations = dto.page_bucket_associations {
@@ -2324,10 +2274,9 @@ extension Storage {
         r.bucket = bucket
         r.item = item
         r.isTombstoned = false
-        r.order = dto.order ?? r.order
+        if r.order != dto.order { r.order = dto.order }
         r.created_at = dto.created_at ?? r.created_at
         r.updated_at = dto.updated_at ?? r.updated_at
-
         return r
     }
 
@@ -2346,26 +2295,24 @@ extension Storage {
             try checkCancelled()
 
             // Fields
-            b.badge_icon = dto.badge_icon
-            b.badge_color_hex_primary = dto.badge_color_hex_primary
-            b.is_centered = dto.is_centered
-            b.half_gradient = dto.half_gradient
-            b.badge_placement = dto.badge_placement
-            b.badge_color_hex_secondary = dto.badge_color_hex_secondary
-            b.badge_text_color_hex = dto.badge_text_color_hex
-            b.badge_gradient_css = dto.badge_gradient_css
-            b.text_color_hex = dto.text_color_hex
-            b.color_hex_secondary = dto.color_hex_secondary
-            b.color_hex_primary = dto.color_hex_primary
-            b.gradient_css = dto.gradient_css
-            b.deeplink_url = dto.deeplink_url
-            b.badge_title = dto.badge_title
-            b.title = dto.title
-            b.desc = dto.description
-
+            if b.badge_icon != dto.badge_icon { b.badge_icon = dto.badge_icon }
+            if b.badge_color_hex_primary != dto.badge_color_hex_primary { b.badge_color_hex_primary = dto.badge_color_hex_primary }
+            if b.is_centered != dto.is_centered { b.is_centered = dto.is_centered }
+            if b.half_gradient != dto.half_gradient { b.half_gradient = dto.half_gradient }
+            if b.badge_placement != dto.badge_placement { b.badge_placement = dto.badge_placement }
+            if b.badge_color_hex_secondary != dto.badge_color_hex_secondary { b.badge_color_hex_secondary = dto.badge_color_hex_secondary }
+            if b.badge_text_color_hex != dto.badge_text_color_hex { b.badge_text_color_hex = dto.badge_text_color_hex }
+            if b.badge_gradient_css != dto.badge_gradient_css { b.badge_gradient_css = dto.badge_gradient_css }
+            if b.text_color_hex != dto.text_color_hex { b.text_color_hex = dto.text_color_hex }
+            if b.color_hex_secondary != dto.color_hex_secondary { b.color_hex_secondary = dto.color_hex_secondary }
+            if b.color_hex_primary != dto.color_hex_primary { b.color_hex_primary = dto.color_hex_primary }
+            if b.gradient_css != dto.gradient_css { b.gradient_css = dto.gradient_css }
+            if b.deeplink_url != dto.deeplink_url { b.deeplink_url = dto.deeplink_url }
+            if b.badge_title != dto.badge_title { b.badge_title = dto.badge_title }
+            if b.title != dto.title { b.title = dto.title }
+            if b.desc != dto.description { b.desc = dto.description }
             b.created_at = dto.created_at ?? b.created_at
             b.updated_at = dto.updated_at ?? b.updated_at
-
             // Primary image
             if let imgDTO = dto.primary_image {
                 try checkCancelled()
@@ -2685,7 +2632,7 @@ extension Storage {
             media = existing
         } else {
             let created = Media(id: dto.id)
-            created.id = dto.id
+            if created.id != dto.id { created.id = dto.id }
             ctx.insert(created)
             batch.mediaByID[dto.id] = created
             media = created
@@ -2722,7 +2669,7 @@ extension Storage {
             media = existing
         } else {
             let created = Media(id: dto.id)
-            created.id = dto.id
+            if created.id != dto.id { created.id = dto.id }
             ctx.insert(created)
             batch.mediaByID[dto.id] = created
             media = created
@@ -2747,7 +2694,7 @@ extension Storage {
             hour = existing
         } else {
             let created = VenueHour(id: dto.id)
-            created.id = dto.id
+            if created.id != dto.id { created.id = dto.id }
             ctx.insert(created)
             batch.venueHoursByID[dto.id] = created
             hour = created
@@ -2773,7 +2720,7 @@ extension Storage {
             method = existing
         } else {
             let created = DeliveryMethod(id: dto.id)
-            created.id = dto.id
+            if created.id != dto.id { created.id = dto.id }
             ctx.insert(created)
             batch.deliveryMethodsByID[dto.id] = created
             method = created
@@ -2801,7 +2748,7 @@ extension Storage {
             trait = existing
         } else {
             let created = MarketTrait(id: dto.id)
-            created.id = dto.id
+            if created.id != dto.id { created.id = dto.id }
             ctx.insert(created)
             batch.marketTraitsByID[dto.id] = created
             trait = created
@@ -2842,14 +2789,39 @@ extension Storage {
             link = created
         }
 
-        if link.key != key { link.key = key }
-        if link.venue_id != venue.id { link.venue_id = venue.id }
-        if link.trait_id != trait.id { link.trait_id = trait.id }
-        if link.market_id != marketID { link.market_id = marketID }
+        if link.key != key {
+            link.key = key
+        }
+
+        if link.venue_id != venue.id {
+            link.venue_id = venue.id
+        }
+
+        if link.trait_id != trait.id {
+            link.trait_id = trait.id
+        }
+
+        if link.market_id != marketID {
+            link.market_id = marketID
+        }
+
+        if link.isTombstoned {
+            link.isTombstoned = false
+        }
 
         try checkCancelledBeforeRelationshipWrite()
-        if link.venue.id != venue.id { link.venue = venue }
-        if link.trait.id != trait.id { link.trait = trait }
+
+        if link.venue.id != venue.id {
+            link.venue = venue
+        }
+
+        if link.trait.id != trait.id {
+            link.trait = trait
+        }
+
+        if !venue.venue_market_traits.contains(where: { $0.key == link.key }) {
+            venue.venue_market_traits.append(link)
+        }
 
         return link
     }
@@ -2860,20 +2832,6 @@ extension Storage {
 
         for (a, b) in zip(lhs, rhs) {
             if a.id != b.id { return false }
-        }
-
-        return true
-    }
-
-    @inline(__always)
-    nonisolated private static func sameVenueMarketTraitKeys(
-        _ lhs: [VenueMarketTrait],
-        _ rhs: [VenueMarketTrait]
-    ) -> Bool {
-        guard lhs.count == rhs.count else { return false }
-
-        for (a, b) in zip(lhs, rhs) {
-            if a.key != b.key { return false }
         }
 
         return true
@@ -3134,26 +3092,24 @@ extension Storage {
         }
 
         message.sessionId = dto.sessionId ?? fallbackSessionId ?? message.sessionId
-        message.transactionId = dto.transactionId ?? message.transactionId
-        message.source = dto.source ?? message.source
-        message.utterance = dto.utterance ?? message.utterance
+        if message.transactionId != dto.transactionId { message.transactionId = dto.transactionId }
+        if message.source != dto.source { message.source = dto.source }
+        if message.utterance != dto.utterance { message.utterance = dto.utterance }
         message.turn = dto.turn ?? fallbackTurn ?? message.turn
         message.created_at = dto.createdAt ?? message.created_at
         message.updated_at = dto.updatedAt ?? message.updated_at
-        message.userAction = dto.userAction ?? message.userAction
-        message.userOptions = dto.userOptions ?? message.userOptions
-        message.userSelection = dto.userSelection ?? message.userSelection
-        message.reportedIssue = dto.reportedIssue ?? message.reportedIssue
-        message.feedbackId = dto.feedbackId ?? message.feedbackId
+        if message.userAction != dto.userAction { message.userAction = dto.userAction }
+        if message.userOptions != dto.userOptions { message.userOptions = dto.userOptions }
+        if message.userSelection != dto.userSelection { message.userSelection = dto.userSelection }
+        if message.reportedIssue != dto.reportedIssue { message.reportedIssue = dto.reportedIssue }
+        if message.feedbackId != dto.feedbackId { message.feedbackId = dto.feedbackId }
         message.positiveReaction = dto.positiveReaction ?? message.positiveReaction
         message.isTombstoned = isGenAISelectionActionOnlyMessage(dto)
 
-        message.variantIds = dto.variantIds
-        message.foodIds = dto.foodIds
-
+        if message.variantIds != dto.variantIds { message.variantIds = dto.variantIds }
+        if message.foodIds != dto.foodIds { message.foodIds = dto.foodIds }
         // Product IDs are finalized after hydration. Keep any direct entity IDs now.
-        message.productIds = dto.productEntityIds
-
+        if message.productIds != dto.productEntityIds { message.productIds = dto.productEntityIds }
         if !dto.utteranceObjects.isEmpty {
             try replaceGenAIUtteranceObjects(on: message, with: dto.utteranceObjects, in: ctx)
         }
@@ -3365,12 +3321,10 @@ extension Storage {
 
         content.created_at = dto.created_at ?? content.created_at
         content.updated_at = dto.updated_at ?? content.updated_at
-        content.title = dto.title
-        content.desc = dto.description
-        content.episode_name = dto.episode_name
-        content.episode_order = dto.episode_order
-
-        
+        if content.title != dto.title { content.title = dto.title }
+        if content.desc != dto.description { content.desc = dto.description }
+        if content.episode_name != dto.episode_name { content.episode_name = dto.episode_name }
+        if content.episode_order != dto.episode_order { content.episode_order = dto.episode_order }
         // Parent. If this method is being called while walking a parent's child list,
         // prefer the supplied parent to avoid recursive parent/child loops.
         if let parent {
@@ -3652,12 +3606,11 @@ extension Storage {
 
         personality.created_at = dto.created_at ?? personality.created_at
         personality.updated_at = dto.updated_at ?? personality.updated_at
-        personality.name = dto.name
-        personality.desc = dto.description
-        personality.badge_title = dto.badge_title
-        personality.badge_gradient_css = dto.badge_gradient_css
-        personality.badge_text_color_hex = dto.badge_text_color_hex
-
+        if personality.name != dto.name { personality.name = dto.name }
+        if personality.desc != dto.description { personality.desc = dto.description }
+        if personality.badge_title != dto.badge_title { personality.badge_title = dto.badge_title }
+        if personality.badge_gradient_css != dto.badge_gradient_css { personality.badge_gradient_css = dto.badge_gradient_css }
+        if personality.badge_text_color_hex != dto.badge_text_color_hex { personality.badge_text_color_hex = dto.badge_text_color_hex }
         if let mediaDTO = dto.primary_media {
             try checkCancelled()
             let media = try upsertMedia(from: mediaDTO, in: ctx)
@@ -3759,8 +3712,8 @@ extension Storage {
 
         association.created_at = dto.created_at ?? association.created_at
         association.updated_at = dto.updated_at ?? association.updated_at
-        association.relationship = dto.relationship
-        association.order = dto.order
+        if association.relationship != dto.relationship { association.relationship = dto.relationship }
+        if association.order != dto.order { association.order = dto.order }
         association.content_id = content.id
         association.personality_id = personality.id
 
@@ -3790,7 +3743,7 @@ extension Storage {
 
         association.created_at = dto.created_at ?? association.created_at
         association.updated_at = dto.updated_at ?? association.updated_at
-        association.order = dto.order
+        if association.order != dto.order { association.order = dto.order }
         association.content_id = content.id
 
         try checkCancelledBeforeRelationshipWrite()
@@ -3798,9 +3751,8 @@ extension Storage {
             association.content = content
         }
 
-        association.product_id = dto.product_id
-        association.variant_id = dto.variant_id
-
+        if association.product_id != dto.product_id { association.product_id = dto.product_id }
+        if association.variant_id != dto.variant_id { association.variant_id = dto.variant_id }
         // Variant details now come from dto.products_cache, which is upserted before associations.
         // Keep this association as a lightweight link by id.
         let variant = try dto.variant_id.flatMap { try Storage.fetchById(Variant.self, id: $0, in: ctx) }
@@ -3837,7 +3789,7 @@ extension Storage {
 
         association.created_at = dto.created_at ?? association.created_at
         association.updated_at = dto.updated_at ?? association.updated_at
-        association.order = dto.order
+        if association.order != dto.order { association.order = dto.order }
         association.content_id = content.id
 
         try checkCancelledBeforeRelationshipWrite()
@@ -3878,7 +3830,7 @@ extension Storage {
 
         association.created_at = dto.created_at ?? association.created_at
         association.updated_at = dto.updated_at ?? association.updated_at
-        association.order = dto.order
+        if association.order != dto.order { association.order = dto.order }
         association.content_id = content.id
 
         try checkCancelledBeforeRelationshipWrite()
@@ -3886,8 +3838,7 @@ extension Storage {
             association.content = content
         }
 
-        association.venue_id = dto.venue_id
-
+        if association.venue_id != dto.venue_id { association.venue_id = dto.venue_id }
         // Venue details now come from dto.venues_cache, which is upserted before associations.
         let venue = try dto.venue_id.flatMap { try Storage.fetchById(Venue.self, id: $0, in: ctx) }
 
@@ -3914,7 +3865,7 @@ extension Storage {
 
         association.created_at = dto.created_at ?? association.created_at
         association.updated_at = dto.updated_at ?? association.updated_at
-        association.order = dto.order
+        if association.order != dto.order { association.order = dto.order }
         association.content_id = content.id
 
         try checkCancelledBeforeRelationshipWrite()
@@ -3964,7 +3915,7 @@ extension Storage {
 
         association.created_at = dto.created_at ?? association.created_at
         association.updated_at = dto.updated_at ?? association.updated_at
-        association.order = dto.order
+        if association.order != dto.order { association.order = dto.order }
         association.content_id = content.id
 
         try checkCancelledBeforeRelationshipWrite()
@@ -4004,12 +3955,11 @@ extension Storage {
             MarketTrait(id: dto.id)
         }
 
-        trait.type = dto.type ?? trait.type
-        trait.name = dto.name ?? trait.name
-        trait.icon_url = dto.icon_url ?? trait.icon_url
+        if trait.type != dto.type { trait.type = dto.type }
+        if trait.name != dto.name { trait.name = dto.name }
+        if trait.icon_url != dto.icon_url { trait.icon_url = dto.icon_url }
         trait.created_at = dto.created_at ?? trait.created_at
         trait.updated_at = dto.updated_at ?? trait.updated_at
-
         return trait
     }
 
@@ -4087,18 +4037,16 @@ extension Storage {
 
         itinerary.created_at = dto.created_at ?? itinerary.created_at
         itinerary.updated_at = dto.updated_at ?? itinerary.updated_at
-        itinerary.name = dto.name
-        itinerary.desc = dto.description
+        if itinerary.name != dto.name { itinerary.name = dto.name }
+        if itinerary.desc != dto.description { itinerary.desc = dto.description }
         itinerary.market_id = market.id
-        itinerary.badge_title = dto.badge_title
-        itinerary.badge_icon = dto.badge_icon
-        itinerary.badge_gradient_css = dto.badge_gradient_css
-        itinerary.badge_text_color_hex = dto.badge_text_color_hex
-        itinerary.badge_color_hex_primary = dto.badge_color_hex_primary
-        itinerary.badge_color_hex_secondary = dto.badge_color_hex_secondary
-        itinerary.color_hex_primary = dto.color_hex_primary
-
-
+        if itinerary.badge_title != dto.badge_title { itinerary.badge_title = dto.badge_title }
+        if itinerary.badge_icon != dto.badge_icon { itinerary.badge_icon = dto.badge_icon }
+        if itinerary.badge_gradient_css != dto.badge_gradient_css { itinerary.badge_gradient_css = dto.badge_gradient_css }
+        if itinerary.badge_text_color_hex != dto.badge_text_color_hex { itinerary.badge_text_color_hex = dto.badge_text_color_hex }
+        if itinerary.badge_color_hex_primary != dto.badge_color_hex_primary { itinerary.badge_color_hex_primary = dto.badge_color_hex_primary }
+        if itinerary.badge_color_hex_secondary != dto.badge_color_hex_secondary { itinerary.badge_color_hex_secondary = dto.badge_color_hex_secondary }
+        if itinerary.color_hex_primary != dto.color_hex_primary { itinerary.color_hex_primary = dto.color_hex_primary }
         try checkCancelledBeforeRelationshipWrite()
         if itinerary.market?.id != market.id {
             itinerary.market = market
@@ -4247,11 +4195,10 @@ extension Storage {
             ItineraryHighlight(id: dto.id, itinerary: itinerary)
         }
 
-        item.name = dto.name
-        item.desc = dto.description
-        item.order = dto.order
-        item.icon_url = dto.icon_url
-
+        if item.name != dto.name { item.name = dto.name }
+        if item.desc != dto.description { item.desc = dto.description }
+        if item.order != dto.order { item.order = dto.order }
+        if item.icon_url != dto.icon_url { item.icon_url = dto.icon_url }
         return item
     }
 
@@ -4272,17 +4219,15 @@ extension Storage {
 
         item.created_at = dto.created_at ?? item.created_at
         item.updated_at = dto.updated_at ?? item.updated_at
-        item.time = dto.time
-        item.name = dto.name
-        item.desc = dto.description
-        item.order = dto.order
+        if item.time != dto.time { item.time = dto.time }
+        if item.name != dto.name { item.name = dto.name }
+        if item.desc != dto.description { item.desc = dto.description }
+        if item.order != dto.order { item.order = dto.order }
         item.itinerary_id = itinerary.id
-        item.local_tip = dto.local_tip
-        item.benefit = dto.benefit
-        item.other_options = dto.other_options
-        item.type = dto.type
-
-
+        if item.local_tip != dto.local_tip { item.local_tip = dto.local_tip }
+        if item.benefit != dto.benefit { item.benefit = dto.benefit }
+        if item.other_options != dto.other_options { item.other_options = dto.other_options }
+        if item.type != dto.type { item.type = dto.type }
         try checkCancelledBeforeRelationshipWrite()
         if item.itinerary?.id != itinerary.id {
             item.itinerary = itinerary
@@ -4366,10 +4311,10 @@ extension Storage {
         }
 
         link.key = key
-        link.remote_id = dto.id
+        if link.remote_id != dto.id { link.remote_id = dto.id }
         link.created_at = dto.created_at ?? link.created_at
         link.updated_at = dto.updated_at ?? link.updated_at
-        link.order = dto.order
+        if link.order != dto.order { link.order = dto.order }
         link.itinerary_id = itinerary.id
         link.market_trait_id = trait.id
 
@@ -4405,7 +4350,7 @@ extension Storage {
 
         association.created_at = dto.created_at ?? association.created_at
         association.updated_at = dto.updated_at ?? association.updated_at
-        association.order = dto.order
+        if association.order != dto.order { association.order = dto.order }
         association.itinerary_item_id = item.id
 
         try checkCancelledBeforeRelationshipWrite()

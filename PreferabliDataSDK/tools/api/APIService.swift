@@ -87,7 +87,7 @@ internal actor APIService {
     internal func createAlamo() async {
         let logging = await MainActor.run { Preferabli.main.loggingEnabled }
         let clientInterface = Storage.getKeyStore().string(forKey: "CLIENT_INTERFACE") ?? "ios_sdk"
-        let version = await MainActor.run { Preferabli.versionCode }
+        let version = await MainActor.run { Preferabli.appBuildNumber }
 
         var headers: HTTPHeaders = [
             "client_interface": clientInterface,
@@ -338,7 +338,7 @@ extension APIService {
         }
 
         let clientInterface = Storage.getKeyStore().string(forKey: "CLIENT_INTERFACE") ?? ""
-        let version = await MainActor.run { Preferabli.versionCode }
+        let version = await MainActor.run { Preferabli.appBuildNumber }
 
         replay.setValue(clientInterface, forHTTPHeaderField: "client_interface")
         replay.setValue(String(version), forHTTPHeaderField: "client_interface_version")

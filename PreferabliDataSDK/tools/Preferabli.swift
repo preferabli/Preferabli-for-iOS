@@ -42,9 +42,7 @@ public class Preferabli {
     public static var storage: StorageFacade { StorageFacade() }
     public let loadState = PreferabliLoadState()
     private let sessionBootstrapper = UserSessionBootstrapper()
-    
-    internal static let versionCode = 19
-    
+        
     public let loggingEnabled : Bool
     internal let api : APIService
     internal let hasBeenInitialized : Bool
@@ -109,13 +107,11 @@ public class Preferabli {
         let keyStore = Storage.getKeyStore()
 
         let savedBuildNumber = keyStore.integer(forKey: "lastDatabaseBuildNumber")
-        let savedVersionCode = keyStore.integer(forKey: "versionCode")
 
-        let isBrandNewInstall = savedBuildNumber == 0 && savedVersionCode == 0
+        let isBrandNewInstall = savedBuildNumber == 0
 
         if isBrandNewInstall {
             keyStore.set(Preferabli.appBuildNumber, forKey: "lastDatabaseBuildNumber")
-            keyStore.set(Preferabli.versionCode, forKey: "versionCode")
         }
     }
     
@@ -134,14 +130,10 @@ public class Preferabli {
         let savedBuildNumber = keyStore.integer(forKey: "lastDatabaseBuildNumber")
         let currentBuildNumber = Preferabli.appBuildNumber
 
-        let savedVersionCode = keyStore.integer(forKey: "versionCode")
-        let currentVersionCode = Preferabli.versionCode
 
-        let isExistingInstallMissingBuildNumber = savedBuildNumber == 0 && savedVersionCode != 0
         let buildNumberIncreased = savedBuildNumber != 0 && currentBuildNumber > savedBuildNumber
-        let sdkVersionChanged = savedVersionCode != 0 && savedVersionCode != currentVersionCode
 
-        return isExistingInstallMissingBuildNumber || buildNumberIncreased || sdkVersionChanged
+        return buildNumberIncreased
     }
 
     @discardableResult
@@ -151,28 +143,18 @@ public class Preferabli {
         let currentBuildNumber = Preferabli.appBuildNumber
         let savedBuildNumber = keyStore.integer(forKey: "lastDatabaseBuildNumber")
 
-        let currentVersionCode = Preferabli.versionCode
-        let savedVersionCode = keyStore.integer(forKey: "versionCode")
-
-        let isExistingInstallMissingBuildNumber = savedBuildNumber == 0 && savedVersionCode != 0
         let buildNumberIncreased = savedBuildNumber != 0 && currentBuildNumber > savedBuildNumber
-        let sdkVersionChanged = savedVersionCode != 0 && savedVersionCode != currentVersionCode
 
-        let shouldUpgrade =
-            isExistingInstallMissingBuildNumber ||
-            buildNumberIncreased ||
-            sdkVersionChanged
+        let shouldUpgrade = buildNumberIncreased
 
         guard shouldUpgrade else {
             keyStore.set(currentBuildNumber, forKey: "lastDatabaseBuildNumber")
-            keyStore.set(currentVersionCode, forKey: "versionCode")
             return false
         }
 
         try await Storage.databaseUpgraded()
 
         keyStore.set(currentBuildNumber, forKey: "lastDatabaseBuildNumber")
-        keyStore.set(currentVersionCode, forKey: "versionCode")
 
         return true
     }
@@ -186,7 +168,7 @@ public class Preferabli {
 
         PreferabliTools.detachedCancellableTask(priority: .background) {
             let ks = Storage.getKeyStore()
-            let reindexKey = "didReindexSearchableContent_v\(await Preferabli.versionCode)"
+            let reindexKey = "didReindexSearchableContent_v\(await Preferabli.appBuildNumber)"
 
             if !ks.bool(forKey: reindexKey) {
                 await Storage.reindexSearchableContent(batchSize: 250, log: log)
@@ -215,7 +197,6 @@ public class Preferabli {
         let clientInterface = keyStore.string(forKey: "CLIENT_INTERFACE")
         let storeFile = keyStore.string(forKey: "swiftdata_store_filename")
         let mainScale = keyStore.double(forKey: "mainScale")
-        let versionCode = keyStore.integer(forKey: "versionCode")
         let lastDatabaseBuildNumber = keyStore.integer(forKey: "lastDatabaseBuildNumber")
         let pendingStoreCleanupURLs = keyStore.stringArray(forKey: "PreferabliSDK.pendingStoreCleanupURLs")
         let activeStoreFilename = keyStore.string(forKey: "PreferabliSDK.activeStoreFilename")
@@ -226,7 +207,6 @@ public class Preferabli {
         keyStore.set(clientInterface, forKey: "CLIENT_INTERFACE")
         keyStore.set(storeFile, forKey: "swiftdata_store_filename")
         keyStore.set(mainScale, forKey: "mainScale")
-        keyStore.set(versionCode, forKey: "versionCode")
         keyStore.set(lastDatabaseBuildNumber, forKey: "lastDatabaseBuildNumber")
         if let pendingStoreCleanupURLs {
             keyStore.set(pendingStoreCleanupURLs, forKey: "PreferabliSDK.pendingStoreCleanupURLs")
