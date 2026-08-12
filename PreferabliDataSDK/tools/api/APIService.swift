@@ -750,6 +750,7 @@ internal struct APIEndpoints {
     internal static func experiences(id: Int) -> String { baseUrl + "tastefuli/venues/\(id)/experiences" }
     internal static func externalReservations(id: Int) -> String { baseUrl + "tastefuli/experiences/\(id)/external-reservation" }
     internal static func reservation(id: Int) -> String { baseUrl + "tastefuli/reservations/\(id)" }
+    internal static func experience(id: Int) -> String { baseUrl + "tastefuli/experience/\(id)" }
     internal static func alternativeTimes(id: Int) -> String { baseUrl + "tastefuli/reservations/\(id)/alternative-times" }
     internal static func internalReservations(id: Int) -> String { baseUrl + "tastefuli/experiences/\(id)/internal-reservation" }
     internal static func searchExperiences(query : String) -> String { baseUrl + "tastefuli/experiences?search=\(query)&offset=0&limit=20" }

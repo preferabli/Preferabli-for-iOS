@@ -399,6 +399,32 @@ public class Preferabli {
     public func verifyPreferabliUser(otpCode: String, firstName: String? = nil, lastName: String? = nil) async throws {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
+
+            // Codes unlocked before authentication belong to the anonymous
+            // session. Preserve them across the identity transition so they
+            // can be attached to the newly authenticated account before its
+            // affiliate bootstrap establishes server-authoritative state.
+            let keyStore = Storage.getKeyStore()
+            let anonymousAffiliateCodes = (
+                (keyStore.stringArray(forKey: "affiliateCodes") ?? [])
+                + (keyStore.stringArray(
+                    forKey: "pendingAffiliateMigrationCodes"
+                ) ?? [])
+            )
+                .map {
+                    $0.trimmingCharacters(
+                        in: .whitespacesAndNewlines
+                    )
+                }
+                .filter { !$0.isEmpty }
+                .uniquedCaseInsensitive()
+
+            if !anonymousAffiliateCodes.isEmpty {
+                keyStore.set(
+                    anonymousAffiliateCodes,
+                    forKey: "pendingAffiliateMigrationCodes"
+                )
+            }
             
             Analytics.track( ["event" : "verify_user"])
             
@@ -425,6 +451,28 @@ public class Preferabli {
             }
             
             try await userUpdated(dto: dto)
+
+            if !anonymousAffiliateCodes.isEmpty {
+                do {
+                    _ = try await unlockAffiliates(
+                        codes: anonymousAffiliateCodes
+                    )
+
+                    keyStore.removeObject(
+                        forKey: "pendingAffiliateMigrationCodes"
+                    )
+
+                    // Keep local consumers correct immediately. The subsequent
+                    // authenticated bootstrap will refresh this from the server.
+                    keyStore.set(
+                        anonymousAffiliateCodes,
+                        forKey: "affiliateCodes"
+                    )
+                } catch {
+                    // Authentication succeeded. Keep the durable pending value
+                    // and let authenticated bootstrap retry the migration.
+                }
+            }
             
             loadUserData()
             
@@ -2691,7 +2739,7 @@ public class Preferabli {
                         needsVenue = false
                     }
                     if let experience = try Storage.fetchById(Experience.self, id: experience_id, in: ctx) {
-                        needsRefresh = PreferabliTools.hasMinutesPassed(minutes: 60, startDate: Storage.getKeyStore().object(forKey: "lastCalledExperiences\(venue_id)") as? Date) || force_refresh
+                        needsRefresh = PreferabliTools.hasMinutesPassed(minutes: 60, startDate: Storage.getKeyStore().object(forKey: "lastCalledExperience\(experience_id)") as? Date) || force_refresh
                     }
                 }
             
@@ -2707,22 +2755,19 @@ public class Preferabli {
             
             if needsRefresh {
                 
-                let params: SParams = ["limit": 9999, "offset": 0]
-                let body: [ExperienceDTO] = try await api.getAlamo().get(APIEndpoints.experiences(id: venue_id), sparams: params)
+                let experienceDTO: ExperienceDTO = try await api.getAlamo().get(APIEndpoints.experience(id: experience_id))
                 
                 try await Storage.withBackgroundContext { ctx, save in
-                    for experienceDTO in body {
                         
                         guard let preferabli_venue_id =  experienceDTO.preferabli_venue_id, let venue = try Storage.fetchById(Venue.self, id: preferabli_venue_id, in: ctx) else {
-                            continue
+                            return
                         }
                         
                         try Storage.upsertExperience(from: experienceDTO, venue: venue, in: ctx)
-                    }
 
                     try save()
                     
-                    Storage.getKeyStore().set(Date(), forKey: "lastCalledExperiences\(venue_id)")
+                    Storage.getKeyStore().set(Date(), forKey: "lastCalledExperience\(experience_id)")
                 }
             }
             
@@ -4027,8 +4072,21 @@ extension Preferabli {
         }
     }
 
+    /// User-initiated logout with coordinated app UI teardown.
+    ///
+    /// Storage admission is closed and existing storage operations are drained before
+    /// `teardownUI` runs. This prevents SwiftData saves from racing SwiftUI's removal
+    /// of the old model-container tree.
+    public func logout(
+        tearingDownUI teardownUI: @escaping @MainActor @Sendable () async -> Void
+    ) async throws {
+        try await PreferabliTools.withLogout {
+            await self.performLogoutCleanupLocked(tearingDownUI: teardownUI)
+        }
+    }
+
     /// Called by networking when refresh fails.
-    /// App handler is responsible for UI teardown first, then calling logout cleanup.
+    /// The app handler should use coordinated logout so storage drains before UI teardown.
     internal func handleRefreshFailureLogout() async {
         let handler = await MainActor.run { Preferabli.forcedLogoutHandler }
         if let handler {
@@ -4055,7 +4113,8 @@ extension Preferabli {
         try? await logout()
     }
 
-    /// Call this only after the app has removed the old SwiftUI tree.
+    /// Legacy logout entry point for clients that do not install SwiftData into SwiftUI.
+    @available(*, deprecated, message: "Use logout(tearingDownUI:) when replacing a SwiftUI model container.")
     public func logoutAfterUITeardown() async throws {
         try await PreferabliTools.withLogout {
             await self.performLogoutCleanupLocked()
@@ -4064,10 +4123,18 @@ extension Preferabli {
 
     /// Actual shared cleanup implementation.
     /// Assumes caller has already entered the logout gate.
-    private func performLogoutCleanupLocked() async {
+    private func performLogoutCleanupLocked(
+        tearingDownUI teardownUI: (@MainActor @Sendable () async -> Void)? = nil
+    ) async {
         await Storage.beginLogoutCancellation()
 
         await PreferabliTools.cancelAllInflight()
+
+        // The old SwiftUI model-container tree must remain installed until all
+        // registered storage work above has stopped. The app can tear it down now.
+        if let teardownUI {
+            await teardownUI()
+        }
 
         do {
             try await clearAllData()
@@ -4935,26 +5002,20 @@ extension Preferabli {
                 .get(APIEndpoints.personalityItineraries(id: personality_id), sparams: params)
 
             try await Storage.withBackgroundContext { ctx, save in
-                
-
-                
                 for itineraryDTO in body {
-                    
-                    guard let market = try Storage.fetchById(
+                    let market = try Storage.fetchById(
                         Market.self,
                         id: itineraryDTO.market_id,
                         in: ctx
-                    ) else {
-                        throw PreferabliException(
-                            type: .BadSwiftData,
-                            message: "Could not save itinerary \(itineraryDTO.id) because Market \(itineraryDTO.market_id) is not stored locally. Fetch markets before itineraries.",
-                            code: 661
-                        )
-                    }
-                    
-                    _ = try Storage.upsertItinerary(from: itineraryDTO, market: market, in: ctx)
+                    )
+
+                    _ = try Storage.upsertItinerary(
+                        from: itineraryDTO,
+                        market: market,
+                        in: ctx
+                    )
                 }
-                
+
                 try save()
             }
 
@@ -5022,8 +5083,9 @@ extension Preferabli {
 
     /// Fetches one itinerary by id and stores it in SwiftData.
     ///
-    /// `market_id` is required only for the local SwiftData relationship; it is not
-    /// added to the `/itineraries/:id` request.
+    /// If the response references a locally stored market, its SwiftData relationship
+    /// is populated. Marketless itineraries and references to markets not stored locally
+    /// are still persisted.
     ///
     /// - Returns: the itinerary id for use with SwiftData queries.
     public func getItinerary(
@@ -5063,17 +5125,11 @@ extension Preferabli {
                     .get(APIEndpoints.itinerary(id: itinerary_id))
 
                 try await Storage.withBackgroundContext { ctx, save in
-                    guard let market = try Storage.fetchById(
+                    let market = try Storage.fetchById(
                         Market.self,
                         id: body.market_id,
                         in: ctx
-                    ) else {
-                        throw PreferabliException(
-                            type: .BadSwiftData,
-                            message: "Could not get itinerary \(itinerary_id) because Market \(body.market_id) is not stored locally. Fetch markets before itineraries.",
-                            code: 661
-                        )
-                    }
+                    )
 
                     _ = try Storage.upsertItinerary(
                         from: body,

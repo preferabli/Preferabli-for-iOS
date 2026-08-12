@@ -124,7 +124,6 @@ public struct ExperiencePriceDTO: Decodable, Sendable {
     public let age_range: String?
     public let experience_economics: String?
     public let experience_id: Int?
-    public let experience_tier: String?
     public let guest_increment: Int?
     public let incentive_type_id: Int?
     public let list_price: Double?
@@ -132,10 +131,9 @@ public struct ExperiencePriceDTO: Decodable, Sendable {
     public let min_count: Int?
     public let partner_ref: Int?
     public let price: Double?
-    public let price_is_external: Bool?
+    public let pricing_mode: String?
     public let price_type: String?
     public let stripe_product_price_id: String?
-    public var price_on_request: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id = "experience_price_id"
@@ -143,7 +141,6 @@ public struct ExperiencePriceDTO: Decodable, Sendable {
         case age_range
         case experience_economics
         case experience_id
-        case experience_tier
         case guest_increment
         case incentive_type_id
         case list_price
@@ -151,10 +148,9 @@ public struct ExperiencePriceDTO: Decodable, Sendable {
         case min_count
         case partner_ref
         case price
-        case price_is_external
+        case pricing_mode
         case price_type
         case stripe_product_price_id
-        case price_on_request
     }
 }
 

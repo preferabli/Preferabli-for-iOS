@@ -22,8 +22,8 @@ public final class Itinerary: HasIntID, HasTimestamps, HasImage {
     
     public var color_hex_primary: String?
 
-    /// Local-only denormalized value. The API does not return the itinerary's Market.
-    public var market_id: Int
+    /// Denormalized foreign key when the itinerary belongs to a market.
+    public var market_id: Int?
     
     public var badge_title: String?
     public var badge_icon: String?
@@ -47,16 +47,16 @@ public final class Itinerary: HasIntID, HasTimestamps, HasImage {
     @Relationship(deleteRule: .cascade, inverse: \ItineraryHighlight.itinerary)
     public var highlights: [ItineraryHighlight] = []
 
-    /// Assigned locally by the caller while the DTO is being upserted.
+    /// Resolved locally when the referenced market is available in SwiftData.
     @Relationship(deleteRule: .nullify)
     public var market: Market?
     
     @Relationship(deleteRule: .nullify)
     public var curator_personality: Personality?
 
-    public init(id: Int, market: Market) {
+    public init(id: Int, market: Market? = nil) {
         self.id = id
-        self.market_id = market.id
+        self.market_id = market?.id
         self.market = market
     }
 

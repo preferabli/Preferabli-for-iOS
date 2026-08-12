@@ -616,16 +616,14 @@ extension Storage {
         if price.age_range != dto.age_range { price.age_range = dto.age_range }
         if price.experience_economics != dto.experience_economics { price.experience_economics = dto.experience_economics }
         price.experience_id = dto.experience_id ?? experience.id
-        if price.experience_tier != dto.experience_tier { price.experience_tier = dto.experience_tier }
         if price.guest_increment != dto.guest_increment { price.guest_increment = dto.guest_increment }
-        if price.price_on_request != dto.price_on_request { price.price_on_request = dto.price_on_request }
         if price.incentive_type_id != dto.incentive_type_id { price.incentive_type_id = dto.incentive_type_id }
         if price.list_price != dto.list_price { price.list_price = dto.list_price }
         if price.max_count != dto.max_count { price.max_count = dto.max_count }
         if price.min_count != dto.min_count { price.min_count = dto.min_count }
         if price.partner_ref != dto.partner_ref { price.partner_ref = dto.partner_ref }
         if price.price != dto.price { price.price = dto.price }
-        if price.price_is_external != dto.price_is_external { price.price_is_external = dto.price_is_external }
+        if price.pricing_mode != dto.pricing_mode { price.pricing_mode = dto.pricing_mode }
         if price.price_type != dto.price_type { price.price_type = dto.price_type }
         if price.stripe_product_price_id != dto.stripe_product_price_id { price.stripe_product_price_id = dto.stripe_product_price_id }
         return price
@@ -706,6 +704,11 @@ extension Storage {
         if v.is_partner != dto.is_partner { v.is_partner = dto.is_partner }
         
         if v.isTombstoned { v.isTombstoned = false }
+
+        let marketIDs = Array(Set(dto.market_ids ?? [])).sorted()
+        if v.market_ids_cache != marketIDs {
+            v.market_ids_cache = marketIDs
+        }
         
         // MARK: - Media pointers
         if let video = dto.video {
@@ -1549,9 +1552,8 @@ extension Storage {
             if guest.price_age_range != priceDTO.age_range { guest.price_age_range = priceDTO.age_range }
             if guest.price_experience_economics != priceDTO.experience_economics { guest.price_experience_economics = priceDTO.experience_economics }
             if guest.price_experience_id != priceDTO.experience_id { guest.price_experience_id = priceDTO.experience_id }
-            if guest.price_experience_tier != priceDTO.experience_tier { guest.price_experience_tier = priceDTO.experience_tier }
             if guest.price_guest_increment != priceDTO.guest_increment { guest.price_guest_increment = priceDTO.guest_increment }
-            if guest.price_price_on_request != priceDTO.price_on_request { guest.price_price_on_request = priceDTO.price_on_request }
+            if guest.price_pricing_mode != priceDTO.pricing_mode { guest.price_pricing_mode = priceDTO.pricing_mode }
             if guest.price_incentive_type_id != priceDTO.incentive_type_id { guest.price_incentive_type_id = priceDTO.incentive_type_id }
             if guest.price_list_price != priceDTO.list_price { guest.price_list_price = priceDTO.list_price }
             if guest.price_max_count != priceDTO.max_count { guest.price_max_count = priceDTO.max_count }
@@ -4025,7 +4027,7 @@ extension Storage {
     @discardableResult
     nonisolated static func upsertItinerary(
         from dto: ItineraryDTO,
-        market: Market,
+        market: Market? = nil,
         in ctx: ModelContext
     ) throws -> Itinerary {
 
@@ -4039,7 +4041,8 @@ extension Storage {
         itinerary.updated_at = dto.updated_at ?? itinerary.updated_at
         if itinerary.name != dto.name { itinerary.name = dto.name }
         if itinerary.desc != dto.description { itinerary.desc = dto.description }
-        itinerary.market_id = market.id
+        let marketID = market?.id ?? dto.market_id
+        itinerary.market_id = marketID
         if itinerary.badge_title != dto.badge_title { itinerary.badge_title = dto.badge_title }
         if itinerary.badge_icon != dto.badge_icon { itinerary.badge_icon = dto.badge_icon }
         if itinerary.badge_gradient_css != dto.badge_gradient_css { itinerary.badge_gradient_css = dto.badge_gradient_css }
@@ -4048,7 +4051,7 @@ extension Storage {
         if itinerary.badge_color_hex_secondary != dto.badge_color_hex_secondary { itinerary.badge_color_hex_secondary = dto.badge_color_hex_secondary }
         if itinerary.color_hex_primary != dto.color_hex_primary { itinerary.color_hex_primary = dto.color_hex_primary }
         try checkCancelledBeforeRelationshipWrite()
-        if itinerary.market?.id != market.id {
+        if itinerary.market?.id != market?.id {
             itinerary.market = market
         }
         

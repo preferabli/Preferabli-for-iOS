@@ -130,10 +130,39 @@ final class UserSessionBootstrapper {
     ) async {
         guard AffiliateRefreshGate.shouldRefresh(force: force) else { return }
 
+        let keyStore = Storage.getKeyStore()
+        let pendingMigrationCodes =
+            (keyStore.stringArray(
+                forKey: "pendingAffiliateMigrationCodes"
+            ) ?? [])
+            .map {
+                $0.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                )
+            }
+            .filter { !$0.isEmpty }
+            .uniquedCaseInsensitive()
+
+        if !pendingMigrationCodes.isEmpty {
+            do {
+                _ = try await preferabli.unlockAffiliates(
+                    codes: pendingMigrationCodes
+                )
+                keyStore.removeObject(
+                    forKey: "pendingAffiliateMigrationCodes"
+                )
+            } catch {
+                // Do not replace the local anonymous codes with an incomplete
+                // server response. Leave the gate and pending migration intact
+                // so a later bootstrap can retry.
+                return
+            }
+        }
+
         do {
             let affiliateCodes = try await preferabli.getAffiliates()
 
-            Storage.getKeyStore().set(
+            keyStore.set(
                 affiliateCodes,
                 forKey: "affiliateCodes"
             )

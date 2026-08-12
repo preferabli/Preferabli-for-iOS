@@ -128,7 +128,6 @@ public final class ExperiencePrice: HasIntID {
     public var age_range: String?
     public var experience_economics: String?
     public var experience_id: Int?
-    public var experience_tier: String?
     public var guest_increment: Int?
     public var incentive_type_id: Int?
     public var list_price: Double?
@@ -136,10 +135,9 @@ public final class ExperiencePrice: HasIntID {
     public var min_count: Int?
     public var partner_ref: Int?
     public var price: Double?
-    public var price_is_external: Bool?
+    public var pricing_mode: String?
     public var price_type: String?
     public var stripe_product_price_id: String?
-    public var price_on_request: Bool?
     
     public var experience: Experience?
 
@@ -149,6 +147,19 @@ public final class ExperiencePrice: HasIntID {
     
     public static func predicate(forID id: Int) -> Predicate<ExperiencePrice> {
         #Predicate<ExperiencePrice> { $0.id == id }
+    }
+}
+
+public enum ExperiencePricingMode: String, CaseIterable, Sendable {
+    case standard
+    case onRequest = "on_request"
+    case noReservationFee = "no_reservation_fee"
+    case notApplicable = "not_applicable"
+}
+
+extension ExperiencePrice {
+    public var pricingMode: ExperiencePricingMode {
+        ExperiencePricingMode(rawValue: pricing_mode ?? "") ?? .standard
     }
 }
 

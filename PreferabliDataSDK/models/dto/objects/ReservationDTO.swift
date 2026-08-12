@@ -96,9 +96,8 @@ public struct ReservationExperiencePriceDTO: Decodable, Sendable {
     public let age_range: String?
     public let experience_economics: String?
     public let experience_id: Int?
-    public let experience_tier: String?
     public let guest_increment: Int?
-    public let price_on_request: Bool?
+    public let pricing_mode: String?
     public let incentive_type_id: Int?
     public let list_price: Double?
     public let max_count: Int?

@@ -72,8 +72,15 @@ public class PreferabliTools {
         _ body: @Sendable () async throws -> T
     ) async throws -> T {
         guard await beginLogout() else { throw CancellationError() }
-        defer { Task { await endLogout() } }
-        return try await body()
+
+        do {
+            let value = try await body()
+            await endLogout()
+            return value
+        } catch {
+            await endLogout()
+            throw error
+        }
     }
 
     // MARK: Inflight cancellation registry
