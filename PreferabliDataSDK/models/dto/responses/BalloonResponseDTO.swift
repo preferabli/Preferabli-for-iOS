@@ -9,4 +9,6 @@ import Foundation
 
 struct BalloonResponseDTO: Decodable {
     let booking: BalloonReservationDTO
+    let venue_id: Int?
+    let experience_id: Int?
 }

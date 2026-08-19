@@ -59,6 +59,8 @@ public struct ReservationExperienceDTO: Decodable, Sendable {
 public struct ReservationBookingDTO: Decodable, Sendable {
     public let account_id: String?
     public let booking_confirmation_ref: String?
+    public let group_lead: String?
+    public let meeting_address: String?
     public let booking_type: String?
     public let brand_id: Int?
     public let venue_id: Int?

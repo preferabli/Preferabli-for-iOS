@@ -452,6 +452,13 @@ public class Preferabli {
             
             try await userUpdated(dto: dto)
 
+            do {
+                try await reconcileLocalTicketReservationsAfterAuthentication()
+            } catch {
+                // Authentication succeeded. The local reservation remains in
+                // SwiftData so authenticated bootstrap can retry safely.
+            }
+
             if !anonymousAffiliateCodes.isEmpty {
                 do {
                     _ = try await unlockAffiliates(
@@ -467,6 +474,10 @@ public class Preferabli {
                     keyStore.set(
                         anonymousAffiliateCodes,
                         forKey: "affiliateCodes"
+                    )
+                    NotificationCenter.default.post(
+                        name: .preferabliAffiliateCodesDidChange,
+                        object: nil
                     )
                 } catch {
                     // Authentication succeeded. Keep the durable pending value
@@ -934,7 +945,10 @@ public class Preferabli {
         total_price : Int?,
         specific_requests : String?,
         cancellation_policy : String?,
-        confirmation_message : String?
+        confirmation_message : String?,
+        group_lead : String? = nil,
+        meeting_address : String? = nil,
+        created_via_code : Bool? = nil
     ) async throws -> Int {
         do {
             try await canWeContinue(needsToBeLoggedIn: true)
@@ -959,6 +973,18 @@ public class Preferabli {
 
             if let booking_confirmation_ref {
                 dictionary["booking_confirmation_ref"] = booking_confirmation_ref
+            }
+
+            if let group_lead {
+                dictionary["group_lead"] = group_lead
+            }
+
+            if let meeting_address {
+                dictionary["meeting_address"] = meeting_address
+            }
+
+            if let created_via_code {
+                dictionary["created_via_code"] = created_via_code
             }
 
             if let unit_price {
@@ -1042,10 +1068,20 @@ public class Preferabli {
                     sparams: dictionary
                 )
             }
-            
-            
 
-            
+            if affiliateArray.isEmpty {
+                throw PreferabliException.init(
+                    type: .BadData,
+                    message: "No affiliate(s) found.",
+                    code: 404
+                )
+            }
+
+            // Affiliate payloads can contain private experiences that are not
+            // returned by getExperiences. Their upsert requires each referenced
+            // venue to exist locally first.
+            try await loadVenuesRequiredByAffiliates(affiliateArray)
+
             let ids : [Int] = try await Storage.withBackgroundContext { ctx, save in
                 var idsToReturn = [Int]()
                 for affiliateDTO in affiliateArray {
@@ -1055,10 +1091,6 @@ public class Preferabli {
 
                 try save()
                 return idsToReturn
-            }
-
-            if affiliateArray.isEmpty {
-                throw PreferabliException.init(type: .BadData, message: "No affiliate(s) found.", code: 404)
             }
             
             return ids
@@ -1077,6 +1109,8 @@ public class Preferabli {
             let response: [AffiliateDTO] = try await api
                 .getAlamo()
                 .get(APIEndpoints.affiliates)
+
+            try await loadVenuesRequiredByAffiliates(response)
 
             try await Storage.withBackgroundContext { ctx, save in
                 for affiliateDTO in response {
@@ -1102,6 +1136,32 @@ public class Preferabli {
         } catch {
             handleError(error: error)
             throw error
+        }
+    }
+
+    private func loadVenuesRequiredByAffiliates(
+        _ affiliates: [AffiliateDTO]
+    ) async throws {
+        var marketIDs = Set(
+            affiliates.compactMap(\.market_id).filter { $0 > 0 }
+        )
+
+        if marketIDs.isEmpty {
+            let storedMarketID = Storage.getKeyStore().integer(
+                forKey: "marketId"
+            )
+            if storedMarketID > 0 {
+                marketIDs.insert(storedMarketID)
+            }
+        }
+
+        guard !marketIDs.isEmpty else { return }
+
+        _ = try await getMarkets(force_refresh: false)
+
+        for marketID in marketIDs.sorted() {
+            try Task.checkCancellation()
+            _ = try await getVenues(market_id: marketID)
         }
     }
     
@@ -1155,6 +1215,7 @@ public class Preferabli {
     public func searchVenues(
         query : String,
         market_trait_ids : [Int]? = nil,
+        market_ids : [Int]? = nil
     ) async throws -> [Int] {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
@@ -1163,6 +1224,9 @@ public class Preferabli {
             var dictionary: SParams = ["search" : query , "search_types" : ["venues"], "has_market_id" : true]
             if let market_trait_ids = market_trait_ids {
                 dictionary["market_trait_ids"] = market_trait_ids
+            }
+            if let market_ids = market_ids {
+                dictionary["market_ids"] = market_ids
             }
             
             let searchResponse : VenueSearchResponseDTO = try await api.getAlamo().get(APIEndpoints.search, sparams: dictionary)
@@ -1249,13 +1313,29 @@ public class Preferabli {
     }
     
     public func searchExperiences(
-        query : String
+        query : String,
+        market_trait_ids : [Int]? = nil,
+        market_ids : [Int]? = nil
     ) async throws -> [Int] {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
             Analytics.track( ["event" : "search_experiences"])
             
-            let searchResponse : [ExperienceDTO] = try await api.getAlamo().get(APIEndpoints.searchExperiences(query: query))
+            var params: SParams = [
+                "search": query,
+                "offset": 0,
+                "limit": 20
+            ]
+            if let market_trait_ids {
+                params["market_trait_ids"] = market_trait_ids
+            }
+            if let market_ids {
+                params["market_ids"] = market_ids
+            }
+
+            let searchResponse: [ExperienceDTO] = try await api
+                .getAlamo()
+                .get(APIEndpoints.searchExperiences, sparams: params)
             
             let needsVenues = try await Storage.withBackgroundContext { ctx, save in
                 var needsVenues = [Int]()
@@ -2846,6 +2926,150 @@ public class Preferabli {
             throw error
         }
     }
+
+    func reconcileLocalTicketReservationsAfterAuthentication() async throws {
+        guard Preferabli.isPreferabliUserLoggedIn() else { return }
+
+        let localTickets = try Storage.withContext { ctx, _ in
+            let reservations = try ctx.fetch(FetchDescriptor<Reservation>())
+            let ticketedExperienceIDs = Set(
+                try ctx.fetch(FetchDescriptor<Experience>())
+                    .filter { $0.is_ticketed == true }
+                    .map(\.id)
+            )
+            return reservations.compactMap { reservation -> LocalTicketReservationUpload? in
+                let experienceID = reservation.booking_experience_id
+                    ?? reservation.experience_id
+                    ?? 1077
+                guard
+                    reservation.id < 0,
+                    ticketedExperienceIDs.contains(experienceID),
+                    let bookingConfirmationRef = reservation.booking_confirmation_ref?
+                        .trimmingCharacters(in: .whitespacesAndNewlines),
+                    !bookingConfirmationRef.isEmpty
+                else {
+                    return nil
+                }
+
+                return LocalTicketReservationUpload(
+                    localId: reservation.id,
+                    experienceId: experienceID,
+                    bookingConfirmationRef: bookingConfirmationRef,
+                    groupLead: reservation.booking_group_lead,
+                    meetingAddress: reservation.booking_meeting_address,
+                    date: reservation.booking_date ?? reservation.date,
+                    time: reservation.booking_confirmed_time,
+                    guestCount: max(
+                        reservation.request_guests.reduce(0) {
+                            $0 + ($1.quantity ?? 0)
+                        },
+                        0
+                    ),
+                    completedSafetyBrief: reservation.completed_safety_brief == true
+                )
+            }
+        }
+
+        guard !localTickets.isEmpty else { return }
+
+        // The server must be consulted before any upload so an existing
+        // profile reservation always wins over the anonymous local copy.
+        _ = try await getReservations()
+        var serverBookingRefs = try serverReservationBookingRefs()
+
+        var uploadError: Error?
+        for ticket in localTickets {
+            let normalizedRef = ticket.bookingConfirmationRef.lowercased()
+            if serverBookingRefs.contains(normalizedRef) {
+                continue
+            }
+
+            guard let date = ticket.date, ticket.guestCount > 0 else {
+                uploadError = uploadError ?? PreferabliException(
+                    type: .BadData,
+                    message: "Local ticket reservation is missing its date or guest count."
+                )
+                continue
+            }
+
+            do {
+                let hubspotDealId = try await createHubspotDeal(
+                    experience_id: ticket.experienceId
+                )
+                _ = try await createExternalReservation(
+                    experience_id: ticket.experienceId,
+                    hubspot_deal_id: hubspotDealId,
+                    date: date,
+                    time: ticket.time,
+                    guest_count: ticket.guestCount,
+                    modification_link: nil,
+                    booking_confirmation_ref: ticket.bookingConfirmationRef,
+                    unit_price: nil,
+                    total_price: nil,
+                    specific_requests: nil,
+                    cancellation_policy: nil,
+                    confirmation_message: nil,
+                    group_lead: ticket.groupLead,
+                    meeting_address: ticket.meetingAddress,
+                    created_via_code: true
+                )
+
+                serverBookingRefs.insert(normalizedRef)
+            } catch {
+                uploadError = uploadError ?? error
+            }
+        }
+
+        // Refresh once more and only remove local rows that are now verifiably
+        // represented by a server-backed reservation.
+        _ = try await getReservations()
+        serverBookingRefs = try serverReservationBookingRefs()
+
+        try Storage.withContext { ctx, save in
+            let serverReservations = try ctx.fetch(FetchDescriptor<Reservation>())
+            for ticket in localTickets where serverBookingRefs.contains(
+                ticket.bookingConfirmationRef.lowercased()
+            ) {
+                if ticket.completedSafetyBrief,
+                   let serverReservation = serverReservations.first(where: {
+                       guard $0.id >= 0 else { return false }
+                       return $0.booking_confirmation_ref?
+                           .trimmingCharacters(in: .whitespacesAndNewlines)
+                           .lowercased() == ticket.bookingConfirmationRef.lowercased()
+                   }) {
+                    serverReservation.completed_safety_brief = true
+                }
+
+                if let localReservation = try Storage.fetchById(
+                    Reservation.self,
+                    id: ticket.localId,
+                    in: ctx
+                ) {
+                    ctx.delete(localReservation)
+                }
+            }
+            try save()
+        }
+
+        if let uploadError {
+            throw uploadError
+        }
+    }
+
+    private func serverReservationBookingRefs() throws -> Set<String> {
+        try Storage.withContext { ctx, _ in
+            let reservations = try ctx.fetch(FetchDescriptor<Reservation>())
+            return Set(
+                reservations.compactMap { reservation in
+                    guard reservation.id >= 0 else { return nil }
+                    let ref = reservation.booking_confirmation_ref?
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .lowercased()
+                    return ref?.isEmpty == false ? ref : nil
+                }
+            )
+        }
+    }
     
     public func getExperiences(force_refresh: Bool = false, venue_id: Int) async throws -> [Int] {
         do {
@@ -2905,26 +3129,210 @@ public class Preferabli {
         }
     }
     
-    public func addBalloonTicket(booking_code: String) async throws -> String {
+    public func addTicket(booking_code: String) async throws -> Int? {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
             
-            Analytics.track(["event": "add_balloon_ticket"])
+            Analytics.track(["event": "add_ticket"])
 
             let params: SParams = ["search": booking_code]
             let body : BalloonResponseDTO = try await api.getAlamo().get(APIEndpoints.balloonBooking, sparams: params)
-            
-            let reservationId = try Storage.withContext { ctx, save in
-                let reservation = try Storage.upsertBalloonReservation(from: body.booking, in: ctx)
-                try save()
-                return reservation.id
-            }
-            
-            return reservationId
+
+            return try await createBalloonExternalReservationIfNeeded(
+                for: body.booking,
+                venueId: body.venue_id ?? 21761,
+                experienceId: body.experience_id ?? 1077
+            )
             
         } catch {
             handleError(error: error)
             throw error
+        }
+    }
+
+    private func createBalloonExternalReservationIfNeeded(
+        for booking: BalloonReservationDTO,
+        venueId: Int,
+        experienceId: Int
+    ) async throws -> Int? {
+        let bookingConfirmationRef = booking.id.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard !bookingConfirmationRef.isEmpty else { return nil }
+
+        let existingReservationId = try Storage.withContext { ctx, _ in
+            var descriptor = FetchDescriptor<Reservation>(
+                predicate: #Predicate<Reservation> { reservation in
+                    reservation.booking_confirmation_ref == bookingConfirmationRef
+                }
+            )
+            descriptor.fetchLimit = 1
+            return try ctx.fetch(descriptor).first?.id
+        }
+        if let existingReservationId { return existingReservationId }
+
+        guard
+            let item = booking.items?.first,
+            let startTimestamp = item.start_date,
+            let groupLead = booking.customer_name?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ),
+            !groupLead.isEmpty,
+            let meetingAddress = item.meeting_point?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ),
+            !meetingAddress.isEmpty
+        else {
+            return nil
+        }
+
+        let startDate = Date(timeIntervalSince1970: TimeInterval(startTimestamp))
+        let dateFormatter = DateFormatter()
+        dateFormatter.calendar = Calendar(identifier: .gregorian)
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.calendar = Calendar(identifier: .gregorian)
+        timeFormatter.locale = Locale(identifier: "en_US_POSIX")
+        timeFormatter.dateFormat = "HH:mm"
+
+        let date = dateFormatter.string(from: startDate)
+        let time = timeFormatter.string(from: startDate)
+        let guestCount = max(Int(item.qty ?? "1") ?? 1, 0)
+
+        guard Preferabli.isPreferabliUserLoggedIn() else {
+            let hasVenue = try Storage.withContext { ctx, _ in
+                try Storage.fetchById(Venue.self, id: venueId, in: ctx) != nil
+            }
+            if !hasVenue {
+                _ = try await getVenue(
+                    force_refresh: true,
+                    venue_id: venueId
+                )
+            }
+
+            let hasExperience = try Storage.withContext { ctx, _ in
+                try Storage.fetchById(
+                    Experience.self,
+                    id: experienceId,
+                    in: ctx
+                ) != nil
+            }
+            if !hasVenue || !hasExperience {
+                _ = try await getExperience(
+                    force_refresh: true,
+                    venue_id: venueId,
+                    experience_id: experienceId
+                )
+            }
+
+            return try createLocalBalloonReservation(
+                experienceId: experienceId,
+                venueId: venueId,
+                bookingConfirmationRef: bookingConfirmationRef,
+                groupLead: groupLead,
+                meetingAddress: meetingAddress,
+                date: date,
+                time: time,
+                guestCount: guestCount
+            )
+        }
+
+        let hubspotDealId = try await createHubspotDeal(
+            experience_id: experienceId
+        )
+
+        return try await createExternalReservation(
+            experience_id: experienceId,
+            hubspot_deal_id: hubspotDealId,
+            date: date,
+            time: time,
+            guest_count: guestCount,
+            modification_link: nil,
+            booking_confirmation_ref: bookingConfirmationRef,
+            unit_price: nil,
+            total_price: nil,
+            specific_requests: nil,
+            cancellation_policy: nil,
+            confirmation_message: nil,
+            group_lead: groupLead,
+            meeting_address: meetingAddress,
+            created_via_code: true
+        )
+    }
+
+    private func createLocalBalloonReservation(
+        experienceId: Int,
+        venueId: Int,
+        bookingConfirmationRef: String,
+        groupLead: String,
+        meetingAddress: String,
+        date: String,
+        time: String,
+        guestCount: Int
+    ) throws -> Int {
+        try Storage.withContext { ctx, save in
+            let existingReservations = try ctx.fetch(FetchDescriptor<Reservation>())
+            let localId = min(existingReservations.map(\.id).min() ?? 0, 0) - 1
+            let reservation = Reservation(id: localId)
+
+            reservation.date = date
+            reservation.status = "booking_confirmed"
+            reservation.experience_id = experienceId
+            reservation.experience_name = "Hot Air Balloon Ride"
+            reservation.booking_confirmation_ref = bookingConfirmationRef
+            reservation.booking_group_lead = groupLead
+            reservation.booking_meeting_address = meetingAddress
+            reservation.booking_confirmed_time = time
+            reservation.booking_date = date
+            reservation.booking_experience_id = experienceId
+            reservation.booking_status = "booking_confirmed"
+
+            guard
+                let venue = try Storage.fetchById(
+                    Venue.self,
+                    id: venueId,
+                    in: ctx
+                ),
+                let experience = try Storage.fetchById(
+                    Experience.self,
+                    id: experienceId,
+                    in: ctx
+                )
+            else {
+                throw PreferabliException(
+                    type: .BadData,
+                    message: "Could not load the balloon venue or experience."
+                )
+            }
+
+            reservation.experience_name = experience.name
+            reservation.experience_header_image_url = experience.header_image_url
+            reservation.experience_preferabli_image_url = experience.preferabli_image_url
+            reservation.brand_id = experience.brand_id
+            reservation.venue_id = experience.venue.id
+            reservation.brand_name = experience.venue.display_name ?? experience.venue.name
+            reservation.brand_logo_image_url = venue.logo?.path
+            reservation.booking_brand_id = experience.brand_id
+            reservation.booking_venue_id = experience.venue.id
+
+            let guest = ReservationRequestGuest(
+                key: ReservationRequestGuest.makeKey(
+                    reservationID: localId,
+                    experiencePriceID: nil,
+                    index: 0
+                )
+            )
+            guest.reservation_id = localId
+            guest.quantity = guestCount
+
+            ctx.insert(guest)
+            reservation.request_guests = [guest]
+            ctx.insert(reservation)
+            try save()
+
+            return localId
         }
     }
     
@@ -2954,18 +3362,22 @@ public class Preferabli {
                 "marketing_sign_up_requested": marketing_sign_up_requested,
                 "completed_safety_brief_platform": Storage.getKeyStore().string(forKey: "CLIENT_INTERFACE"),
                 "booking_id": booking_id,
-                "date_of_birth": date_of_birth
+                "date_of_birth": date_of_birth,
+                "company": "Napa Valley Balloons"
             ]
 
             try await api.getAlamo().post(APIEndpoints.completeSafetyBrief, sjson: params)
 
             try await Storage.withBackgroundContext { ctx, save in
-                guard let reservation = try Storage.fetchById(BalloonReservation.self, id: booking_id, in: ctx) else {
-                    return
+                let descriptor = FetchDescriptor<Reservation>(
+                    predicate: #Predicate<Reservation> { reservation in
+                        reservation.booking_confirmation_ref == booking_id
+                    }
+                )
+                for reservation in try ctx.fetch(descriptor) {
+                    reservation.completed_safety_brief = true
                 }
-                
-                reservation.completed_safety_brief = true
-                
+
                 try save()
             }
 

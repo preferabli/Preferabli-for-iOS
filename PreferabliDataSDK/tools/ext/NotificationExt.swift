@@ -9,4 +9,7 @@ import Foundation
 
 public extension Notification.Name {
     static let preferabliIdentityDidChange = Notification.Name("preferabli.identityDidChange")
+    static let preferabliAffiliateCodesDidChange = Notification.Name(
+        "preferabli.affiliateCodesDidChange"
+    )
 }

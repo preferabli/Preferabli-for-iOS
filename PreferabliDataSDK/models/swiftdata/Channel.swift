@@ -76,7 +76,7 @@ public final class Channel: HasIntID, HasTimestamps {
     public var primary_image: Media?
 
     /// JSON: images: [ { ... } ]
-    @Relationship(deleteRule: .cascade)
+    @Relationship(deleteRule: .nullify)
     public var images: [Media] = []
 
     /// JSON: channel_venues: [ { id, venue, is_primary, archived } ]

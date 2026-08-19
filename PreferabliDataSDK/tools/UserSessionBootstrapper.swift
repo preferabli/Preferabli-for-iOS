@@ -80,6 +80,18 @@ final class UserSessionBootstrapper {
                 await self.refreshAffiliatesIfNeeded(preferabli: preferabli, force: force)
             }
 
+            let localTicketTask = Task { @MainActor [weak preferabli] in
+                guard let preferabli else { return false }
+                guard Preferabli.isPreferabliUserLoggedIn() else { return true }
+                do {
+                    try await preferabli
+                        .reconcileLocalTicketReservationsAfterAuthentication()
+                    return true
+                } catch {
+                    return false
+                }
+            }
+
             do {
                 await CollectionLoader.shared.ensureWarm(
                     BuiltInCollection.wishlist
@@ -114,9 +126,12 @@ final class UserSessionBootstrapper {
             }
 
             await affiliateTask.value
+            let didReconcileLocalTickets = await localTicketTask.value
 
-            self.sessionBootstrappedOnce = true
-            PostLoginWarmupGate.markComplete()
+            self.sessionBootstrappedOnce = didReconcileLocalTickets
+            if didReconcileLocalTickets {
+                PostLoginWarmupGate.markComplete()
+            }
         }
 
         self.sessionBootstrapTask = t
@@ -159,18 +174,58 @@ final class UserSessionBootstrapper {
             }
         }
 
+        let localCodesBeforeRefresh = normalizedAffiliateCodes(
+            keyStore.stringArray(forKey: "affiliateCodes") ?? []
+        )
+
         do {
             let affiliateCodes = try await preferabli.getAffiliates()
 
+            // The authenticated root can unlock an affiliate while this
+            // server snapshot is in flight. If local state changed during the
+            // request, preserve that newer state instead of replacing it with
+            // a response that may have been captured before the unlock POST.
+            let localCodesAfterRefresh = normalizedAffiliateCodes(
+                keyStore.stringArray(forKey: "affiliateCodes") ?? []
+            )
+            let localStateChangedDuringRefresh =
+                canonicalAffiliateCodes(localCodesAfterRefresh) !=
+                canonicalAffiliateCodes(localCodesBeforeRefresh)
+
+            let codesToPersist = localStateChangedDuringRefresh
+                ? normalizedAffiliateCodes(
+                    localCodesAfterRefresh + affiliateCodes
+                )
+                : normalizedAffiliateCodes(affiliateCodes)
+
             keyStore.set(
-                affiliateCodes,
+                codesToPersist,
                 forKey: "affiliateCodes"
+            )
+            NotificationCenter.default.post(
+                name: .preferabliAffiliateCodesDidChange,
+                object: nil
             )
 
             AffiliateRefreshGate.markRefreshed()
         } catch {
             // Silent by design — affiliate loading should not block bootstrap.
         }
+    }
+
+    private func normalizedAffiliateCodes(_ codes: [String]) -> [String] {
+        codes
+            .map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            .filter { !$0.isEmpty }
+            .uniquedCaseInsensitive()
+    }
+
+    private func canonicalAffiliateCodes(_ codes: [String]) -> [String] {
+        normalizedAffiliateCodes(codes)
+            .map { $0.lowercased() }
+            .sorted()
     }
 
     /// Call on logout / user switch.

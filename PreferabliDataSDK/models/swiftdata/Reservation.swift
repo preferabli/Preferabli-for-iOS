@@ -39,6 +39,9 @@ public final class Reservation: HasIntID {
     public var booking_id: Int?
     public var booking_account_id: String?
     public var booking_confirmation_ref: String?
+    public var booking_group_lead: String?
+    public var booking_meeting_address: String?
+    public var completed_safety_brief: Bool?
     public var booking_type: String?
     public var booking_brand_id: Int?
     public var booking_venue_id: Int?

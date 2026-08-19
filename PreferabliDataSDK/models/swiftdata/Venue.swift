@@ -61,7 +61,7 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
     @Relationship(deleteRule: .nullify) public var video: Media?
 
     @Relationship(deleteRule: .cascade, inverse: \DeliveryMethod.venue) public var active_delivery_methods: [DeliveryMethod] = []
-    @Relationship(deleteRule: .cascade) public var images: [Media] = []
+    @Relationship(deleteRule: .nullify) public var images: [Media] = []
     @Relationship(deleteRule: .cascade, inverse: \VenueHour.venue) public var hours: [VenueHour] = []
     @Relationship(deleteRule: .cascade, inverse: \ChannelVenue.venue)
     public var channel_venues: [ChannelVenue] = []

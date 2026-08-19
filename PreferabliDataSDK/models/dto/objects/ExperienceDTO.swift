@@ -11,6 +11,7 @@ public struct ExperienceDTO: Decodable, Sendable {
     public let id: Int
     public let booking_link: String?
     public let booking_terms: String?
+    public let affiliate_unlock_code: String?
     public let brand_id: Int?
     public let preferabli_venue_id: Int?
     public let cuvee_experience: Bool?
@@ -21,6 +22,7 @@ public struct ExperienceDTO: Decodable, Sendable {
     public let duration: Int?
     public let experience_type: String?
     public let header_image_url: String?
+    public let is_ticketed: Bool?
     public let min_availability_notice_days: Int?
     public let name: String
     public let no_published_hours: Bool?
@@ -61,6 +63,7 @@ public struct ExperienceDTO: Decodable, Sendable {
         case id
         case booking_link
         case booking_terms
+        case affiliate_unlock_code
         case brand_id
         case preferabli_venue_id
         case cuvee_experience
@@ -71,6 +74,7 @@ public struct ExperienceDTO: Decodable, Sendable {
         case duration
         case experience_type
         case header_image_url
+        case is_ticketed
         case min_availability_notice_days
         case name
         case no_published_hours

@@ -649,8 +649,6 @@ private enum ModelRegistry {
         add(GenAIUtterance.self)
         add(GenAIMessage.self)
         
-        add(BalloonReservationItem.self)
-        add(BalloonReservation.self)
 
         add(Location.self)
         add(Media.self)

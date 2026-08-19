@@ -479,6 +479,7 @@ extension Storage {
         if experience.name != dto.name { experience.name = dto.name }
         if experience.booking_link != dto.booking_link { experience.booking_link = dto.booking_link }
         if experience.booking_terms != dto.booking_terms { experience.booking_terms = dto.booking_terms }
+        if experience.affiliate_unlock_code != dto.affiliate_unlock_code { experience.affiliate_unlock_code = dto.affiliate_unlock_code }
         if experience.brand_id != dto.brand_id { experience.brand_id = dto.brand_id }
         if experience.cuvee_experience != dto.cuvee_experience { experience.cuvee_experience = dto.cuvee_experience }
         if experience.experience_description != dto.description { experience.experience_description = dto.description }
@@ -488,6 +489,7 @@ extension Storage {
         if experience.duration != dto.duration { experience.duration = dto.duration }
         if experience.experience_type != dto.experience_type { experience.experience_type = dto.experience_type }
         if experience.header_image_url != dto.header_image_url { experience.header_image_url = dto.header_image_url }
+        if experience.is_ticketed != dto.is_ticketed { experience.is_ticketed = dto.is_ticketed }
         if experience.min_availability_notice_days != dto.min_availability_notice_days { experience.min_availability_notice_days = dto.min_availability_notice_days }
         if experience.no_published_hours != dto.no_published_hours { experience.no_published_hours = dto.no_published_hours }
         if experience.number_of_wines_poured != dto.number_of_wines_poured { experience.number_of_wines_poured = dto.number_of_wines_poured }
@@ -1472,6 +1474,8 @@ extension Storage {
             if r.booking_id != bookingDTO.id { r.booking_id = bookingDTO.id }
             if r.booking_account_id != bookingDTO.account_id { r.booking_account_id = bookingDTO.account_id }
             if r.booking_confirmation_ref != bookingDTO.booking_confirmation_ref { r.booking_confirmation_ref = bookingDTO.booking_confirmation_ref }
+            if r.booking_group_lead != bookingDTO.group_lead { r.booking_group_lead = bookingDTO.group_lead }
+            if r.booking_meeting_address != bookingDTO.meeting_address { r.booking_meeting_address = bookingDTO.meeting_address }
             if r.booking_type != bookingDTO.booking_type { r.booking_type = bookingDTO.booking_type }
             if r.booking_brand_id != bookingDTO.brand_id { r.booking_brand_id = bookingDTO.brand_id }
             if r.booking_venue_id != bookingDTO.venue_id { r.booking_venue_id = bookingDTO.venue_id }
@@ -1567,66 +1571,6 @@ extension Storage {
         return guest
     }
     
-
-        // MARK: - BalloonReservation
-
-        @discardableResult
-        nonisolated static func upsertBalloonReservation(
-            from dto: BalloonReservationDTO,
-            in ctx: ModelContext
-        ) throws -> BalloonReservation {
-
-            try checkCancelled()
-
-            let reservation = try fetchOrInsert(BalloonReservation.self, id: dto.id, in: ctx) {
-                BalloonReservation(id: dto.id)
-            }
-
-            try checkCancelled()
-
-            if reservation.id != dto.id { reservation.id = dto.id }
-            if reservation.customer_email != dto.customer_email { reservation.customer_email = dto.customer_email }
-            if reservation.customer_name != dto.customer_name { reservation.customer_name = dto.customer_name }
-            if reservation.customer_phone != dto.customer_phone { reservation.customer_phone = dto.customer_phone }
-            if let itemDTOs = dto.items {
-                var newItems: [BalloonReservationItem] = []
-                newItems.reserveCapacity(itemDTOs.count)
-
-                for itemDTO in itemDTOs {
-                    try checkCancelled()
-                    let item = try upsertBalloonReservationItem(from: itemDTO, in: ctx)
-                    newItems.append(item)
-                }
-
-                try checkCancelledBeforeRelationshipWrite()
-                reservation.items = newItems
-            }
-
-            return reservation
-        }
-
-        @discardableResult
-        nonisolated static func upsertBalloonReservationItem(
-            from dto: BalloonReservationItemDTO,
-            in ctx: ModelContext
-        ) throws -> BalloonReservationItem {
-
-            try checkCancelled()
-
-            let item = BalloonReservationItem()
-            if item.meeting_point != dto.meeting_point { item.meeting_point = dto.meeting_point }
-            if item.meeting_point_coordinates != dto.meeting_point_coordinates { item.meeting_point_coordinates = dto.meeting_point_coordinates }
-            item.qty = Int(dto.qty ?? "1")
-            if item.sku != dto.sku { item.sku = dto.sku }
-            if let start = dto.start_date {
-                item.start_date = Date(timeIntervalSince1970: TimeInterval(start))
-            } else {
-                item.start_date = nil
-            }
-
-            ctx.insert(item)
-            return item
-        }
 
     // MARK: - Style
 

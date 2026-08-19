@@ -15,6 +15,7 @@ public final class Experience: HasIntID, HasImage {
 
     public var booking_link: String?
     public var booking_terms: String?
+    public var affiliate_unlock_code: String?
     public var brand_id: Int?
     public var cuvee_experience: Bool?
     public var experience_description: String?
@@ -24,6 +25,7 @@ public final class Experience: HasIntID, HasImage {
     public var duration: Int?
     public var experience_type: String?
     public var header_image_url: String?
+    public var is_ticketed: Bool?
     public var min_availability_notice_days: Int?
     public var name: String
     public var no_published_hours: Bool?
