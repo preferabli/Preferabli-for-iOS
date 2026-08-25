@@ -750,16 +750,44 @@ extension Storage {
 
         // MARK: - Relationship lists (source-of-truth as provided by venue DTO)
         if let imgs = dto.images {
-            var newImages: [Media] = []
-            newImages.reserveCapacity(imgs.count)
+            let keepKeys = Set(
+                imgs.map { VenueImage.makeKey(venueID: v.id, mediaID: $0.id) }
+            )
 
-            for img in imgs {
+            for link in v.venue_images {
                 try checkCancelled()
-                newImages.append(try upsertMedia(from: img, in: ctx))
+                let shouldBeTombstoned = !keepKeys.contains(link.key)
+                if link.isTombstoned != shouldBeTombstoned {
+                    link.isTombstoned = shouldBeTombstoned
+                }
             }
 
-            try checkCancelledBeforeRelationshipWrite()
-            v.images = newImages
+            for (order, img) in imgs.enumerated() {
+                try checkCancelled()
+                let media = try upsertMedia(from: img, in: ctx)
+                let key = VenueImage.makeKey(venueID: v.id, mediaID: media.id)
+
+                let link: VenueImage
+                if let existing = try Storage.fetchByKey(VenueImage.self, key: key, in: ctx) {
+                    link = existing
+                } else {
+                    let created = VenueImage(key: key, order: order, venue: v, media: media)
+                    ctx.insert(created)
+                    link = created
+                }
+
+                if link.order != order { link.order = order }
+                if link.venue_id != v.id { link.venue_id = v.id }
+                if link.media_id != media.id { link.media_id = media.id }
+                if link.isTombstoned { link.isTombstoned = false }
+
+                try checkCancelledBeforeRelationshipWrite()
+                if link.venue.id != v.id { link.venue = v }
+                if link.media.id != media.id { link.media = media }
+                if !v.venue_images.contains(where: { $0.key == key }) {
+                    v.venue_images.append(link)
+                }
+            }
         }
 
         if let hrs = dto.hours {
@@ -1021,17 +1049,35 @@ extension Storage {
         // MARK: - Relationship lists
 
         if let imgs = dto.images {
-            var newImages: [Media] = []
-            newImages.reserveCapacity(imgs.count)
+            let keepKeys = Set(
+                imgs.map { VenueImage.makeKey(venueID: v.id, mediaID: $0.id) }
+            )
 
-            for img in imgs {
+            for link in v.venue_images {
                 try checkCancelled()
-                newImages.append(try cachedMedia(from: img, batch: batch, in: ctx))
+                let shouldBeTombstoned = !keepKeys.contains(link.key)
+                if link.isTombstoned != shouldBeTombstoned {
+                    link.isTombstoned = shouldBeTombstoned
+                }
             }
 
-            if !sameIntIDs(v.images, newImages) {
+            for (order, img) in imgs.enumerated() {
+                try checkCancelled()
+                let media = try cachedMedia(from: img, batch: batch, in: ctx)
+                let key = VenueImage.makeKey(venueID: v.id, mediaID: media.id)
+                let link = try cachedVenueImage(
+                    key: key,
+                    order: order,
+                    venue: v,
+                    media: media,
+                    batch: batch,
+                    in: ctx
+                )
+
                 try checkCancelledBeforeRelationshipWrite()
-                v.images = newImages
+                if !v.venue_images.contains(where: { $0.key == link.key }) {
+                    v.venue_images.append(link)
+                }
             }
         }
 
@@ -2430,6 +2476,7 @@ extension Storage {
         var deliveryMethodsByID: [Int: DeliveryMethod]
         var marketTraitsByID: [Int: MarketTrait]
         var venueMarketTraitsByKey: [String: VenueMarketTrait]
+        var venueImagesByKey: [String: VenueImage]
 
         init(
             venueDTOs: [VenueDTO],
@@ -2444,6 +2491,7 @@ extension Storage {
             var deliveryMethodIDs = Set<Int>()
             var marketTraitIDs = Set<Int>()
             var venueMarketTraitKeys = Set<String>()
+            var venueImageKeys = Set<String>()
 
             let scopeMarketID = market?.id
 
@@ -2457,6 +2505,9 @@ extension Storage {
 
                 for image in dto.images ?? [] {
                     mediaIDs.insert(image.id)
+                    venueImageKeys.insert(
+                        VenueImage.makeKey(venueID: dto.id, mediaID: image.id)
+                    )
                 }
 
                 for hour in dto.hours ?? [] {
@@ -2511,7 +2562,43 @@ extension Storage {
                 keys: Array(venueMarketTraitKeys),
                 in: ctx
             )
+
+            self.venueImagesByKey = try Storage.fetchExistingVenueImages(
+                keys: Array(venueImageKeys),
+                in: ctx
+            )
         }
+    }
+
+    nonisolated static func fetchExistingVenueImages(
+        keys: [String],
+        in ctx: ModelContext
+    ) throws -> [String: VenueImage] {
+        let keys = Array(Set(keys))
+        guard !keys.isEmpty else { return [:] }
+
+        var result: [String: VenueImage] = [:]
+        result.reserveCapacity(keys.count)
+
+        let chunkSize = 500
+
+        for start in stride(from: 0, to: keys.count, by: chunkSize) {
+            try checkCancelled()
+
+            let end = min(start + chunkSize, keys.count)
+            let chunk = Array(keys[start..<end])
+            let fd = FetchDescriptor<VenueImage>(
+                predicate: #Predicate<VenueImage> { link in
+                    chunk.contains(link.key)
+                }
+            )
+
+            for link in try ctx.fetch(fd) {
+                result[link.key] = link
+            }
+        }
+
+        return result
     }
 
     nonisolated static func fetchExistingVenueMarketTraits(
@@ -2707,6 +2794,44 @@ extension Storage {
         if trait.updated_at != dto.updated_at { trait.updated_at = dto.updated_at ?? Date.now }
 
         return trait
+    }
+
+    @discardableResult
+    nonisolated static func cachedVenueImage(
+        key: String,
+        order: Int,
+        venue: Venue,
+        media: Media,
+        batch: VenueUpsertBatch,
+        in ctx: ModelContext
+    ) throws -> VenueImage {
+        let link: VenueImage
+
+        if let existing = batch.venueImagesByKey[key] {
+            link = existing
+        } else {
+            let created = VenueImage(
+                key: key,
+                order: order,
+                venue: venue,
+                media: media
+            )
+            ctx.insert(created)
+            batch.venueImagesByKey[key] = created
+            link = created
+        }
+
+        if link.key != key { link.key = key }
+        if link.order != order { link.order = order }
+        if link.venue_id != venue.id { link.venue_id = venue.id }
+        if link.media_id != media.id { link.media_id = media.id }
+        if link.isTombstoned { link.isTombstoned = false }
+
+        try checkCancelledBeforeRelationshipWrite()
+        if link.venue.id != venue.id { link.venue = venue }
+        if link.media.id != media.id { link.media = media }
+
+        return link
     }
 
     @discardableResult
@@ -4171,9 +4296,6 @@ extension Storage {
         if item.desc != dto.description { item.desc = dto.description }
         if item.order != dto.order { item.order = dto.order }
         item.itinerary_id = itinerary.id
-        if item.local_tip != dto.local_tip { item.local_tip = dto.local_tip }
-        if item.benefit != dto.benefit { item.benefit = dto.benefit }
-        if item.other_options != dto.other_options { item.other_options = dto.other_options }
         if item.type != dto.type { item.type = dto.type }
         try checkCancelledBeforeRelationshipWrite()
         if item.itinerary?.id != itinerary.id {
@@ -4191,6 +4313,8 @@ extension Storage {
                     try upsertItineraryItemAssociation(
                         from: associationDTO,
                         item: item,
+                        parent: nil,
+                        ancestorIDs: [],
                         in: ctx
                     )
                 )
@@ -4282,6 +4406,8 @@ extension Storage {
     nonisolated static func upsertItineraryItemAssociation(
         from dto: ItineraryItemAssociationDTO,
         item: ItineraryItem,
+        parent: ItineraryItemAssociation?,
+        ancestorIDs: Set<Int>,
         in ctx: ModelContext
     ) throws -> ItineraryItemAssociation {
 
@@ -4297,12 +4423,37 @@ extension Storage {
 
         association.created_at = dto.created_at ?? association.created_at
         association.updated_at = dto.updated_at ?? association.updated_at
+        if association.description != dto.description {
+            association.description = dto.description
+        }
+        if association.local_tip_title != dto.local_tip_title {
+            association.local_tip_title = dto.local_tip_title
+        }
+        if association.local_tip != dto.local_tip {
+            association.local_tip = dto.local_tip
+        }
+        if association.benefit_title != dto.benefit_title {
+            association.benefit_title = dto.benefit_title
+        }
+        if association.benefit != dto.benefit {
+            association.benefit = dto.benefit
+        }
+        if association.other_options_title != dto.other_options_title {
+            association.other_options_title = dto.other_options_title
+        }
+        if association.other_options != dto.other_options {
+            association.other_options = dto.other_options
+        }
         if association.order != dto.order { association.order = dto.order }
-        association.itinerary_item_id = item.id
+        association.itinerary_item_id = parent == nil ? item.id : nil
+        association.parent_association_id = parent?.id
 
         try checkCancelledBeforeRelationshipWrite()
-        if association.itinerary_item?.id != item.id {
-            association.itinerary_item = item
+        if association.itinerary_item?.id != (parent == nil ? item.id : nil) {
+            association.itinerary_item = parent == nil ? item : nil
+        }
+        if association.parent_association?.id != parent?.id {
+            association.parent_association = parent
         }
 
         let resolvedVenue: Venue?
@@ -4379,6 +4530,36 @@ extension Storage {
         try checkCancelledBeforeRelationshipWrite()
         if association.experience?.id != resolvedExperience?.id {
             association.experience = resolvedExperience
+        }
+
+        if let childDTOs = dto.item_associations {
+            var children: [ItineraryItemAssociation] = []
+            children.reserveCapacity(childDTOs.count)
+            let childAncestorIDs = ancestorIDs.union([dto.id])
+
+            for childDTO in childDTOs where !childAncestorIDs.contains(childDTO.id) {
+                try checkCancelled()
+                children.append(
+                    try upsertItineraryItemAssociation(
+                        from: childDTO,
+                        item: item,
+                        parent: association,
+                        ancestorIDs: childAncestorIDs,
+                        in: ctx
+                    )
+                )
+            }
+
+            try deleteMissingItineraryIntIDs(
+                association.item_associations,
+                keeping: Set(children.map(\.id)),
+                in: ctx
+            )
+
+            if !itinerarySameIntIDs(association.item_associations, children) {
+                try checkCancelledBeforeRelationshipWrite()
+                association.item_associations = children
+            }
         }
 
         return association

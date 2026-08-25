@@ -869,7 +869,7 @@ public class Preferabli {
     ) async throws -> Int {
         do {
             try await canWeContinue(needsToBeLoggedIn: true)
-            Analytics.track(["event": "create_anyroad_reservation"])
+            Analytics.track(["event": "create_reservation"])
             
             var dictionary: SParams = [
                 "date": date,
@@ -4410,7 +4410,7 @@ public class Preferabli {
             return (tag.product_id, tag.collection_id, tag.tag_type, tag.value)
         }
         
-        try await createOrEditTagActual(tag_id: tag_id, product_id: product_id, year: year, collection_id: collection_id, value: value, tag_type: tag_type, location: location, notes: notes, price: price, quantity: quantity, format_ml: format_ml)
+        try await createOrEditTagActual(tag_id: tag_id, product_id: product_id, year: year, collection_id: collection_id, value: rating?.getValue() ?? value, tag_type: tag_type, location: location, notes: notes, price: price, quantity: quantity, format_ml: format_ml)
     }
     
     @discardableResult

@@ -667,6 +667,7 @@ private enum ModelRegistry {
         add(VenueHour.self)
         add(MarketTrait.self)
         add(VenueMarketTrait.self)
+        add(VenueImage.self)
         add(Venue.self)
         
         add(Recipe.self)
@@ -860,6 +861,16 @@ extension Storage {
         in ctx: ModelContext
     ) throws -> VenueMarketTrait? {
         var fd = FetchDescriptor<VenueMarketTrait>(predicate: VenueMarketTrait.predicate(forKey: key))
+        fd.fetchLimit = 1
+        return try ctx.fetch(fd).first
+    }
+
+    nonisolated static func fetchByKey(
+        _ type: VenueImage.Type,
+        key: String,
+        in ctx: ModelContext
+    ) throws -> VenueImage? {
+        var fd = FetchDescriptor<VenueImage>(predicate: VenueImage.predicate(forKey: key))
         fd.fetchLimit = 1
         return try ctx.fetch(fd).first
     }

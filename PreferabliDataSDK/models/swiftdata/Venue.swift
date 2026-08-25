@@ -61,7 +61,8 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
     @Relationship(deleteRule: .nullify) public var video: Media?
 
     @Relationship(deleteRule: .cascade, inverse: \DeliveryMethod.venue) public var active_delivery_methods: [DeliveryMethod] = []
-    @Relationship(deleteRule: .nullify) public var images: [Media] = []
+    @Relationship(deleteRule: .cascade, inverse: \VenueImage.venue)
+    public var venue_images: [VenueImage] = []
     @Relationship(deleteRule: .cascade, inverse: \VenueHour.venue) public var hours: [VenueHour] = []
     @Relationship(deleteRule: .cascade, inverse: \ChannelVenue.venue)
     public var channel_venues: [ChannelVenue] = []
@@ -71,6 +72,18 @@ public final class Venue: HasIntID, HasTimestamps, HasImage {
     public var venue_market_traits: [VenueMarketTrait] = []
     @Relationship(deleteRule: .nullify, inverse: \Market.venues)
     public var markets: [Market] = []
+
+    /// Images in the exact order supplied by `VenueDTO.images`.
+    @Transient
+    public var images: [Media] {
+        venue_images
+            .filter { !$0.isTombstoned }
+            .sorted {
+                if $0.order != $1.order { return $0.order < $1.order }
+                return $0.media_id < $1.media_id
+            }
+            .map(\.media)
+    }
 
 
     /// Available delivery methods for the current user. Call Where to Buy to populate.

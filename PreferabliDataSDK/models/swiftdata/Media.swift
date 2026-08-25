@@ -69,8 +69,8 @@ public final class Media: HasIntID, HasTimestamps, HasImage {
     @Relationship(deleteRule: .nullify, inverse: \Venue.video)
     public var videoForVenues: [Venue] = []
 
-    @Relationship(deleteRule: .nullify, inverse: \Venue.images)
-    public var imagesForVenues: [Venue] = []
+    @Relationship(deleteRule: .cascade, inverse: \VenueImage.media)
+    public var venueImageAssociations: [VenueImage] = []
 
     @Relationship(deleteRule: .nullify, inverse: \Channel.primary_image)
     public var primaryImageForChannels: [Channel] = []

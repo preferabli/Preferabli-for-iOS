@@ -87,9 +87,6 @@ public final class ItineraryItem: HasIntID, HasTimestamps {
     public var time: String?
     public var name: String?
     public var desc: String?
-    public var local_tip: String?
-    public var benefit: String?
-    public var other_options: String?
     public var type: String?
     public var order: Int?
 
@@ -168,10 +165,29 @@ public final class ItineraryItemAssociation: HasIntID, HasTimestamps {
     public var itinerary_item_id: Int?
     public var venue_id: Int?
     public var experience_id: Int?
+    public var parent_association_id: Int?
+    public var desc: String?
+    public var local_tip_title: String?
+    public var local_tip: String?
+    public var benefit_title: String?
+    public var benefit: String?
+    public var other_options_title: String?
+    public var other_options: String?
     public var order: Int?
+
+    public var description: String? {
+        get { desc }
+        set { desc = newValue }
+    }
 
     @Relationship(deleteRule: .nullify)
     public var itinerary_item: ItineraryItem?
+
+    @Relationship(deleteRule: .nullify, inverse: \ItineraryItemAssociation.item_associations)
+    public var parent_association: ItineraryItemAssociation?
+
+    @Relationship(deleteRule: .cascade)
+    public var item_associations: [ItineraryItemAssociation] = []
 
     @Relationship(deleteRule: .nullify)
     public var venue: Venue?
