@@ -1142,8 +1142,17 @@ public class Preferabli {
     private func loadVenuesRequiredByAffiliates(
         _ affiliates: [AffiliateDTO]
     ) async throws {
+        // Venue hydration is only needed to upsert private experiences embedded
+        // in an affiliate payload. Affiliates without experiences should not
+        // trigger a full market venue load.
+        let affiliatesWithExperiences = affiliates.filter {
+            !($0.experiences ?? []).isEmpty
+        }
+
+        guard !affiliatesWithExperiences.isEmpty else { return }
+
         var marketIDs = Set(
-            affiliates.compactMap(\.market_id).filter { $0 > 0 }
+            affiliatesWithExperiences.compactMap(\.market_id).filter { $0 > 0 }
         )
 
         if marketIDs.isEmpty {
@@ -1249,6 +1258,104 @@ public class Preferabli {
             handleError(error: error)
             throw error
         }
+    }
+
+    /// Resolves a collection code and stores the collection locally without creating
+    /// a user-collection relationship.
+    /// - Returns: The matching collection id, or `nil` when the code has no match.
+    public func resolveCollection(code: String) async throws -> Int? {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: false)
+            Analytics.track(["event": "resolve_collection_code"])
+
+            guard let collectionDTO = try await collectionDTO(code: code) else {
+                return nil
+            }
+
+            try await Storage.withBackgroundContext { context, save in
+                _ = try Storage.upsertCollection(from: collectionDTO, in: context)
+                try save()
+            }
+
+            return collectionDTO.id
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    /// Finds an event collection by its unlock code and saves it for the current user.
+    /// - Returns: The unlocked collection id, or `nil` when the code has no match.
+    public func unlockEvent(code: String) async throws -> Int? {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            Analytics.track(["event": "unlock_event"])
+
+            guard let collectionDTO = try await collectionDTO(code: code) else {
+                return nil
+            }
+
+            let isAlreadySaved = try await Storage.withBackgroundContext { context in
+                var descriptor = FetchDescriptor<UserCollection>(
+                    predicate: StorageFacade.QueriesNamespace().events()
+                )
+                descriptor.propertiesToFetch = [\.id, \.collection_id]
+                return try context.fetch(descriptor).contains {
+                    $0.collection_id == collectionDTO.id
+                }
+            }
+
+            if isAlreadySaved {
+                try await Storage.withBackgroundContext { context, save in
+                    _ = try Storage.upsertCollection(from: collectionDTO, in: context)
+                    try save()
+                }
+                return collectionDTO.id
+            }
+
+            let userID = PreferabliTools.getPreferabliUserId()
+            let relationshipPayload: SParams = [
+                "collection_id": collectionDTO.id,
+                "relationship_type": "saved",
+                "is_admin": false,
+                "is_editor": false,
+                "is_viewer": true,
+                "user_id": userID
+            ]
+            let userCollectionDTO: UserCollectionDTO = try await api
+                .getAlamo()
+                .post(
+                    APIEndpoints.userCollections(id: userID),
+                    sjson: relationshipPayload
+                )
+
+            try await Storage.withBackgroundContext { context, save in
+                _ = try Storage.upsertCollection(from: collectionDTO, in: context)
+                _ = try Storage.upsertUserCollection(from: userCollectionDTO, in: context)
+                try save()
+            }
+
+            try await canWeContinue(needsToBeLoggedIn: true)
+            return collectionDTO.id
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    private func collectionDTO(code: String) async throws -> CollectionDTO? {
+        let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedCode.isEmpty else { return nil }
+
+        let params: SParams = [
+            "search": trimmedCode,
+            "search_types": ["collections-by-code"]
+        ]
+        let searchResponse: CollectionCodeSearchResponseDTO = try await api
+            .getAlamo()
+            .get(APIEndpoints.search, sparams: params)
+
+        return searchResponse.collections.first
     }
     
     
@@ -1761,9 +1868,7 @@ public class Preferabli {
             // ✅ Fast path: return local if not stale AND we’ve loaded before
             if !needsRefresh, ks.bool(forKey: "hasLoadedUserCollections") {
                 let localIds: [Int] = try await Storage.withBackgroundContext { ctx, save in
-                    var fd = FetchDescriptor<UserCollection>(
-                        predicate: StorageFacade.QueriesNamespace().cellars()
-                    )
+                    var fd = FetchDescriptor<UserCollection>()
                     fd.propertiesToFetch = [\.id]
                     let ucs = try ctx.fetch(fd)
                     return ucs.map { $0.id }
@@ -1790,9 +1895,7 @@ public class Preferabli {
                 }
                 
                 // 2) ✅ Remove anything local that is missing from API (source of truth)
-                var fd = FetchDescriptor<UserCollection>(
-                    predicate: StorageFacade.QueriesNamespace().cellars()
-                )
+                var fd = FetchDescriptor<UserCollection>()
                 fd.propertiesToFetch = [\.id]
                 let localAll = try ctx.fetch(fd)
                 for local in localAll where !apiIds.contains(local.id) {
@@ -3588,26 +3691,53 @@ public class Preferabli {
         do {
             try await canWeContinue(needsToBeLoggedIn: true)
             Analytics.track(["event": "delete_cellar"])
-            
-            _ = try await api
-                .getAlamo()
-                .delete(APIEndpoints.userCollection(id: PreferabliTools.getPreferabliUserId(), userCollectionId: userCollectionId))
-            
-            try Storage.withContext { ctx, save in
-                guard let userCollection = try Storage.fetchById(UserCollection.self, id: userCollectionId, in: ctx) else {
-                    return
-                }
-                
-                ctx.delete(userCollection)
-                
-                try save()
-            }
+
+            try await deleteUserCollectionRelationship(id: userCollectionId)
             
             try await canWeContinue(needsToBeLoggedIn: true)
             
         } catch {
             handleError(error: error)
             throw error
+        }
+    }
+
+    /// Removes a saved event from the current user's events.
+    public func removeEvent(userCollectionId: Int) async throws {
+        do {
+            try await canWeContinue(needsToBeLoggedIn: true)
+            Analytics.track(["event": "remove_event"])
+
+            try await deleteUserCollectionRelationship(id: userCollectionId)
+
+            try await canWeContinue(needsToBeLoggedIn: true)
+        } catch {
+            handleError(error: error)
+            throw error
+        }
+    }
+
+    private func deleteUserCollectionRelationship(id: Int) async throws {
+        _ = try await api
+            .getAlamo()
+            .delete(
+                APIEndpoints.userCollection(
+                    id: PreferabliTools.getPreferabliUserId(),
+                    userCollectionId: id
+                )
+            )
+
+        try Storage.withContext { context, save in
+            guard let userCollection = try Storage.fetchById(
+                UserCollection.self,
+                id: id,
+                in: context
+            ) else {
+                return
+            }
+
+            context.delete(userCollection)
+            try save()
         }
     }
     
@@ -5442,7 +5572,7 @@ extension Preferabli {
 
 extension Preferabli {
 
-    /// Fetches the complete itinerary list for a market and stores it in SwiftData.
+    /// Fetches the complete public itinerary list for a market and stores it in SwiftData.
     ///
     /// The server does not return the Market relationship, so `market_id` is resolved
     /// locally and supplied to every itinerary upsert.

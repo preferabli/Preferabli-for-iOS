@@ -19,6 +19,8 @@ public final class Market: Identifiable, HasIntID, HasTimestamps, HasImage {
     public var top_level: Bool?
     public var display_appellations: Bool?
     public var default_span_delta: Double?
+    public var distance_unit: String?
+    public var currency_code: String?
 
     // ✅ Tree
     public var parent: Market?

@@ -48,12 +48,6 @@ public final class Media: HasIntID, HasTimestamps, HasImage {
     @Relationship(deleteRule: .nullify, inverse: \CTABucketItem.primary_image)
     public var primaryImageForCTABucketItems: [CTABucketItem] = []
 
-    @Relationship(deleteRule: .nullify, inverse: \CTABucketItem.sub_image_1)
-    public var firstSubImageForCTABucketItems: [CTABucketItem] = []
-
-    @Relationship(deleteRule: .nullify, inverse: \CTABucketItem.sub_image_2)
-    public var secondSubImageForCTABucketItems: [CTABucketItem] = []
-
     @Relationship(deleteRule: .nullify, inverse: \RecipeGroup.primary_image)
     public var primaryImageForRecipeGroups: [RecipeGroup] = []
 
@@ -83,6 +77,9 @@ public final class Media: HasIntID, HasTimestamps, HasImage {
 
     @Relationship(deleteRule: .nullify, inverse: \Itinerary.images)
     public var imagesForItineraries: [Itinerary] = []
+
+    @Relationship(deleteRule: .nullify, inverse: \ItineraryItemAssociation.media)
+    public var itineraryItemAssociations: [ItineraryItemAssociation] = []
 
     public init(id: Int) { self.id = id }
     

@@ -31,6 +31,11 @@ public final class Itinerary: HasIntID, HasTimestamps, HasImage {
     public var badge_color_hex_secondary: String?
     public var badge_gradient_css: String?
     public var badge_text_color_hex: String?
+    public var duration_minutes_low: Int?
+    public var duration_minutes_high: Int?
+    public var distance_display: Int?
+    public var distance_unit: String?
+    public var `public`: Bool = true
 
     @Relationship(deleteRule: .nullify)
     public var primary_image: Media?
@@ -89,6 +94,7 @@ public final class ItineraryItem: HasIntID, HasTimestamps {
     public var desc: String?
     public var type: String?
     public var order: Int?
+    public var optional: Bool = false
 
     public var itinerary_id: Int?
 
@@ -165,6 +171,7 @@ public final class ItineraryItemAssociation: HasIntID, HasTimestamps {
     public var itinerary_item_id: Int?
     public var venue_id: Int?
     public var experience_id: Int?
+    public var media_id: Int?
     public var parent_association_id: Int?
     public var desc: String?
     public var local_tip_title: String?
@@ -173,6 +180,9 @@ public final class ItineraryItemAssociation: HasIntID, HasTimestamps {
     public var benefit: String?
     public var other_options_title: String?
     public var other_options: String?
+    public var button_title: String?
+    public var button_deeplink_url: String?
+    public var button_icon: String?
     public var order: Int?
 
     public var description: String? {
@@ -194,6 +204,9 @@ public final class ItineraryItemAssociation: HasIntID, HasTimestamps {
     
     @Relationship(deleteRule: .nullify)
     public var experience: Experience?
+
+    @Relationship(deleteRule: .nullify)
+    public var media: Media?
 
     public init(id: Int, itinerary_item: ItineraryItem? = nil) {
         self.id = id
@@ -217,6 +230,7 @@ public final class ItineraryHighlight: HasIntID, HasTimestamps {
     public var order: Int?
     public var name: String?
     public var desc: String?
+    public var type: String?
 
     @Relationship(deleteRule: .nullify)
     public var itinerary: Itinerary
@@ -228,5 +242,19 @@ public final class ItineraryHighlight: HasIntID, HasTimestamps {
 
     public static func predicate(forID id: Int) -> Predicate<ItineraryHighlight> {
         #Predicate<ItineraryHighlight> { $0.id == id }
+    }
+}
+
+public enum ItineraryHighlightType: String, CaseIterable, Sendable {
+    case `default`
+    case duration
+    case distance
+    case stopCount = "stop_count"
+    case additional
+}
+
+extension ItineraryHighlight {
+    public var highlightType: ItineraryHighlightType {
+        ItineraryHighlightType(rawValue: type ?? "") ?? .default
     }
 }

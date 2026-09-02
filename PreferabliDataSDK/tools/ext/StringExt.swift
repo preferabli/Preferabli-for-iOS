@@ -165,6 +165,7 @@ extension String {
         var currentHeading: HTMLHeadingLevel?
         var currentLinkURL: URL?
         var listStack: [HTMLListType] = []
+        var listItemDepth = 0
 
         func selectedFont() -> Font {
             switch currentHeading {
@@ -540,10 +541,16 @@ extension String {
                     appendNewline()
 
                 case "p", "div":
-                    if tag.isClosing {
-                        appendParagraphBreak()
-                    } else if !result.characters.isEmpty {
-                        appendParagraphBreak()
+                    if listItemDepth > 0 {
+                        if tag.isClosing {
+                            appendNewline()
+                        }
+                    } else {
+                        if tag.isClosing {
+                            appendParagraphBreak()
+                        } else if !result.characters.isEmpty {
+                            appendParagraphBreak()
+                        }
                     }
 
                 case "ul":
@@ -572,9 +579,14 @@ extension String {
 
                 case "li":
                     if tag.isClosing {
+                        listItemDepth = max(
+                            0,
+                            listItemDepth - 1
+                        )
                         appendNewline()
                     } else {
                         appendListItemPrefix()
+                        listItemDepth += 1
                     }
 
                 default:

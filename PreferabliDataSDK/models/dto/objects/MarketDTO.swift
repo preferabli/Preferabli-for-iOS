@@ -20,6 +20,8 @@ public struct MarketDTO: Decodable, Sendable {
     public let latitude: Double?
     public let longitude: Double?
     public let default_span_delta: Double?
+    public let distance_unit: String?
+    public let currency_code: String?
     public let submarkets: [MarketDTO]?
     public let market_trait_associations: [MarketTraitAssociationDTO]?
 }

@@ -23,12 +23,11 @@ public final class CTABucketItem: Identifiable, HasIntID, HasImage {
     public var badge_title: String?
     public var title: String?
     public var desc: String?
+    public var subtext: String?
     public var half_gradient: Bool?
     public var badge_placement: String?
     
     @Relationship(deleteRule: .nullify) public var primary_image: Media?
-    @Relationship(deleteRule: .nullify) public var sub_image_1: Media?
-    @Relationship(deleteRule: .nullify) public var sub_image_2: Media?
     
     @Relationship(deleteRule: .cascade, inverse: \CTABucketItemAssociation.item)
     public var bucket_item_associations: [CTABucketItemAssociation] = []

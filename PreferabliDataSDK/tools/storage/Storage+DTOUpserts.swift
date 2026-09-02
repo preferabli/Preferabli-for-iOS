@@ -75,7 +75,7 @@ extension Storage {
         // Variants
         var mostRecentYear = -2
         product.cachedMostRecentVariant = nil
-        
+
         if let vDTOs = dto.variants {
             for vDTO in vDTOs {
                 try checkCancelled()
@@ -704,14 +704,14 @@ extension Storage {
         if v.notes != dto.notes { v.notes = dto.notes }
 
         if v.is_partner != dto.is_partner { v.is_partner = dto.is_partner }
-        
+
         if v.isTombstoned { v.isTombstoned = false }
 
         let marketIDs = Array(Set(dto.market_ids ?? [])).sorted()
         if v.market_ids_cache != marketIDs {
             v.market_ids_cache = marketIDs
         }
-        
+
         // MARK: - Media pointers
         if let video = dto.video {
             try checkCancelled()
@@ -723,7 +723,7 @@ extension Storage {
             try checkCancelledBeforeRelationshipWrite()
             v.video = nil
         }
-        
+
         if let logo = dto.logo {
             try checkCancelled()
             let media = try upsertMedia(from: logo, in: ctx)
@@ -1926,6 +1926,10 @@ extension Storage {
         market.created_at = dto.created_at ?? market.created_at
         market.updated_at = dto.updated_at ?? market.updated_at
         if market.default_span_delta != dto.default_span_delta { market.default_span_delta = dto.default_span_delta }
+        if market.distance_unit != dto.distance_unit { market.distance_unit = dto.distance_unit }
+        if market.currency_code != dto.currency_code {
+            market.currency_code = dto.currency_code
+        }
         // Parent
         try checkCancelledBeforeRelationshipWrite()
         if market.parent?.id != parent?.id {
@@ -2303,6 +2307,7 @@ extension Storage {
             if b.badge_title != dto.badge_title { b.badge_title = dto.badge_title }
             if b.title != dto.title { b.title = dto.title }
             if b.desc != dto.description { b.desc = dto.description }
+            if b.subtext != dto.subtext { b.subtext = dto.subtext }
             b.created_at = dto.created_at ?? b.created_at
             b.updated_at = dto.updated_at ?? b.updated_at
             // Primary image
@@ -2316,31 +2321,7 @@ extension Storage {
                 try checkCancelledBeforeRelationshipWrite()
                 b.primary_image = nil
             }
-            
-            // sub image 1
-            if let imgDTO = dto.sub_image_1 {
-                try checkCancelled()
-                let media = try upsertMedia(from: imgDTO, in: ctx)
-
-                try checkCancelledBeforeRelationshipWrite()
-                if b.sub_image_1 !== media { b.sub_image_1 = media }
-            } else {
-                try checkCancelledBeforeRelationshipWrite()
-                b.sub_image_1 = nil
-            }
-            
-            // sub image 2
-            if let imgDTO = dto.sub_image_2 {
-                try checkCancelled()
-                let media = try upsertMedia(from: imgDTO, in: ctx)
-
-                try checkCancelledBeforeRelationshipWrite()
-                if b.sub_image_2 !== media { b.sub_image_2 = media }
-            } else {
-                try checkCancelledBeforeRelationshipWrite()
-                b.sub_image_2 = nil
-            }
-
+        
             return b
         }
 
@@ -4051,7 +4032,8 @@ extension Storage {
 
     // MARK: - Itinerary collection
 
-    /// Treats the market itinerary endpoint as the source of truth for that market.
+    /// Treats the market itinerary endpoint as the source of truth for public
+    /// itineraries in that market. Private itineraries are unlocked separately.
     @discardableResult
     nonisolated static func upsertItineraries(
         from dtos: [ItineraryDTO],
@@ -4063,15 +4045,22 @@ extension Storage {
         try checkCancelled()
 
         if replaceExisting {
-            let marketID = market.id
             let keepIDs = Set(dtos.map(\.id))
-            let descriptor = FetchDescriptor<Itinerary>(
-                predicate: #Predicate<Itinerary> { itinerary in
-                    itinerary.market_id == marketID
-                }
-            )
+            var scopeMarketIDs = Set<Int>()
+            var pendingMarkets = [market]
 
-            for existing in try ctx.fetch(descriptor) where !keepIDs.contains(existing.id) {
+            while let nextMarket = pendingMarkets.popLast() {
+                guard scopeMarketIDs.insert(nextMarket.id).inserted else {
+                    continue
+                }
+
+                pendingMarkets.append(contentsOf: nextMarket.submarkets)
+            }
+
+            for existing in try ctx.fetch(FetchDescriptor<Itinerary>())
+            where existing.market_id.map(scopeMarketIDs.contains) == true
+                && existing.`public`
+                && !keepIDs.contains(existing.id) {
                 try checkCancelled()
                 try checkCancelledBeforeRelationshipWrite()
                 ctx.delete(existing)
@@ -4083,8 +4072,25 @@ extension Storage {
 
         for dto in dtos {
             try checkCancelled()
+
+            let itineraryMarket: Market
+            if let marketID = dto.market_id,
+               let resolvedMarket = try Storage.fetchById(
+                Market.self,
+                id: marketID,
+                in: ctx
+               ) {
+                itineraryMarket = resolvedMarket
+            } else {
+                itineraryMarket = market
+            }
+
             itineraries.append(
-                try upsertItinerary(from: dto, market: market, in: ctx)
+                try upsertItinerary(
+                    from: dto,
+                    market: itineraryMarket,
+                    in: ctx
+                )
             )
         }
 
@@ -4119,6 +4125,22 @@ extension Storage {
         if itinerary.badge_color_hex_primary != dto.badge_color_hex_primary { itinerary.badge_color_hex_primary = dto.badge_color_hex_primary }
         if itinerary.badge_color_hex_secondary != dto.badge_color_hex_secondary { itinerary.badge_color_hex_secondary = dto.badge_color_hex_secondary }
         if itinerary.color_hex_primary != dto.color_hex_primary { itinerary.color_hex_primary = dto.color_hex_primary }
+        if itinerary.duration_minutes_low != dto.duration_minutes_low {
+            itinerary.duration_minutes_low = dto.duration_minutes_low
+        }
+        if itinerary.duration_minutes_high != dto.duration_minutes_high {
+            itinerary.duration_minutes_high = dto.duration_minutes_high
+        }
+        if itinerary.distance_display != dto.distance_display {
+            itinerary.distance_display = dto.distance_display
+        }
+        if itinerary.distance_unit != dto.distance_unit {
+            itinerary.distance_unit = dto.distance_unit
+        }
+        let isPublic = dto.`public` ?? true
+        if itinerary.`public` != isPublic {
+            itinerary.`public` = isPublic
+        }
         try checkCancelledBeforeRelationshipWrite()
         if itinerary.market?.id != market?.id {
             itinerary.market = market
@@ -4271,6 +4293,7 @@ extension Storage {
         if item.desc != dto.description { item.desc = dto.description }
         if item.order != dto.order { item.order = dto.order }
         if item.icon_url != dto.icon_url { item.icon_url = dto.icon_url }
+        if item.type != dto.type { item.type = dto.type }
         return item
     }
 
@@ -4295,6 +4318,8 @@ extension Storage {
         if item.name != dto.name { item.name = dto.name }
         if item.desc != dto.description { item.desc = dto.description }
         if item.order != dto.order { item.order = dto.order }
+        let isOptional = dto.optional ?? false
+        if item.optional != isOptional { item.optional = isOptional }
         item.itinerary_id = itinerary.id
         if item.type != dto.type { item.type = dto.type }
         try checkCancelledBeforeRelationshipWrite()
@@ -4444,6 +4469,15 @@ extension Storage {
         if association.other_options != dto.other_options {
             association.other_options = dto.other_options
         }
+        if association.button_title != dto.button_title {
+            association.button_title = dto.button_title
+        }
+        if association.button_deeplink_url != dto.button_deeplink_url {
+            association.button_deeplink_url = dto.button_deeplink_url
+        }
+        if association.button_icon != dto.button_icon {
+            association.button_icon = dto.button_icon
+        }
         if association.order != dto.order { association.order = dto.order }
         association.itinerary_item_id = parent == nil ? item.id : nil
         association.parent_association_id = parent?.id
@@ -4454,6 +4488,20 @@ extension Storage {
         }
         if association.parent_association?.id != parent?.id {
             association.parent_association = parent
+        }
+
+        let resolvedMedia: Media?
+        if let mediaDTO = dto.primary_media {
+            resolvedMedia = try upsertMedia(from: mediaDTO, in: ctx)
+        } else {
+            resolvedMedia = nil
+        }
+
+        association.media_id = dto.primary_media?.id
+
+        try checkCancelledBeforeRelationshipWrite()
+        if association.media?.id != resolvedMedia?.id {
+            association.media = resolvedMedia
         }
 
         let resolvedVenue: Venue?
@@ -4532,7 +4580,7 @@ extension Storage {
             association.experience = resolvedExperience
         }
 
-        if let childDTOs = dto.item_associations {
+        if let childDTOs = dto.item_association_children {
             var children: [ItineraryItemAssociation] = []
             children.reserveCapacity(childDTOs.count)
             let childAncestorIDs = ancestorIDs.union([dto.id])

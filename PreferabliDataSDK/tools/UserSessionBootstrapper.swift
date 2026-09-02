@@ -92,6 +92,23 @@ final class UserSessionBootstrapper {
                 }
             }
 
+            // UserCollection relationships drive both cellars and events in the
+            // profile. Await this lightweight relationship sync as part of the
+            // bootstrap; only cellar contents are warmed afterward.
+            do {
+                _ = try await preferabli.getUserCollections(force_refresh: force)
+
+                Task(priority: .background) { [weak preferabli] in
+                    guard let preferabli else { return }
+
+                    await CellarWarmup.warmCellars(
+                        preferabli: preferabli
+                    )
+                }
+            } catch {
+                // Other independent bootstrap work should still be allowed to run.
+            }
+
             do {
                 await CollectionLoader.shared.ensureWarm(
                     BuiltInCollection.wishlist
@@ -112,14 +129,6 @@ final class UserSessionBootstrapper {
                     forceRefreshRatings: false,
                     timeout: 10
                 )
-
-                Task(priority: .background) { [weak preferabli] in
-                    guard let preferabli else { return }
-
-                    await CellarWarmup.warmCellars(
-                        preferabli: preferabli
-                    )
-                }
 
             } catch {
                 // Silent by design.
@@ -279,10 +288,8 @@ public enum PostLoginWarmupGate {
 public enum CellarWarmup {
     public static func warmCellars(preferabli: Preferabli) async {
         do {
-            // 1) Sync user collections (source of truth)
-            _ = try await preferabli.getUserCollections(force_refresh: false)
-
-            // 2) Find cellar userCollections locally
+            // Find cellar relationships from the user-collection snapshot that
+            // the session bootstrap has already persisted.
             let cellarCollectionIds: [Int] = try await Storage.withBackgroundContext { ctx in
                 var fd = FetchDescriptor<UserCollection>(
                     predicate: StorageFacade.QueriesNamespace().cellars()
@@ -292,7 +299,8 @@ public enum CellarWarmup {
                 return Array(Set(ucs.compactMap { $0.collection_id }))
             }
 
-            // 3) Warm each associated Collection via orderings
+            // Events intentionally skip this content warmup; the relationship's
+            // embedded collection metadata is sufficient for their profile cards.
             for cid in cellarCollectionIds {
                 let spec = FixedIDCollectionSpec(
                     collectionId: cid,

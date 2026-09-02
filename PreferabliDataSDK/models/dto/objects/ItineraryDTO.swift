@@ -24,6 +24,11 @@ public struct ItineraryDTO: Decodable, Sendable {
     public let itinerary_items: [ItineraryItemDTO]?
     public let market_trait_associations: [ItineraryMarketTraitDTO]?
     public let highlights: [ItineraryHighlightDTO]?
+    public let duration_minutes_low: Int?
+    public let duration_minutes_high: Int?
+    public let distance_display: Int?
+    public let distance_unit: String?
+    public let `public`: Bool?
     public let created_at: Date?
     public let updated_at: Date?
     public let market_id: Int?
@@ -36,6 +41,7 @@ public struct ItineraryItemDTO: Decodable, Sendable {
     public let description: String?
     public let type: String?
     public let order: Int?
+    public let optional: Bool?
     public let item_associations: [ItineraryItemAssociationDTO]?
     public let created_at: Date?
     public let updated_at: Date?
@@ -57,6 +63,7 @@ public struct ItineraryItemAssociationDTO: Decodable, Sendable {
     public let id: Int
     public let venue: VenueDTO?
     public let experience: ExperienceDTO?
+    public let primary_media: MediaDTO?
     public let description: String?
     public let local_tip_title: String?
     public let local_tip: String?
@@ -64,7 +71,10 @@ public struct ItineraryItemAssociationDTO: Decodable, Sendable {
     public let benefit: String?
     public let other_options_title: String?
     public let other_options: String?
-    public let item_associations: [ItineraryItemAssociationDTO]?
+    public let button_title: String?
+    public let button_deeplink_url: String?
+    public let button_icon: String?
+    public let item_association_children: [ItineraryItemAssociationDTO]?
     public let order: Int?
     public let created_at: Date?
     public let updated_at: Date?
@@ -76,4 +86,5 @@ public struct ItineraryHighlightDTO: Decodable, Sendable {
     public let order: Int?
     public let name: String?
     public let description: String?
+    public let type: String?
 }

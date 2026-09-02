@@ -161,7 +161,7 @@ internal actor APIService {
             return try await refreshTask.value
         }
 
-        let failedAccessToken = bearerToken(from: failedAuthorizationHeader)
+        let failedAccessToken = APIService.bearerToken(from: failedAuthorizationHeader)
         let currentAccessToken = Storage.getKeyStore()
             .string(forKey: "access_token")?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -311,7 +311,7 @@ private final class LoggingAdapter: RequestAdapter {
 
 extension APIService {
     
-    private func bearerToken(from authorizationHeader: String?) -> String? {
+    private static func bearerToken(from authorizationHeader: String?) -> String? {
         guard let authorizationHeader else { return nil }
 
         let prefix = "Bearer "
@@ -325,14 +325,29 @@ extension APIService {
         return token.isEmpty ? nil : token
     }
 
-    private static func buildReplayRequest(from original: URLRequest) async -> URLRequest {
+    private static func isGenAIAuthenticatedRequest(_ request: URLRequest?) -> Bool {
+        guard let request,
+              request.url?.host?.hasSuffix(".lambda-url.us-east-1.on.aws") == true,
+              let requestToken = bearerToken(from: request.value(forHTTPHeaderField: "Authorization"))
+        else { return false }
+
+        let accessToken = Storage.getKeyStore()
+            .string(forKey: "access_token")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return requestToken != accessToken
+    }
+
+    private static func buildReplayRequest(
+        from original: URLRequest,
+        bearerToken: String?
+    ) async -> URLRequest {
         var replay = original
 
         replay.setValue("1", forHTTPHeaderField: authRetryHeader)
 
-        if let accessToken = Storage.getKeyStore().string(forKey: "access_token"),
-           !accessToken.isEmptyOrWhitespace() {
-            replay.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        if let bearerToken, !bearerToken.isEmptyOrWhitespace() {
+            replay.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
         } else {
             replay.setValue(nil, forHTTPHeaderField: "Authorization")
         }
@@ -412,10 +427,13 @@ extension APIService {
                 APILog.response.error("\(msg, privacy: .public)")
 
                 let api = await Preferabli.main.api
+                let isGenAIRequest = isGenAIAuthenticatedRequest(response.request)
 
                 // Already retried once after refresh -> session is dead.
                 if response.request?.value(forHTTPHeaderField: authRetryHeader) == "1" {
-                    await api.forceLogoutAfterRefreshFailureIfNeeded()
+                    if !isGenAIRequest {
+                        await api.forceLogoutAfterRefreshFailureIfNeeded()
+                    }
                     throw makeErr(
                         .InvalidAccessToken,
                         code: http.statusCode,
@@ -426,10 +444,16 @@ extension APIService {
                 do {
                     let failedAuthorizationHeader =
                         response.request?.value(forHTTPHeaderField: "Authorization")
+                    let replayToken: String?
 
-                    try await api.refreshSessionIfNeeded(
-                        failedAuthorizationHeader: failedAuthorizationHeader
-                    )
+                    if isGenAIRequest {
+                        replayToken = try await api.ensureGenAIAuthTokenIfNeeded(forceRefresh: true)
+                    } else {
+                        try await api.refreshSessionIfNeeded(
+                            failedAuthorizationHeader: failedAuthorizationHeader
+                        )
+                        replayToken = Storage.getKeyStore().string(forKey: "access_token")
+                    }
 
                     guard let originalRequest = response.request else {
                         throw makeErr(
@@ -439,13 +463,18 @@ extension APIService {
                         )
                     }
 
-                    let replayRequest = await buildReplayRequest(from: originalRequest)
+                    let replayRequest = await buildReplayRequest(
+                        from: originalRequest,
+                        bearerToken: replayToken
+                    )
                     let session = try await api.getAlamo()
                     let replayResponse = await session.requestRaw(replayRequest)
 
                     return try await continueOrThrowPreferabliException(response: replayResponse)
                 } catch let e as PreferabliException {
-                    await api.forceLogoutAfterRefreshFailureIfNeeded()
+                    if !isGenAIRequest {
+                        await api.forceLogoutAfterRefreshFailureIfNeeded()
+                    }
 
                     var msg = "[\(endpoint)] \(e.getMessage())"
                     if let raw, !raw.isEmpty {
@@ -455,7 +484,9 @@ extension APIService {
 
                     throw PreferabliException(type: e.type, message: msg, code: e.getCode())
                 } catch {
-                    await api.forceLogoutAfterRefreshFailureIfNeeded()
+                    if !isGenAIRequest {
+                        await api.forceLogoutAfterRefreshFailureIfNeeded()
+                    }
                     throw makeErr(
                         .APIError,
                         code: http.statusCode,

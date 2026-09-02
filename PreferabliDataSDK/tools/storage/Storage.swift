@@ -769,6 +769,13 @@ public struct StorageFacade {
                 (uc.relationship_type ?? "") == "mycellar"
             }
         }
+
+        /// User-saved collections are surfaced as events in Tastefuli.
+        public func events() -> Predicate<UserCollection> {
+            #Predicate<UserCollection> { uc in
+                (uc.relationship_type ?? "") == "saved"
+            }
+        }
     }
     
     public struct SortsNamespace {

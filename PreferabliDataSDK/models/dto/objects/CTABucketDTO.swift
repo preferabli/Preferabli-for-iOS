@@ -65,9 +65,8 @@ public struct CTABucketItemDTO: Decodable, Sendable {
     public let badge_title: String?
     public let title: String?
     public let description: String?
+    public let subtext: String?
     public let created_at: Date?
     public let updated_at: Date?
     public let primary_image: MediaDTO?
-    public let sub_image_1: MediaDTO?
-    public let sub_image_2: MediaDTO?
 }
