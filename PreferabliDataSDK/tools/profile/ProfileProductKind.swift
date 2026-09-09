@@ -67,11 +67,11 @@ public extension ProfileProductKind {
     /// Total number of styles per type (from legacy `getTotalStyleCount`).
     var totalStyleCount: Int {
         switch self {
-        case .red:        return 213
-        case .white:      return 143
+        case .red:        return 209
+        case .white:      return 126
         case .rose:       return 16
-        case .sparkling:  return 37
-        case .fortified:  return 24
+        case .sparkling:  return 34
+        case .fortified:  return 48
         case .whiskey:    return 72
         case .mezcal:     return 45
         case .beer:       return 197

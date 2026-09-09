@@ -64,7 +64,7 @@ final class AppConfigLoader {
             let platform = Storage.getKeyStore().string(forKey: "CLIENT_INTERFACE") ?? "ios"
 
             let dto: AppConfigDTO = try await preferabli.api
-                .getAlamo(requiresAccessToken: false)
+                .getAlamo(requiresAccessToken: true)
                 .get(APIEndpoints.config, sparams: [
                     "version": buildInt,
                     "platform": platform
