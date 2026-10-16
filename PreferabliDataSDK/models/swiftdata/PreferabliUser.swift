@@ -12,6 +12,7 @@ public final class PreferabliUser : HasIntID, HasTimestamps, HasImage {
     public var country: String?
     public var display_name: String?
     public var email: String?
+    public var phone: String?
     public var is_team_preferabli: Bool?
     public var fname: String?
     public var lname: String?

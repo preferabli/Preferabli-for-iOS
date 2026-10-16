@@ -151,7 +151,7 @@ public final class GenAIMessage: HasIntID, HasTimestamps {
     }
 
     public var hasSelectionOptions: Bool {
-        hasProductOptions || hasFoodOptions
+        hasProductOptions || hasFoodOptions || hasRecipeOptions
     }
 
     public var awaitsSelection: Bool {
@@ -203,6 +203,29 @@ public final class GenAIMessage: HasIntID, HasTimestamps {
             .filter { ["products", "product_list", "wine_list"].contains($0.subType) }
             .flatMap(\.sortedContent)
     }
+
+    public var recipeOptionContents: [GenAIUtteranceContent] {
+        sortedUtteranceObjects
+            .filter { ["recipes", "recipe_list"].contains($0.subType) }
+            .flatMap(\.sortedContent)
+    }
+
+    public var recipeIds: [Int] {
+        recipeOptionContents.compactMap(\.recipeId).uniqued()
+    }
+
+    // Reuse the persisted non-product selection slot for recipe selections.
+    public var selectedRecipeId: Int? {
+        get { hasRecipeOptions ? selectedFoodId : nil }
+        set { selectedFoodId = newValue }
+    }
+
+    public var selectedRecipeName: String? {
+        guard let selectedRecipeId else { return nil }
+        return recipeOptionContents.first { $0.recipeId == selectedRecipeId }?.displayName
+    }
+
+    public var hasRecipeOptions: Bool { !recipeOptionContents.isEmpty }
 
     public var foodOptionContents: [GenAIUtteranceContent] {
         sortedUtteranceObjects
@@ -267,6 +290,7 @@ public final class GenAIUtterance {
         type == "selection_intro" ||
         (type == "text" && subType.isEmptyOrWhitespace()) ||
         [
+            "rfp_intro",
             "lttt_intro",
             "wff_intro",
             "product_info",
@@ -283,6 +307,7 @@ public final class GenAIUtterance {
 
     public var isPostDisplayText: Bool {
         [
+            "rfp_outro",
             "lttt_outro",
             "wff_outro",
             "guided_rec_end",
@@ -330,6 +355,9 @@ public final class GenAIUtteranceContent {
         self.recognitionType = recognitionType
         self.displayData = displayData
     }
+
+    /// Selection options use entity_id; recommendation lists use id.
+    public var recipeId: Int? { entityId ?? remoteId }
 
     public var stableID: String {
         [remoteId, entityId, order]

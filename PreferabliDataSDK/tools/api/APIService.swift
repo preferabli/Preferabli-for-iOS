@@ -676,7 +676,7 @@ internal struct APIEndpoints {
         personalities + "/\(id)/itineraries"
     }
     
-    internal static let genAISeedLambda = "law7au2zlfnm6i3tvmebboj6ry0yotlj"
+    internal static let genAISeedLambda = "io7toqcjuqx4y5k3jpnvd3uwg40ukdso"
 
     private static var genAILambda: String? {
         let value = Storage.getKeyStore().string(forKey: "genAILambda")

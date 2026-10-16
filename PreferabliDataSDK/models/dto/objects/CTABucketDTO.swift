@@ -9,6 +9,7 @@ import Foundation
 
 public struct CTAPageDTO: Decodable, Sendable {
     let id: Int
+    public let status: String?
     let slug: String?
     let name: String?
     let market_id: Int?
@@ -20,8 +21,9 @@ public struct CTAPageDTO: Decodable, Sendable {
 
 public struct CTABucketAssociationDTO: Decodable, Sendable {
     let id: Int
+    public let status: String?
     let order: Int?
-    let bucket: CTABucketDTO
+    let bucket: CTABucketDTO?
     let created_at: Date?
     let updated_at: Date?
 }
@@ -29,6 +31,7 @@ public struct CTABucketAssociationDTO: Decodable, Sendable {
 public struct CTABucketDTO: Decodable, Sendable {
     let id: Int
     let name: String?
+    let description: String?
     let item_width: Int?
     let item_height: Int?
     let item_corner_radius: Int?
@@ -41,6 +44,7 @@ public struct CTABucketDTO: Decodable, Sendable {
 
 public struct CTABucketItemAssociationDTO: Decodable, Sendable {
     let id: Int
+    public let status: String?
     let order: Int?
     let item: CTABucketItemDTO
     let created_at: Date?

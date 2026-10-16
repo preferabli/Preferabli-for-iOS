@@ -9,6 +9,7 @@ import Foundation
 
 public struct MarketDTO: Decodable, Sendable {
     public let id: Int
+    public let status: String?
     public let name: String?
     public let image_url: String?
     public let description: String?

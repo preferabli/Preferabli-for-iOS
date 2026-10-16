@@ -488,7 +488,7 @@ public actor CollectionLoader {
                                 code: 702
                             )
                         )
-                        try ctx.save()
+                        try BetaDeepLinkStorage.save(ctx)
                         return localErrors
                     }
 
@@ -504,7 +504,7 @@ public actor CollectionLoader {
                         )
                     }
 
-                    try ctx.save()
+                    try BetaDeepLinkStorage.save(ctx)
                     return localErrors
                 }
 
@@ -597,7 +597,7 @@ public actor CollectionLoader {
                     _ = try Storage.upsertTag(from: td, variant: variant, in: ctx)
                 }
 
-                try ctx.save()
+                try BetaDeepLinkStorage.save(ctx)
                 return localErrors
             }
 
@@ -636,7 +636,7 @@ public actor CollectionLoader {
 
         try await Storage.withBackgroundContext { ctx in
             _ = try Storage.upsertCollection(from: dto, in: ctx)
-            try ctx.save()
+            try BetaDeepLinkStorage.save(ctx)
         }
     }
 
@@ -649,7 +649,7 @@ public actor CollectionLoader {
 
         try await Storage.withBackgroundContext { ctx in
             _ = try Storage.upsertCollection(from: dto, in: ctx)
-            try ctx.save()
+            try BetaDeepLinkStorage.save(ctx)
         }
     }
 

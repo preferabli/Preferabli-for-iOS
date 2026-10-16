@@ -21,4 +21,5 @@ public struct BalloonReservationItemDTO: Decodable, Sendable {
     public let qty: String?
     public let sku: String?
     public let start_date: Int?
+    public let timezone: String?
 }

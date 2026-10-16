@@ -110,6 +110,7 @@ public struct GenAIUtteranceDTO: Decodable, Sendable {
             type == "selection_intro" ||
             (type == "text" && subType.isEmptyOrWhitespace()) ||
             [
+                "rfp_intro",
                 "lttt_intro",
                 "wff_intro",
                 "product_info",
@@ -220,6 +221,14 @@ public struct GenAIMessageDTO: Decodable, Sendable {
             }
         }
         .uniqued()
+    }
+
+    public var recipeIds: [Int] {
+        utteranceObjects
+            .filter { ["recipes", "recipe_list"].contains($0.subType) }
+            .flatMap(\.content)
+            .compactMap { $0.entityId ?? $0.remoteId }
+            .uniqued()
     }
 
     public var foodIds: [Int] {

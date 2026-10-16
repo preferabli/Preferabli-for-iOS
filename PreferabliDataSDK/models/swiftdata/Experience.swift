@@ -12,6 +12,7 @@ import SwiftData
 @Model
 public final class Experience: HasIntID, HasImage {
     @Attribute(.unique) public var id: Int
+    public var status: String?
 
     public var booking_link: String?
     public var booking_terms: String?
@@ -135,7 +136,6 @@ public final class ExperiencePrice: HasIntID {
     public var list_price: Double?
     public var max_count: Int?
     public var min_count: Int?
-    public var partner_ref: Int?
     public var price: Double?
     public var pricing_mode: String?
     public var price_type: String?

@@ -122,6 +122,17 @@ extension Optional where Wrapped: Swift.Collection {
     }
 }
 
+/// Marks links produced by the HTML parser for the app's inline-link renderer.
+public enum HTMLInlineLinkAttribute: AttributedStringKey {
+    public typealias Value = Bool
+    public static let name = "preferabli.htmlInlineLink"
+}
+
+public enum HTMLBlockAttribute: AttributedStringKey {
+    public typealias Value = String
+    public static let name = "preferabli.htmlBlock"
+}
+
 private enum HTMLListType {
     case unordered
     case ordered(currentNumber: Int)
@@ -162,12 +173,14 @@ extension String {
         var strikethroughDepth = 0
         var ignoredContentDepth = 0
 
+        var currentBlock: String?
         var currentHeading: HTMLHeadingLevel?
         var currentLinkURL: URL?
         var listStack: [HTMLListType] = []
         var listItemDepth = 0
 
         func selectedFont() -> Font {
+            if currentBlock == "tagline" || currentBlock == "quote" { return boldFont }
             switch currentHeading {
             case .h1:
                 return heading1Font
@@ -192,6 +205,7 @@ extension String {
             var piece = AttributedString(text)
             piece.foregroundColor = baseColor
             piece.font = font
+            piece[HTMLBlockAttribute.self] = currentBlock
             return piece
         }
 
@@ -457,6 +471,21 @@ extension String {
                 }
 
                 switch tag.name {
+                case "tagline", "quote":
+                    currentBlock = nil
+                    appendParagraphBreak()
+                    if !tag.isClosing { currentBlock = tag.name }
+
+                case "divider":
+                    if !tag.isClosing {
+                        currentBlock = nil
+                        appendParagraphBreak()
+                        currentBlock = "divider"
+                        result.append(makePiece("\u{FFFC}", font: regularFont))
+                        currentBlock = nil
+                        appendParagraphBreak()
+                    }
+
                 case "strong", "b":
                     if tag.isClosing {
                         boldDepth = max(
@@ -611,7 +640,7 @@ extension String {
                 font: selectedFont()
             )
 
-            if underlineDepth > 0 || currentLinkURL != nil {
+            if underlineDepth > 0 && currentLinkURL == nil {
                 piece.underlineStyle = .single
             }
 
@@ -621,7 +650,8 @@ extension String {
 
             if let currentLinkURL {
                 piece.link = currentLinkURL
-                piece.foregroundColor = linkColor
+                piece.foregroundColor = baseColor
+                piece[HTMLInlineLinkAttribute.self] = true
             }
 
             result.append(piece)

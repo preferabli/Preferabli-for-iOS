@@ -15,6 +15,7 @@ public struct PreferabliUserDTO: Decodable, Sendable {
     public let country: String?
     public let display_name: String?
     public let email: String?
+    public let phone: String?
     public let is_team_preferabli: Bool?
     public let fname: String?
     public let lname: String?

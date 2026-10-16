@@ -5,6 +5,7 @@ import Foundation
 public final class CTAPage: Identifiable, HasIntID {
 
     @Attribute(.unique) public var id: Int
+    public var status: String?
 
     public var created_at: Date = Foundation.Date.now
     public var updated_at: Date = Foundation.Date.now

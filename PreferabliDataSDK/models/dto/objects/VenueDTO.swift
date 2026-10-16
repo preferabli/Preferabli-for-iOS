@@ -27,6 +27,7 @@ public struct DeliveryMethodDTO: Decodable, Sendable {
 
 public struct VenueDTO: Decodable, Sendable {
     public let id: Int
+    public let status: String?
     public let address_l1: String?
     public let address_l2: String?
     public let city: String?

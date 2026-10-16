@@ -9,6 +9,7 @@ import Foundation
 
 public struct ExperienceDTO: Decodable, Sendable {
     public let id: Int
+    public let status: String?
     public let booking_link: String?
     public let booking_terms: String?
     public let affiliate_unlock_code: String?
@@ -61,6 +62,7 @@ public struct ExperienceDTO: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id
+        case status
         case booking_link
         case booking_terms
         case affiliate_unlock_code
@@ -133,7 +135,6 @@ public struct ExperiencePriceDTO: Decodable, Sendable {
     public let list_price: Double?
     public let max_count: Int?
     public let min_count: Int?
-    public let partner_ref: Int?
     public let price: Double?
     public let pricing_mode: String?
     public let price_type: String?
@@ -150,7 +151,6 @@ public struct ExperiencePriceDTO: Decodable, Sendable {
         case list_price
         case max_count
         case min_count
-        case partner_ref
         case price
         case pricing_mode
         case price_type

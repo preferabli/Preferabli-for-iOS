@@ -476,6 +476,7 @@ extension Storage {
         try checkCancelled()
 
         if experience.id != dto.id { experience.id = dto.id }
+        if experience.status != dto.status { experience.status = dto.status }
         if experience.name != dto.name { experience.name = dto.name }
         if experience.booking_link != dto.booking_link { experience.booking_link = dto.booking_link }
         if experience.booking_terms != dto.booking_terms { experience.booking_terms = dto.booking_terms }
@@ -623,7 +624,6 @@ extension Storage {
         if price.list_price != dto.list_price { price.list_price = dto.list_price }
         if price.max_count != dto.max_count { price.max_count = dto.max_count }
         if price.min_count != dto.min_count { price.min_count = dto.min_count }
-        if price.partner_ref != dto.partner_ref { price.partner_ref = dto.partner_ref }
         if price.price != dto.price { price.price = dto.price }
         if price.pricing_mode != dto.pricing_mode { price.pricing_mode = dto.pricing_mode }
         if price.price_type != dto.price_type { price.price_type = dto.price_type }
@@ -662,163 +662,12 @@ extension Storage {
 
     @discardableResult
     nonisolated static func upsertVenue(from dto: VenueDTO, in ctx: ModelContext) throws -> Venue? {
-
-        try checkCancelled()
-
-        guard let name = dto.name else {
-            return nil
-        }
-
-        let v = try fetchOrInsert(Venue.self, id: dto.id, in: ctx) {
-            Venue(id: dto.id, name: name)
-        }
-
-        // MARK: - Fields (nil means clear; write only if changed)
-
-        if v.address_l1 != dto.address_l1 { v.address_l1 = dto.address_l1 }
-        if v.address_l2 != dto.address_l2 { v.address_l2 = dto.address_l2 }
-        if v.city != dto.city { v.city = dto.city }
-        if v.country != dto.country { v.country = dto.country }
-        if v.display_name != dto.display_name { v.display_name = dto.display_name }
-
-        if v.lat != dto.lat { v.lat = dto.lat }
-        if v.lon != dto.lon { v.lon = dto.lon }
-
-        if v.primary_inventory_id != dto.primary_inventory_id { v.primary_inventory_id = dto.primary_inventory_id }
-        if v.featured_collection_id != dto.featured_collection_id { v.featured_collection_id = dto.featured_collection_id }
-
-        if v.is_virtual != dto.is_virtual { v.is_virtual = dto.is_virtual }
-
-        if v.phone != dto.phone { v.phone = dto.phone }
-        if v.email_address != dto.email_address { v.email_address = dto.email_address }
-        if v.state != dto.state { v.state = dto.state }
-        if v.url != dto.url { v.url = dto.url }
-
-        if v.url_facebook != dto.url_facebook { v.url_facebook = dto.url_facebook }
-        if v.url_instagram != dto.url_instagram { v.url_instagram = dto.url_instagram }
-        if v.url_twitter != dto.url_twitter { v.url_twitter = dto.url_twitter }
-        if v.url_youtube != dto.url_youtube { v.url_youtube = dto.url_youtube }
-        if v.reservations_provider_enabled != dto.reservations_provider_enabled { v.reservations_provider_enabled = dto.reservations_provider_enabled }
-
-        if v.zip_code != dto.zip_code { v.zip_code = dto.zip_code }
-        if v.notes != dto.notes { v.notes = dto.notes }
-
-        if v.is_partner != dto.is_partner { v.is_partner = dto.is_partner }
-
-        if v.isTombstoned { v.isTombstoned = false }
-
-        let marketIDs = Array(Set(dto.market_ids ?? [])).sorted()
-        if v.market_ids_cache != marketIDs {
-            v.market_ids_cache = marketIDs
-        }
-
-        // MARK: - Media pointers
-        if let video = dto.video {
-            try checkCancelled()
-            let media = try upsertMedia(from: video, in: ctx)
-
-            try checkCancelledBeforeRelationshipWrite()
-            if v.video !== media { v.video = media }
-        } else {
-            try checkCancelledBeforeRelationshipWrite()
-            v.video = nil
-        }
-
-        if let logo = dto.logo {
-            try checkCancelled()
-            let media = try upsertMedia(from: logo, in: ctx)
-            media.mime_type = "image/png"
-
-            try checkCancelledBeforeRelationshipWrite()
-            if v.logo !== media { v.logo = media }
-        } else {
-            try checkCancelledBeforeRelationshipWrite()
-            v.logo = nil
-        }
-
-        if let primary = dto.primary_image {
-            try checkCancelled()
-            let media = try upsertMedia(from: primary, in: ctx)
-
-            try checkCancelledBeforeRelationshipWrite()
-            if v.primary_image !== media { v.primary_image = media }
-        } else {
-            try checkCancelledBeforeRelationshipWrite()
-            v.primary_image = nil
-        }
-
-
-        // MARK: - Relationship lists (source-of-truth as provided by venue DTO)
-        if let imgs = dto.images {
-            let keepKeys = Set(
-                imgs.map { VenueImage.makeKey(venueID: v.id, mediaID: $0.id) }
-            )
-
-            for link in v.venue_images {
-                try checkCancelled()
-                let shouldBeTombstoned = !keepKeys.contains(link.key)
-                if link.isTombstoned != shouldBeTombstoned {
-                    link.isTombstoned = shouldBeTombstoned
-                }
-            }
-
-            for (order, img) in imgs.enumerated() {
-                try checkCancelled()
-                let media = try upsertMedia(from: img, in: ctx)
-                let key = VenueImage.makeKey(venueID: v.id, mediaID: media.id)
-
-                let link: VenueImage
-                if let existing = try Storage.fetchByKey(VenueImage.self, key: key, in: ctx) {
-                    link = existing
-                } else {
-                    let created = VenueImage(key: key, order: order, venue: v, media: media)
-                    ctx.insert(created)
-                    link = created
-                }
-
-                if link.order != order { link.order = order }
-                if link.venue_id != v.id { link.venue_id = v.id }
-                if link.media_id != media.id { link.media_id = media.id }
-                if link.isTombstoned { link.isTombstoned = false }
-
-                try checkCancelledBeforeRelationshipWrite()
-                if link.venue.id != v.id { link.venue = v }
-                if link.media.id != media.id { link.media = media }
-                if !v.venue_images.contains(where: { $0.key == key }) {
-                    v.venue_images.append(link)
-                }
-            }
-        }
-
-        if let hrs = dto.hours {
-            var newHours: [VenueHour] = []
-            newHours.reserveCapacity(hrs.count)
-
-            for h in hrs {
-                try checkCancelled()
-                newHours.append(try upsertVenueHour(from: h, in: ctx))
-            }
-
-            try checkCancelledBeforeRelationshipWrite()
-            v.hours = newHours
-        }
-
-        if let dms = dto.active_delivery_methods {
-            var newDms: [DeliveryMethod] = []
-            newDms.reserveCapacity(dms.count)
-
-            for dm in dms {
-                try checkCancelled()
-                newDms.append(try upsertDeliveryMethod(from: dm, in: ctx))
-            }
-
-            try checkCancelledBeforeRelationshipWrite()
-            v.active_delivery_methods = newDms
-        }
-
-        return v
+        // Single-venue/search responses contain the same trait graph as market lists.
+        // Keep both entry points on the same persistence path so categories are never skipped.
+        let batch = try VenueUpsertBatch(venueDTOs: [dto], market: nil, in: ctx)
+        return try upsertVenue(from: dto, market: nil, batch: batch, in: ctx)
     }
-    
+
     nonisolated static func deleteVenuesNotInBatch(
         _ keep: Set<Int>,
         rootMarket: Market,
@@ -895,6 +744,7 @@ extension Storage {
 
         // MARK: - Fields
 
+        if v.status != dto.status { v.status = dto.status }
         if v.address_l1 != dto.address_l1 { v.address_l1 = dto.address_l1 }
         if v.address_l2 != dto.address_l2 { v.address_l2 = dto.address_l2 }
         if v.city != dto.city { v.city = dto.city }
@@ -1608,7 +1458,6 @@ extension Storage {
             if guest.price_list_price != priceDTO.list_price { guest.price_list_price = priceDTO.list_price }
             if guest.price_max_count != priceDTO.max_count { guest.price_max_count = priceDTO.max_count }
             if guest.price_min_count != priceDTO.min_count { guest.price_min_count = priceDTO.min_count }
-            if guest.price_partner_ref != priceDTO.partner_ref { guest.price_partner_ref = priceDTO.partner_ref }
             if guest.price_price != priceDTO.price { guest.price_price = priceDTO.price }
             if guest.price_price_type != priceDTO.price_type { guest.price_price_type = priceDTO.price_type }
             if guest.price_stripe_product_price_id != priceDTO.stripe_product_price_id { guest.price_stripe_product_price_id = priceDTO.stripe_product_price_id }
@@ -1714,6 +1563,7 @@ extension Storage {
         if u.country != dto.country { u.country = dto.country }
         if u.display_name != dto.display_name { u.display_name = dto.display_name }
         if u.email != dto.email { u.email = dto.email }
+        if u.phone != dto.phone { u.phone = dto.phone }
         if u.is_team_preferabli != dto.is_team_preferabli { u.is_team_preferabli = dto.is_team_preferabli }
         if u.fname != dto.fname { u.fname = dto.fname }
         if u.lname != dto.lname { u.lname = dto.lname }
@@ -1914,6 +1764,7 @@ extension Storage {
         try checkCancelled()
 
         // Fields
+        if market.status != dto.status { market.status = dto.status }
         if market.name != dto.name { market.name = dto.name }
         if market.desc != dto.description { market.desc = dto.description }
         if market.image_url != dto.image_url { market.image_url = dto.image_url }
@@ -2159,6 +2010,8 @@ extension Storage {
 
         let r = try fetchOrInsert(CTABucketAssociation.self, id: dto.id, in: ctx) { CTABucketAssociation(id: dto.id, page: page, bucket: bucket) }
 
+        if r.status != dto.status { r.status = dto.status }
+
         r.page = page
         r.bucket = bucket
         r.isTombstoned = false
@@ -2179,6 +2032,7 @@ extension Storage {
         r.created_at = dto.created_at ?? r.created_at
         r.updated_at = dto.updated_at ?? r.updated_at
         if r.name != dto.name { r.name = dto.name }
+        if r.desc != dto.description { r.desc = dto.description }
         if r.type != dto.type { r.type = dto.type }
         if r.item_width != dto.item_width { r.item_width = dto.item_width }
         if r.item_height != dto.item_height { r.item_height = dto.item_height }
@@ -2219,6 +2073,8 @@ extension Storage {
 
         let r = try fetchOrInsert(CTAPage.self, id: dto.id, in: ctx) { CTAPage(id: dto.id) }
 
+        if r.status != dto.status { r.status = dto.status }
+
         r.created_at = dto.created_at ?? r.created_at
         r.updated_at = dto.updated_at ?? r.updated_at
         if r.name != dto.name { r.name = dto.name }
@@ -2228,7 +2084,9 @@ extension Storage {
         r.isTombstoned = false
 
         if let bucketAssociations = dto.page_bucket_associations {
-            let keepIDs = Set(bucketAssociations.map(\.id))
+            // The API can retain an association whose bucket is null.
+            // Exclude it from the live IDs so any cached association is hidden too.
+            let keepIDs = Set(bucketAssociations.filter { $0.bucket != nil }.map(\.id))
 
             for oldAssociation in r.page_bucket_associations where !keepIDs.contains(oldAssociation.id) {
                 oldAssociation.isTombstoned = true
@@ -2236,7 +2094,8 @@ extension Storage {
 
             for association in bucketAssociations {
                 try checkCancelled()
-                let bucket = try upsertCTABucket(from: association.bucket, in: ctx)
+                guard let bucketDTO = association.bucket else { continue }
+                let bucket = try upsertCTABucket(from: bucketDTO, in: ctx)
                 _ = try upsertCTABucketAssociation(
                     from: association,
                     page: r,
@@ -2266,6 +2125,8 @@ extension Storage {
         let r = try fetchOrInsert(CTABucketItemAssociation.self, id: dto.id, in: ctx) {
             CTABucketItemAssociation(id: dto.id, bucket: bucket, item: item)
         }
+
+        if r.status != dto.status { r.status = dto.status }
 
         r.bucket = bucket
         r.item = item
@@ -3179,6 +3040,10 @@ extension Storage {
         else { return false }
 
         return [
+            "btn_confirm",
+            "btn_reject",
+            "btn_recipe_entity_confirm",
+            "btn_recipe_entity_reject",
             "btn_food_entity_confirm",
             "btn_wine_entity_confirm",
             "btn_food_entity_reject",
@@ -3188,6 +3053,7 @@ extension Storage {
     
     private struct GenAIParsedSelection {
         let entityId: Int?
+        var entityType: String? = nil
     }
 
     private nonisolated static func applyGenAISelectionActionIfNeeded(
@@ -3199,12 +3065,14 @@ extension Storage {
               let action = dto.userAction
         else { return }
 
-        let isFoodConfirm = action == "btn_food_entity_confirm"
+        let isFoodConfirm = ["btn_food_entity_confirm", "btn_recipe_entity_confirm"].contains(action)
         let isProductConfirm = action == "btn_wine_entity_confirm"
-        let isFoodReject = action == "btn_food_entity_reject"
+        let isFoodReject = ["btn_food_entity_reject", "btn_recipe_entity_reject"].contains(action)
         let isProductReject = action == "btn_wine_entity_reject"
 
-        guard isFoodConfirm || isProductConfirm || isFoodReject || isProductReject else { return }
+        guard action == "btn_confirm" || action == "btn_reject" ||
+              isFoodConfirm || isProductConfirm || isFoodReject || isProductReject else { return }
+        let selection = parseGenAIUserSelection(dto.userSelection)
 
         let descriptor = FetchDescriptor<GenAIMessage>(
             predicate: #Predicate<GenAIMessage> { message in
@@ -3218,15 +3086,32 @@ extension Storage {
         let previousMessages = try ctx.fetch(descriptor)
 
         guard let target = previousMessages.first(where: { message in
-            if isFoodConfirm || isFoodReject {
-                return message.hasFoodOptions
+            if action == "btn_confirm" || action == "btn_reject" {
+                guard message.isUserSelection else { return false }
+                switch selection.entityType {
+                case "recipe_name": return message.hasRecipeOptions
+                case "food_name": return message.hasFoodOptions
+                case "product_name", "wine_name": return message.hasProductOptions
+                default: return message.hasSelectionOptions
+                }
+            } else if isFoodConfirm || isFoodReject {
+                return action.contains("recipe") ? message.hasRecipeOptions : message.hasFoodOptions
             } else {
                 return message.hasProductOptions
             }
         }) else { return }
 
-        if isFoodConfirm {
-            let selection = parseGenAIUserSelection(dto.userSelection)
+        if action == "btn_confirm" {
+            let isProduct = selection.entityType.map { ["product_name", "wine_name"].contains($0) }
+                ?? target.hasProductOptions
+            if isProduct {
+                target.selectedProductId = selection.entityId
+            } else {
+                target.selectedFoodId = selection.entityId
+            }
+            target.didRejectSelection = false
+            target.updated_at = Date()
+        } else if isFoodConfirm {
             target.selectedFoodId = selection.entityId
             target.didRejectSelection = false
             target.updated_at = Date()
@@ -3257,7 +3142,8 @@ extension Storage {
         }
 
         return GenAIParsedSelection(
-            entityId: object["entity_id"] as? Int
+            entityId: object["entity_id"] as? Int,
+            entityType: object["entity_type"] as? String
         )
     }
 
@@ -3319,23 +3205,23 @@ extension Storage {
         }
         message.utteranceObjects.removeAll()
 
-        for utteranceDTO in utteranceDTOs {
+        for (utteranceIndex, utteranceDTO) in utteranceDTOs.enumerated() {
             try checkCancelled()
 
             let utterance = GenAIUtterance(
                 type: utteranceDTO.type ?? "",
                 subType: utteranceDTO.subType ?? "",
-                order: utteranceDTO.order
+                order: utteranceDTO.order ?? utteranceIndex
             )
             utterance.message = message
             ctx.insert(utterance)
 
-            for contentDTO in utteranceDTO.content {
+            for (contentIndex, contentDTO) in utteranceDTO.content.enumerated() {
                 let content = GenAIUtteranceContent(
                     remoteId: contentDTO.remoteId,
                     productId: contentDTO.productId,
                     entityId: contentDTO.entityId,
-                    order: contentDTO.order,
+                    order: contentDTO.order ?? contentIndex,
                     entityName: contentDTO.entityName,
                     entityProbability: contentDTO.entityProbability,
                     name: contentDTO.name,
@@ -4039,11 +3925,13 @@ extension Storage {
         from dtos: [ItineraryDTO],
         market: Market,
         replaceExisting: Bool = true,
+        types: [String]? = nil,
         in ctx: ModelContext
     ) throws -> [Itinerary] {
 
         try checkCancelled()
 
+        let requestedTypes = types.flatMap { $0.isEmpty ? nil : Set($0) }
         if replaceExisting {
             let keepIDs = Set(dtos.map(\.id))
             var scopeMarketIDs = Set<Int>()
@@ -4060,10 +3948,11 @@ extension Storage {
             for existing in try ctx.fetch(FetchDescriptor<Itinerary>())
             where existing.market_id.map(scopeMarketIDs.contains) == true
                 && existing.`public`
+                && (requestedTypes == nil || requestedTypes?.contains(existing.type ?? "") == true)
                 && !keepIDs.contains(existing.id) {
                 try checkCancelled()
                 try checkCancelledBeforeRelationshipWrite()
-                ctx.delete(existing)
+                existing.isTombstoned = true
             }
         }
 
@@ -4103,6 +3992,7 @@ extension Storage {
     nonisolated static func upsertItinerary(
         from dto: ItineraryDTO,
         market: Market? = nil,
+        ancestorItineraryIDs: Set<Int> = [],
         in ctx: ModelContext
     ) throws -> Itinerary {
 
@@ -4112,10 +4002,20 @@ extension Storage {
             Itinerary(id: dto.id, market: market)
         }
 
+        if itinerary.isTombstoned { itinerary.isTombstoned = false }
+
+        // A linked itinerary may point back to one already being imported.
+        guard !ancestorItineraryIDs.contains(dto.id) else { return itinerary }
+        let itineraryAncestors = ancestorItineraryIDs.union([dto.id])
+
         itinerary.created_at = dto.created_at ?? itinerary.created_at
         itinerary.updated_at = dto.updated_at ?? itinerary.updated_at
         if itinerary.name != dto.name { itinerary.name = dto.name }
+        if itinerary.type != dto.type { itinerary.type = dto.type }
         if itinerary.desc != dto.description { itinerary.desc = dto.description }
+        if itinerary.curator_personality_description != dto.curator_personality_description {
+            itinerary.curator_personality_description = dto.curator_personality_description
+        }
         let marketID = market?.id ?? dto.market_id
         itinerary.market_id = marketID
         if itinerary.badge_title != dto.badge_title { itinerary.badge_title = dto.badge_title }
@@ -4137,8 +4037,9 @@ extension Storage {
         if itinerary.distance_unit != dto.distance_unit {
             itinerary.distance_unit = dto.distance_unit
         }
-        let isPublic = dto.`public` ?? true
-        if itinerary.`public` != isPublic {
+        // Linked/list payloads may omit visibility. Preserve the known value;
+        // only an explicit server value should change an existing unlocked badge.
+        if let isPublic = dto.`public`, itinerary.`public` != isPublic {
             itinerary.`public` = isPublic
         }
         try checkCancelledBeforeRelationshipWrite()
@@ -4200,16 +4101,21 @@ extension Storage {
                     try upsertItineraryItem(
                         from: itemDTO,
                         itinerary: itinerary,
+                        ancestorItineraryIDs: itineraryAncestors,
                         in: ctx
                     )
                 )
             }
 
-            try deleteMissingItineraryIntIDs(
+            try tombstoneMissingItineraryIntIDs(
                 itinerary.itinerary_items,
                 keeping: Set(items.map(\.id)),
                 in: ctx
             )
+
+            // Retain missing rows and their relationships for readers in other contexts.
+            let activeIDs = Set(items.map(\.id))
+            items += itinerary.itinerary_items.filter { !activeIDs.contains($0.id) }
 
             if !itinerarySameIntIDs(itinerary.itinerary_items, items) {
                 try checkCancelledBeforeRelationshipWrite()
@@ -4232,11 +4138,15 @@ extension Storage {
                 )
             }
 
-            try deleteMissingItineraryIntIDs(
+            try tombstoneMissingItineraryIntIDs(
                 itinerary.highlights,
                 keeping: Set(items.map(\.id)),
                 in: ctx
             )
+
+            // Retain missing rows and their relationships for readers in other contexts.
+            let activeIDs = Set(items.map(\.id))
+            items += itinerary.highlights.filter { !activeIDs.contains($0.id) }
 
             if !itinerarySameIntIDs(itinerary.highlights, items) {
                 try checkCancelledBeforeRelationshipWrite()
@@ -4264,8 +4174,9 @@ extension Storage {
             for existing in itinerary.market_trait_associations where !keepKeys.contains(existing.key) {
                 try checkCancelled()
                 try checkCancelledBeforeRelationshipWrite()
-                ctx.delete(existing)
+                existing.isTombstoned = true
             }
+            links += itinerary.market_trait_associations.filter { !keepKeys.contains($0.key) }
 
             if !itinerarySameKeys(itinerary.market_trait_associations, links) {
                 try checkCancelledBeforeRelationshipWrite()
@@ -4279,16 +4190,24 @@ extension Storage {
     @discardableResult
     nonisolated static func upsertItineraryHighlight(
         from dto: ItineraryHighlightDTO,
-        itinerary: Itinerary,
+        itinerary: Itinerary? = nil,
+        association: ItineraryItemAssociation? = nil,
         in ctx: ModelContext
     ) throws -> ItineraryHighlight {
 
         try checkCancelled()
 
         let item = try fetchOrInsert(ItineraryHighlight.self, id: dto.id, in: ctx) {
-            ItineraryHighlight(id: dto.id, itinerary: itinerary)
+            ItineraryHighlight(id: dto.id, itinerary: itinerary, itinerary_item_association: association)
         }
 
+        if item.isTombstoned { item.isTombstoned = false }
+
+        try checkCancelledBeforeRelationshipWrite()
+        if item.itinerary?.id != itinerary?.id { item.itinerary = itinerary }
+        if item.itinerary_item_association?.id != association?.id {
+            item.itinerary_item_association = association
+        }
         if item.name != dto.name { item.name = dto.name }
         if item.desc != dto.description { item.desc = dto.description }
         if item.order != dto.order { item.order = dto.order }
@@ -4303,6 +4222,7 @@ extension Storage {
     nonisolated static func upsertItineraryItem(
         from dto: ItineraryItemDTO,
         itinerary: Itinerary,
+        ancestorItineraryIDs: Set<Int> = [],
         in ctx: ModelContext
     ) throws -> ItineraryItem {
 
@@ -4312,6 +4232,8 @@ extension Storage {
             ItineraryItem(id: dto.id, itinerary: itinerary)
         }
 
+        if item.isTombstoned { item.isTombstoned = false }
+
         item.created_at = dto.created_at ?? item.created_at
         item.updated_at = dto.updated_at ?? item.updated_at
         if item.time != dto.time { item.time = dto.time }
@@ -4320,6 +4242,8 @@ extension Storage {
         if item.order != dto.order { item.order = dto.order }
         let isOptional = dto.optional ?? false
         if item.optional != isOptional { item.optional = isOptional }
+        let hideDetails = dto.hide_details ?? false
+        if item.hide_details != hideDetails { item.hide_details = hideDetails }
         item.itinerary_id = itinerary.id
         if item.type != dto.type { item.type = dto.type }
         try checkCancelledBeforeRelationshipWrite()
@@ -4340,16 +4264,21 @@ extension Storage {
                         item: item,
                         parent: nil,
                         ancestorIDs: [],
+                        ancestorItineraryIDs: ancestorItineraryIDs,
                         in: ctx
                     )
                 )
             }
 
-            try deleteMissingItineraryIntIDs(
+            try tombstoneMissingItineraryIntIDs(
                 item.item_associations,
                 keeping: Set(associations.map(\.id)),
                 in: ctx
             )
+
+            // Retain missing rows and their relationships for readers in other contexts.
+            let activeIDs = Set(associations.map(\.id))
+            associations += item.item_associations.filter { !activeIDs.contains($0.id) }
 
             if !itinerarySameIntIDs(item.item_associations, associations) {
                 try checkCancelledBeforeRelationshipWrite()
@@ -4406,6 +4335,8 @@ extension Storage {
             link = created
         }
 
+        if link.isTombstoned { link.isTombstoned = false }
+
         link.key = key
         if link.remote_id != dto.id { link.remote_id = dto.id }
         link.created_at = dto.created_at ?? link.created_at
@@ -4433,6 +4364,7 @@ extension Storage {
         item: ItineraryItem,
         parent: ItineraryItemAssociation?,
         ancestorIDs: Set<Int>,
+        ancestorItineraryIDs: Set<Int> = [],
         in ctx: ModelContext
     ) throws -> ItineraryItemAssociation {
 
@@ -4446,6 +4378,8 @@ extension Storage {
             ItineraryItemAssociation(id: dto.id, itinerary_item: item)
         }
 
+        if association.isTombstoned { association.isTombstoned = false }
+
         association.created_at = dto.created_at ?? association.created_at
         association.updated_at = dto.updated_at ?? association.updated_at
         if association.description != dto.description {
@@ -4456,18 +4390,6 @@ extension Storage {
         }
         if association.local_tip != dto.local_tip {
             association.local_tip = dto.local_tip
-        }
-        if association.benefit_title != dto.benefit_title {
-            association.benefit_title = dto.benefit_title
-        }
-        if association.benefit != dto.benefit {
-            association.benefit = dto.benefit
-        }
-        if association.other_options_title != dto.other_options_title {
-            association.other_options_title = dto.other_options_title
-        }
-        if association.other_options != dto.other_options {
-            association.other_options = dto.other_options
         }
         if association.button_title != dto.button_title {
             association.button_title = dto.button_title
@@ -4495,6 +4417,22 @@ extension Storage {
             resolvedMedia = try upsertMedia(from: mediaDTO, in: ctx)
         } else {
             resolvedMedia = nil
+        }
+
+        let linkedItinerary: Itinerary?
+        if let itineraryDTO = dto.itinerary {
+            linkedItinerary = try upsertItinerary(
+                from: itineraryDTO,
+                ancestorItineraryIDs: ancestorItineraryIDs,
+                in: ctx
+            )
+        } else {
+            linkedItinerary = nil
+        }
+        try checkCancelledBeforeRelationshipWrite()
+        association.itinerary_id = linkedItinerary?.id
+        if association.itinerary?.id != linkedItinerary?.id {
+            association.itinerary = linkedItinerary
         }
 
         association.media_id = dto.primary_media?.id
@@ -4580,6 +4518,32 @@ extension Storage {
             association.experience = resolvedExperience
         }
 
+        if let highlightDTOs = dto.highlights {
+            var highlights: [ItineraryHighlight] = []
+            highlights.reserveCapacity(highlightDTOs.count)
+            for highlightDTO in highlightDTOs {
+                try checkCancelled()
+                highlights.append(try upsertItineraryHighlight(
+                    from: highlightDTO,
+                    association: association,
+                    in: ctx
+                ))
+            }
+            try tombstoneMissingItineraryIntIDs(
+                association.highlights,
+                keeping: Set(highlights.map(\.id)),
+                in: ctx
+            )
+            // Retain missing rows and their relationships for readers in other contexts.
+            let activeIDs = Set(highlights.map(\.id))
+            highlights += association.highlights.filter { !activeIDs.contains($0.id) }
+
+            if !itinerarySameIntIDs(association.highlights, highlights) {
+                try checkCancelledBeforeRelationshipWrite()
+                association.highlights = highlights
+            }
+        }
+
         if let childDTOs = dto.item_association_children {
             var children: [ItineraryItemAssociation] = []
             children.reserveCapacity(childDTOs.count)
@@ -4593,16 +4557,21 @@ extension Storage {
                         item: item,
                         parent: association,
                         ancestorIDs: childAncestorIDs,
+                        ancestorItineraryIDs: ancestorItineraryIDs,
                         in: ctx
                     )
                 )
             }
 
-            try deleteMissingItineraryIntIDs(
+            try tombstoneMissingItineraryIntIDs(
                 association.item_associations,
                 keeping: Set(children.map(\.id)),
                 in: ctx
             )
+
+            // Retain missing rows and their relationships for readers in other contexts.
+            let activeIDs = Set(children.map(\.id))
+            children += association.item_associations.filter { !activeIDs.contains($0.id) }
 
             if !itinerarySameIntIDs(association.item_associations, children) {
                 try checkCancelledBeforeRelationshipWrite()
@@ -4643,7 +4612,7 @@ extension Storage {
         return true
     }
 
-    nonisolated private static func deleteMissingItineraryIntIDs<T: HasIntID>(
+    nonisolated private static func tombstoneMissingItineraryIntIDs<T: HasIntID & ItineraryTombstone>(
         _ existing: [T],
         keeping keepIDs: Set<Int>,
         in ctx: ModelContext
@@ -4651,7 +4620,7 @@ extension Storage {
         for object in existing where !keepIDs.contains(object.id) {
             try checkCancelled()
             try checkCancelledBeforeRelationshipWrite()
-            ctx.delete(object)
+            if !object.isTombstoned { object.isTombstoned = true }
         }
     }
 }

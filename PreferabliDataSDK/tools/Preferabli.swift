@@ -396,7 +396,7 @@ public class Preferabli {
     ///   - otpCode: the OTP code that was sent to the user's email address.
     ///   - firstName: the user's first name
     ///   - lastName: the user's last name
-    public func verifyPreferabliUser(otpCode: String, firstName: String? = nil, lastName: String? = nil) async throws {
+    public func verifyPreferabliUser(otpCode: String, firstName: String? = nil, lastName: String? = nil, phone: String? = nil) async throws {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
 
@@ -441,13 +441,16 @@ public class Preferabli {
             
             var dto: PreferabliUserDTO = try await api.getAlamo().get(APIEndpoints.user(id: user_id))
             
-            if (!firstName.isEmptyOrWhitespace || !lastName.isEmptyOrWhitespace) {
-                let paramss2: SParams = [
-                    "fname": firstName,
-                    "lname": lastName
-                ]
-                
-                dto = try await api.getAlamo().put(APIEndpoints.user(id: user_id), sjson: paramss2)
+            var contactUpdates: SParams = [:]
+            if !firstName.isEmptyOrWhitespace { contactUpdates["fname"] = firstName }
+            if !lastName.isEmptyOrWhitespace { contactUpdates["lname"] = lastName }
+            // Booking contact details stay hidden during verification and never replace
+            // a phone already associated with the newly authenticated account.
+            if dto.phone.isEmptyOrWhitespace, !phone.isEmptyOrWhitespace {
+                contactUpdates["phone"] = phone
+            }
+            if !contactUpdates.isEmpty {
+                dto = try await api.getAlamo().put(APIEndpoints.user(id: user_id), sjson: contactUpdates)
             }
             
             try await userUpdated(dto: dto)
@@ -493,17 +496,34 @@ public class Preferabli {
         }
     }
     
-    public func updatePreferabliUser(firstName: String? = nil, lastName: String? = nil) async throws {
+    /// Saves a booking contact number only while the same signed-in account has no phone.
+    public func saveBookingPhoneIfMissing(_ phone: String, expectedUserID: Int) async throws {
+        try await canWeContinue(needsToBeLoggedIn: true)
+        guard Self.USER_ID == expectedUserID, !phone.isEmptyOrWhitespace() else { return }
+        let current: PreferabliUserDTO = try await api.getAlamo().get(APIEndpoints.user(id: expectedUserID))
+        guard Self.USER_ID == expectedUserID, Self.isPreferabliUserLoggedIn() else { return }
+        guard current.phone.isEmptyOrWhitespace else {
+            try await userUpdated(dto: current)
+            return
+        }
+        let updated: PreferabliUserDTO = try await api.getAlamo().put(
+            APIEndpoints.user(id: expectedUserID), sjson: ["phone": phone]
+        )
+        guard Self.USER_ID == expectedUserID, Self.isPreferabliUserLoggedIn() else { return }
+        try await userUpdated(dto: updated)
+    }
+
+    public func updatePreferabliUser(firstName: String? = nil, lastName: String? = nil, phone: String? = nil) async throws {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
             
             Analytics.track( ["event" : "update_user"])
             
-            if (!firstName.isEmptyOrWhitespace || !lastName.isEmptyOrWhitespace) {
-                let params: SParams = [
-                    "fname": firstName,
-                    "lname": lastName
-                ]
+            if (!firstName.isEmptyOrWhitespace || !lastName.isEmptyOrWhitespace || phone != nil) {
+                var params: SParams = [:]
+                if let firstName { params["fname"] = firstName }
+                if let lastName { params["lname"] = lastName }
+                if let phone { params["phone"] = phone }
                 
                 let dto : PreferabliUserDTO = try await api.getAlamo().put(APIEndpoints.user(id: Preferabli.USER_ID), sjson: params)
                 
@@ -3290,14 +3310,19 @@ public class Preferabli {
         }
 
         let startDate = Date(timeIntervalSince1970: TimeInterval(startTimestamp))
+        // Persist venue-local date and time, independent of the device's time zone.
+        let venueTimeZone = item.timezone.flatMap { TimeZone(identifier: $0) }
+            ?? TimeZone(identifier: "America/Los_Angeles")!
         let dateFormatter = DateFormatter()
         dateFormatter.calendar = Calendar(identifier: .gregorian)
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.timeZone = venueTimeZone
         dateFormatter.dateFormat = "yyyy-MM-dd"
 
         let timeFormatter = DateFormatter()
         timeFormatter.calendar = Calendar(identifier: .gregorian)
         timeFormatter.locale = Locale(identifier: "en_US_POSIX")
+        timeFormatter.timeZone = venueTimeZone
         timeFormatter.dateFormat = "HH:mm"
 
         let date = dateFormatter.string(from: startDate)
@@ -4705,9 +4730,10 @@ extension Preferabli {
                 "source": GenAIMessage.Source.client,
                 "user_id": PreferabliTools.getPreferabliUserId(),
                 "use_wine_utterance_objects": false,
+                "use_food_utterance_objects": false,
                 "origin_id": auth.originId,
                 "product_category_context": "wine",
-                "integration_id": 13242
+                "integration_id": 1
             ]
 
             let body: GenAIStartConversationDTO = try await api
@@ -4960,7 +4986,10 @@ extension Preferabli {
         foodName: String?,
         entityProbability: Double?,
         recognitionType: String?,
-        isFood: Bool
+        isFood: Bool,
+        recipeId: Int? = nil,
+        recipeName: String? = nil,
+        isRecipe: Bool = false
     ) async throws -> GenAIMessage {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
@@ -4982,7 +5011,14 @@ extension Preferabli {
                 if let productName { selection["entity_name"] = productName }
                 if let entityProbability { selection["entity_prob"] = entityProbability }
 
-                params["user_action"] = "btn_wine_entity_confirm"
+                params["user_action"] = "btn_confirm"
+                params["user_selection"] = selection
+            } else if let recipeId {
+                var selection: SParams = ["entity_id": recipeId, "entity_type": "recipe_name"]
+                if let recipeName { selection["recipe_entity"] = recipeName }
+                if let entityProbability { selection["score"] = entityProbability }
+                if let recognitionType { selection["recog_type"] = recognitionType }
+                params["user_action"] = "btn_confirm"
                 params["user_selection"] = selection
             } else if let foodId {
                 var selection: SParams = [
@@ -4993,12 +5029,10 @@ extension Preferabli {
                 if let entityProbability { selection["score"] = entityProbability }
                 if let recognitionType { selection["recog_type"] = recognitionType }
 
-                params["user_action"] = "btn_food_entity_confirm"
+                params["user_action"] = "btn_confirm"
                 params["user_selection"] = selection
-            } else if isFood {
-                params["user_action"] = "btn_food_entity_reject"
             } else {
-                params["user_action"] = "btn_wine_entity_reject"
+                params["user_action"] = "btn_reject"
             }
 
             let dto: GenAIMessageDTO = try await api
@@ -5184,6 +5218,12 @@ extension Preferabli {
 
         try await hydrateGenAIProducts(for: dto, messageId: messageId)
         try await hydrateGenAIFoodsIfNeeded(foodIds: dto.foodIds)
+        if !dto.recipeIds.isEmpty {
+            let localIds = try await getRecipes()
+            if !Set(dto.recipeIds).isSubset(of: Set(localIds)) {
+                _ = try await getRecipes(force_refresh: true)
+            }
+        }
 
         return try Storage.withContext { ctx, save in
             guard let message = try Storage.fetchGenAIMessage(id: messageId, in: ctx) else {
@@ -5572,14 +5612,15 @@ extension Preferabli {
 
 extension Preferabli {
 
-    /// Fetches the complete public itinerary list for a market and stores it in SwiftData.
+    /// Fetches public itineraries for a market, optionally limited to the supplied types.
+    /// Omitted or empty types fetch all types; filtered refreshes preserve other cached types.
     ///
     /// The server does not return the Market relationship, so `market_id` is resolved
     /// locally and supplied to every itinerary upsert.
     ///
     /// - Returns: itinerary ids in the same order as the API response.
     @discardableResult
-    public func getItineraries(market_id: Int) async throws -> [Int] {
+    public func getItineraries(market_id: Int, types: [String]? = nil) async throws -> [Int] {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
 
@@ -5588,9 +5629,11 @@ extension Preferabli {
                 "market_id": market_id
             ])
 
+            let requestedTypes = types.flatMap { $0.isEmpty ? nil : $0 }
+            let params: SParams? = requestedTypes.map { ["types": $0] }
             let body: [ItineraryDTO] = try await api
                 .getAlamo()
-                .get(APIEndpoints.itinerariesForMarket(id: market_id))
+                .get(APIEndpoints.itinerariesForMarket(id: market_id), sparams: params)
 
             let itineraryIDs = try await Storage.withBackgroundContext { ctx, save in
                 guard let market = try Storage.fetchById(
@@ -5609,6 +5652,7 @@ extension Preferabli {
                     from: body,
                     market: market,
                     replaceExisting: true,
+                    types: requestedTypes,
                     in: ctx
                 )
 
@@ -5651,7 +5695,7 @@ extension Preferabli {
                         id: itinerary_id,
                         in: ctx
                     ) {
-                        needsRefresh = PreferabliTools.hasMinutesPassed(
+                        needsRefresh = itinerary.isTombstoned || PreferabliTools.hasMinutesPassed(
                             minutes: 60,
                             startDate: Storage.getKeyStore().object(
                                 forKey: "lastCalledItinerary\(itinerary_id)"

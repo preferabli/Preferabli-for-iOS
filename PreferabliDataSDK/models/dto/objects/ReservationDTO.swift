@@ -104,7 +104,6 @@ public struct ReservationExperiencePriceDTO: Decodable, Sendable {
     public let list_price: Double?
     public let max_count: Int?
     public let min_count: Int?
-    public let partner_ref: Int?
     public let price: Double?
     public let price_type: String?
     public let stripe_product_price_id: String?

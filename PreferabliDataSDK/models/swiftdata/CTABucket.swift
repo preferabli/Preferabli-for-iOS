@@ -11,6 +11,7 @@ public final class CTABucket: Identifiable, HasIntID {
 
     public var type: String?
     public var name: String?
+    public var desc: String?
     public var item_height: Int?
     public var item_width: Int?
     public var item_corner_radius: Int?

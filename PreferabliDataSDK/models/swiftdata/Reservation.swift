@@ -92,7 +92,6 @@ public final class ReservationRequestGuest {
     public var price_list_price: Double?
     public var price_max_count: Int?
     public var price_min_count: Int?
-    public var price_partner_ref: Int?
     public var price_price: Double?
     public var price_price_type: String?
     public var price_stripe_product_price_id: String?

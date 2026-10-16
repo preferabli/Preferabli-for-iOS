@@ -8,17 +8,26 @@
 import Foundation
 import SwiftData
 
+/// Rows retained during refresh so other contexts can finish reading them safely.
+protocol ItineraryTombstone: AnyObject {
+    var isTombstoned: Bool { get set }
+}
+
 @Model
 public final class Itinerary: HasIntID, HasTimestamps, HasImage {
+
+    public var isTombstoned: Bool = false
 
     @Attribute(.unique) public var id: Int
     public var created_at: Date = Foundation.Date.now
     public var updated_at: Date = Foundation.Date.now
 
     public var name: String?
+    public var type: String?
 
     /// Persisted using the same naming convention as ContentItem and Market.
     public var desc: String?
+    public var curator_personality_description: String?
     
     public var color_hex_primary: String?
 
@@ -83,7 +92,9 @@ public final class Itinerary: HasIntID, HasTimestamps, HasImage {
 }
 
 @Model
-public final class ItineraryItem: HasIntID, HasTimestamps {
+public final class ItineraryItem: HasIntID, HasTimestamps, ItineraryTombstone {
+
+    public var isTombstoned: Bool = false
 
     @Attribute(.unique) public var id: Int
     public var created_at: Date = Foundation.Date.now
@@ -95,6 +106,7 @@ public final class ItineraryItem: HasIntID, HasTimestamps {
     public var type: String?
     public var order: Int?
     public var optional: Bool = false
+    public var hide_details: Bool = false
 
     public var itinerary_id: Int?
 
@@ -121,6 +133,8 @@ public final class ItineraryItem: HasIntID, HasTimestamps {
 /// association id, matching the existing VenueMarketTrait approach.
 @Model
 public final class ItineraryMarketTrait {
+
+    public var isTombstoned: Bool = false
 
     @Attribute(.unique) public var key: String
 
@@ -162,7 +176,9 @@ public final class ItineraryMarketTrait {
 }
 
 @Model
-public final class ItineraryItemAssociation: HasIntID, HasTimestamps {
+public final class ItineraryItemAssociation: HasIntID, HasTimestamps, ItineraryTombstone {
+
+    public var isTombstoned: Bool = false
 
     @Attribute(.unique) public var id: Int
     public var created_at: Date = Foundation.Date.now
@@ -172,14 +188,11 @@ public final class ItineraryItemAssociation: HasIntID, HasTimestamps {
     public var venue_id: Int?
     public var experience_id: Int?
     public var media_id: Int?
+    public var itinerary_id: Int?
     public var parent_association_id: Int?
     public var desc: String?
     public var local_tip_title: String?
     public var local_tip: String?
-    public var benefit_title: String?
-    public var benefit: String?
-    public var other_options_title: String?
-    public var other_options: String?
     public var button_title: String?
     public var button_deeplink_url: String?
     public var button_icon: String?
@@ -208,6 +221,12 @@ public final class ItineraryItemAssociation: HasIntID, HasTimestamps {
     @Relationship(deleteRule: .nullify)
     public var media: Media?
 
+    @Relationship(deleteRule: .nullify)
+    public var itinerary: Itinerary?
+
+    @Relationship(deleteRule: .cascade, inverse: \ItineraryHighlight.itinerary_item_association)
+    public var highlights: [ItineraryHighlight] = []
+
     public init(id: Int, itinerary_item: ItineraryItem? = nil) {
         self.id = id
         self.itinerary_item = itinerary_item
@@ -220,7 +239,9 @@ public final class ItineraryItemAssociation: HasIntID, HasTimestamps {
 }
 
 @Model
-public final class ItineraryHighlight: HasIntID, HasTimestamps {
+public final class ItineraryHighlight: HasIntID, HasTimestamps, ItineraryTombstone {
+
+    public var isTombstoned: Bool = false
 
     @Attribute(.unique) public var id: Int
     public var created_at: Date = Foundation.Date.now
@@ -233,11 +254,19 @@ public final class ItineraryHighlight: HasIntID, HasTimestamps {
     public var type: String?
 
     @Relationship(deleteRule: .nullify)
-    public var itinerary: Itinerary
+    public var itinerary: Itinerary?
 
-    public init(id: Int, itinerary: Itinerary) {
+    @Relationship(deleteRule: .nullify)
+    public var itinerary_item_association: ItineraryItemAssociation?
+
+    public init(
+        id: Int,
+        itinerary: Itinerary? = nil,
+        itinerary_item_association: ItineraryItemAssociation? = nil
+    ) {
         self.id = id
         self.itinerary = itinerary
+        self.itinerary_item_association = itinerary_item_association
     }
 
     public static func predicate(forID id: Int) -> Predicate<ItineraryHighlight> {
@@ -251,10 +280,29 @@ public enum ItineraryHighlightType: String, CaseIterable, Sendable {
     case distance
     case stopCount = "stop_count"
     case additional
+    case horizontal
+    case vertical
 }
 
 extension ItineraryHighlight {
     public var highlightType: ItineraryHighlightType {
         ItineraryHighlightType(rawValue: type ?? "") ?? .default
     }
+}
+
+// Use active relationships for presentation; keep the stored relationships intact
+// so a refresh does not invalidate models retained by an open screen.
+extension Itinerary {
+    public var activeItems: [ItineraryItem] { itinerary_items.filter { !$0.isTombstoned } }
+    public var activeHighlights: [ItineraryHighlight] { highlights.filter { !$0.isTombstoned } }
+    public var activeMarketTraits: [ItineraryMarketTrait] { market_trait_associations.filter { !$0.isTombstoned } }
+}
+
+extension ItineraryItem {
+    public var activeAssociations: [ItineraryItemAssociation] { item_associations.filter { !$0.isTombstoned } }
+}
+
+extension ItineraryItemAssociation {
+    public var activeAssociations: [ItineraryItemAssociation] { item_associations.filter { !$0.isTombstoned } }
+    public var activeHighlights: [ItineraryHighlight] { highlights.filter { !$0.isTombstoned } }
 }

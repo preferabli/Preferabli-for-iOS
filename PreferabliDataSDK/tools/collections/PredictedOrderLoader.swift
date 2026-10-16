@@ -42,6 +42,7 @@ public actor PredictedOrderLoader {
         var receivedOrderingCount = 0
 
         while offset < totalOrderingCount {
+            try Task.checkCancellation()
             let payload: SParams = [
                 "collection_id": collectionId,
                 "fast_method": true,
@@ -61,6 +62,7 @@ public actor PredictedOrderLoader {
                         sparams: payload
                     )
 
+            try Task.checkCancellation()
             let pageItems = predictedOrderingItems(
                 from: versionDTO
             )
@@ -117,6 +119,7 @@ public actor PredictedOrderLoader {
             )
         }
 
+        try Task.checkCancellation()
         return predictedVersionID
     }
     
@@ -218,7 +221,7 @@ public actor PredictedOrderLoader {
                 in: ctx
             )
 
-            try ctx.save()
+            try BetaDeepLinkStorage.save(ctx)
             return version.id
         }
 
@@ -393,7 +396,7 @@ public actor PredictedOrderLoader {
                     )
                 }
 
-                try ctx.save()
+                try BetaDeepLinkStorage.save(ctx)
                 return localErrors
             }
 

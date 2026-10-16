@@ -11,8 +11,10 @@ public struct ItineraryDTO: Decodable, Sendable {
     public let id: Int
     public let primary_image: MediaDTO?
     public let curator_personality: PersonalityDTO?
+    public let curator_personality_description: String?
     public let images: [MediaDTO]?
     public let name: String?
+    public let type: String?
     public let description: String?
     public let badge_title: String?
     public let badge_icon: String?
@@ -42,6 +44,7 @@ public struct ItineraryItemDTO: Decodable, Sendable {
     public let type: String?
     public let order: Int?
     public let optional: Bool?
+    public let hide_details: Bool?
     public let item_associations: [ItineraryItemAssociationDTO]?
     public let created_at: Date?
     public let updated_at: Date?
@@ -61,16 +64,14 @@ public struct ItineraryMarketTraitDTO: Decodable, Sendable {
 /// Supports either an embedded VenueDTO, a venue_id, or both.
 public struct ItineraryItemAssociationDTO: Decodable, Sendable {
     public let id: Int
+    public let highlights: [ItineraryHighlightDTO]?
     public let venue: VenueDTO?
     public let experience: ExperienceDTO?
     public let primary_media: MediaDTO?
+    public let itinerary: ItineraryDTO?
     public let description: String?
     public let local_tip_title: String?
     public let local_tip: String?
-    public let benefit_title: String?
-    public let benefit: String?
-    public let other_options_title: String?
-    public let other_options: String?
     public let button_title: String?
     public let button_deeplink_url: String?
     public let button_icon: String?

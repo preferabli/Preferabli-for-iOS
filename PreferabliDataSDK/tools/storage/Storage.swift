@@ -321,7 +321,7 @@ public enum Storage {
                 throw CancellationError()
             }
 
-            try ctx.save()
+            try BetaDeepLinkStorage.save(ctx)
         }
 
         return try body(ctx, save)
@@ -386,7 +386,7 @@ public enum Storage {
                     throw CancellationError()
                 }
 
-                try ctx.save()
+                try BetaDeepLinkStorage.save(ctx)
 
                 try Task.checkCancellation()
             }
@@ -610,7 +610,7 @@ public enum Storage {
         if batch.isEmpty { break }
 
         for obj in batch { ctx.delete(obj) }
-        try ctx.save()
+        try BetaDeepLinkStorage.save(ctx)
         // ctx goes out of scope here -> drops invalidated faults
       }
     }
@@ -745,7 +745,7 @@ public struct StorageFacade {
 
         public func itineraries(forMarketID marketID: Int) -> Predicate<Itinerary> {
             #Predicate<Itinerary> { itinerary in
-                itinerary.market_id == marketID
+                itinerary.market_id == marketID && !itinerary.isTombstoned
             }
         }
         
@@ -1037,7 +1037,7 @@ extension Storage {
 
                 for obj in doomed { ctx.delete(obj) }
 
-                try ctx.save()
+                try BetaDeepLinkStorage.save(ctx)
                 return doomed.count
             }
 
@@ -1141,7 +1141,7 @@ extension Storage {
                     tag.updateSearchableContent()
                 }
 
-                try ctx.save()
+                try BetaDeepLinkStorage.save(ctx)
 
                 lastID = tags.last?.id ?? lastID
                 return tags.count
