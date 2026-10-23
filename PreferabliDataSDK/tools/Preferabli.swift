@@ -2557,6 +2557,12 @@ public class Preferabli {
         }
     }
     
+    /// A complete market venue response has been saved, including an empty result.
+    /// The database keystore reset clears this flag along with the stored data.
+    public func hasLoadedVenues(market_id: Int) -> Bool {
+        Storage.getKeyStore().bool(forKey: "hasLoadedMarketVenues\(market_id)")
+    }
+
     public func getVenues(market_id: Int) async throws -> [Int] {
         do {
             try await canWeContinue(needsToBeLoggedIn: false)
@@ -2610,6 +2616,7 @@ public class Preferabli {
                 return venueIds
             }
 
+            Storage.getKeyStore().set(true, forKey: "hasLoadedMarketVenues\(market_id)")
             return venueIds
 
         } catch {

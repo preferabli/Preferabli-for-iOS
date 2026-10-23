@@ -2231,9 +2231,15 @@ extension Storage {
 
             let existing = try ctx.fetch(fd)
 
+            // Embedded pages need not appear in the standalone CTA endpoint.
+            let itineraryAssociations = try ctx.fetch(FetchDescriptor<ItineraryItemAssociation>(
+                predicate: #Predicate { !$0.isTombstoned && $0.cta_page_id != nil }
+            ))
+            let embeddedPageIDs = Set(itineraryAssociations.compactMap(\.cta_page_id))
+
             for b in existing {
                 try checkCancelled()
-                if !keep.contains(b.id) {
+                if !keep.contains(b.id) && !embeddedPageIDs.contains(b.id) {
                     try checkCancelledBeforeRelationshipWrite()
                     b.isTombstoned = true
                 }
@@ -4012,6 +4018,12 @@ extension Storage {
         itinerary.updated_at = dto.updated_at ?? itinerary.updated_at
         if itinerary.name != dto.name { itinerary.name = dto.name }
         if itinerary.type != dto.type { itinerary.type = dto.type }
+        if itinerary.section_title_justification != dto.section_title_justification {
+            itinerary.section_title_justification = dto.section_title_justification
+        }
+        if itinerary.section_title_size != dto.section_title_size {
+            itinerary.section_title_size = dto.section_title_size
+        }
         if itinerary.desc != dto.description { itinerary.desc = dto.description }
         if itinerary.curator_personality_description != dto.curator_personality_description {
             itinerary.curator_personality_description = dto.curator_personality_description
@@ -4025,6 +4037,7 @@ extension Storage {
         if itinerary.badge_color_hex_primary != dto.badge_color_hex_primary { itinerary.badge_color_hex_primary = dto.badge_color_hex_primary }
         if itinerary.badge_color_hex_secondary != dto.badge_color_hex_secondary { itinerary.badge_color_hex_secondary = dto.badge_color_hex_secondary }
         if itinerary.color_hex_primary != dto.color_hex_primary { itinerary.color_hex_primary = dto.color_hex_primary }
+        if itinerary.text_color_hex != dto.text_color_hex { itinerary.text_color_hex = dto.text_color_hex }
         if itinerary.duration_minutes_low != dto.duration_minutes_low {
             itinerary.duration_minutes_low = dto.duration_minutes_low
         }
@@ -4091,6 +4104,39 @@ extension Storage {
             }
         }
 
+        // Hydrate shared traits and their itinerary inverses before adding venue links.
+        // Resolving cached traits afterward can reconcile a stale inverse snapshot and
+        // nullify newly inserted VenueMarketTrait.trait relationships during save.
+        if let traitDTOs = dto.market_trait_associations {
+            var links: [ItineraryMarketTrait] = []
+            links.reserveCapacity(traitDTOs.count)
+
+            for traitDTO in traitDTOs {
+                try checkCancelled()
+
+                if let link = try upsertItineraryMarketTrait(
+                    from: traitDTO,
+                    itinerary: itinerary,
+                    in: ctx
+                ) {
+                    links.append(link)
+                }
+            }
+
+            let keepKeys = Set(links.map(\.key))
+            for existing in itinerary.market_trait_associations where !keepKeys.contains(existing.key) {
+                try checkCancelled()
+                try checkCancelledBeforeRelationshipWrite()
+                existing.isTombstoned = true
+            }
+            links += itinerary.market_trait_associations.filter { !keepKeys.contains($0.key) }
+
+            if !itinerarySameKeys(itinerary.market_trait_associations, links) {
+                try checkCancelledBeforeRelationshipWrite()
+                itinerary.market_trait_associations = links
+            }
+        }
+
         if let itemDTOs = dto.itinerary_items {
             var items: [ItineraryItem] = []
             items.reserveCapacity(itemDTOs.count)
@@ -4151,36 +4197,6 @@ extension Storage {
             if !itinerarySameIntIDs(itinerary.highlights, items) {
                 try checkCancelledBeforeRelationshipWrite()
                 itinerary.highlights = items
-            }
-        }
-
-        if let traitDTOs = dto.market_trait_associations {
-            var links: [ItineraryMarketTrait] = []
-            links.reserveCapacity(traitDTOs.count)
-
-            for traitDTO in traitDTOs {
-                try checkCancelled()
-
-                if let link = try upsertItineraryMarketTrait(
-                    from: traitDTO,
-                    itinerary: itinerary,
-                    in: ctx
-                ) {
-                    links.append(link)
-                }
-            }
-
-            let keepKeys = Set(links.map(\.key))
-            for existing in itinerary.market_trait_associations where !keepKeys.contains(existing.key) {
-                try checkCancelled()
-                try checkCancelledBeforeRelationshipWrite()
-                existing.isTombstoned = true
-            }
-            links += itinerary.market_trait_associations.filter { !keepKeys.contains($0.key) }
-
-            if !itinerarySameKeys(itinerary.market_trait_associations, links) {
-                try checkCancelledBeforeRelationshipWrite()
-                itinerary.market_trait_associations = links
             }
         }
 
@@ -4433,6 +4449,18 @@ extension Storage {
         association.itinerary_id = linkedItinerary?.id
         if association.itinerary?.id != linkedItinerary?.id {
             association.itinerary = linkedItinerary
+        }
+
+        let linkedCTAPage: CTAPage?
+        if let pageDTO = dto.cta_page {
+            linkedCTAPage = try upsertCTAPage(from: pageDTO, in: ctx)
+        } else {
+            linkedCTAPage = nil
+        }
+        try checkCancelledBeforeRelationshipWrite()
+        association.cta_page_id = linkedCTAPage?.id
+        if association.cta_page?.id != linkedCTAPage?.id {
+            association.cta_page = linkedCTAPage
         }
 
         association.media_id = dto.primary_media?.id

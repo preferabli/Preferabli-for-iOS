@@ -25,11 +25,16 @@ public final class Itinerary: HasIntID, HasTimestamps, HasImage {
     public var name: String?
     public var type: String?
 
+    /// Guide item heading style; nil uses the app's default size and alignment.
+    public var section_title_justification: String?
+    public var section_title_size: Double?
+
     /// Persisted using the same naming convention as ContentItem and Market.
     public var desc: String?
     public var curator_personality_description: String?
     
     public var color_hex_primary: String?
+    public var text_color_hex: String?
 
     /// Denormalized foreign key when the itinerary belongs to a market.
     public var market_id: Int?
@@ -189,6 +194,7 @@ public final class ItineraryItemAssociation: HasIntID, HasTimestamps, ItineraryT
     public var experience_id: Int?
     public var media_id: Int?
     public var itinerary_id: Int?
+    public var cta_page_id: Int?
     public var parent_association_id: Int?
     public var desc: String?
     public var local_tip_title: String?
@@ -223,6 +229,9 @@ public final class ItineraryItemAssociation: HasIntID, HasTimestamps, ItineraryT
 
     @Relationship(deleteRule: .nullify)
     public var itinerary: Itinerary?
+
+    @Relationship(deleteRule: .nullify)
+    public var cta_page: CTAPage?
 
     @Relationship(deleteRule: .cascade, inverse: \ItineraryHighlight.itinerary_item_association)
     public var highlights: [ItineraryHighlight] = []

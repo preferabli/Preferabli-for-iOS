@@ -15,6 +15,8 @@ public struct ItineraryDTO: Decodable, Sendable {
     public let images: [MediaDTO]?
     public let name: String?
     public let type: String?
+    public let section_title_justification: String?
+    public let section_title_size: Double?
     public let description: String?
     public let badge_title: String?
     public let badge_icon: String?
@@ -23,6 +25,7 @@ public struct ItineraryDTO: Decodable, Sendable {
     public let badge_text_color_hex: String?
     public let badge_gradient_css: String?
     public let color_hex_primary: String?
+    public let text_color_hex: String?
     public let itinerary_items: [ItineraryItemDTO]?
     public let market_trait_associations: [ItineraryMarketTraitDTO]?
     public let highlights: [ItineraryHighlightDTO]?
@@ -61,7 +64,7 @@ public struct ItineraryMarketTraitDTO: Decodable, Sendable {
     public let updated_at: Date?
 }
 
-/// Supports either an embedded VenueDTO, a venue_id, or both.
+/// An itinerary or guide content block with optional embedded destinations, media, or CTA content.
 public struct ItineraryItemAssociationDTO: Decodable, Sendable {
     public let id: Int
     public let highlights: [ItineraryHighlightDTO]?
@@ -69,6 +72,7 @@ public struct ItineraryItemAssociationDTO: Decodable, Sendable {
     public let experience: ExperienceDTO?
     public let primary_media: MediaDTO?
     public let itinerary: ItineraryDTO?
+    public let cta_page: CTAPageDTO?
     public let description: String?
     public let local_tip_title: String?
     public let local_tip: String?
